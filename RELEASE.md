@@ -147,11 +147,13 @@ CI やトークンは不要で、push すると Cloudflare Pages が自動デプ
 
 ---
 
-## 補足: ASIO 対応 Windows 版をローカルで作る（任意・未署名）
+## 補足: ローカルで ASIO 対応 Windows 版を作る（フォールバック・通常は不要）
 
-ASIO SDK は再配布制限のため CI に置けないので、ASIO 入り Windows 版が必要な場合のみローカル手動でビルドする
-（この成果物は**未署名**になる）。先に ASIO SDK を `Source/ThirdParty/asiosdk/` に配置する
-（CMake が自動検出して `JUCE_ASIO=1` を有効化）。
+**通常リリースは CI が ASIO 対応 Windows 版まで作る**（上記「2.」。ASIO SDK は非公開 repo
+`AsteroidApp-hub/utawave-asiosdk` から deploy key で取得し、CMake が `JUCE_ASIO=1` を自動有効化）。
+以下は CI が使えない時や手元検証用の**フォールバック**。先に ASIO SDK を
+`Source/ThirdParty/asiosdk/` に配置すると CMake が自動検出して `JUCE_ASIO=1` を有効化する
+（この成果物は**未署名**になる）。
 
 **公式リリースとして配布するなら、「0. リリースビルドに焼き込むフラグ」も configure に付ける**
 （付けないとクラッシュ送信などがオフのまま）。クラッシュ URL は今すぐ有効:

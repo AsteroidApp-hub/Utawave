@@ -86,9 +86,9 @@ Gatekeeper の「開発元を確認できないため開けません」を解消
 
 ## RELEASE.md との接続
 
-署名 + 公証が有効になったら、`RELEASE.md` の macOS 手順 (ローカル手動ビルド) を
-**「ワークフローの `Utawave-<version>-macOS` 成果物 zip を使う」**に置き換える。
-公証済みになれば、`RELEASE.md` 末尾の「macOS 版は ad-hoc 署名のため初回は右クリック→開く」の注記は不要になる。
+署名 + 公証は設定済み。**リリースは `RELEASE.md` のとおり CI (GitHub Actions `release-build.yml`) で
+ビルド + 署名 + 公証し、`Utawave-<version>-macOS` 成果物 zip を GitHub Release に上げる**
+(ローカル手動ビルドは検証 / フォールバック用)。公証済みなので「初回は右クリック→開く」の注記も不要。
 
 ---
 

@@ -37,7 +37,10 @@ SignPath Foundation は **出所検証 (Origin Verification)** を技術的に�
 > **macOS と統合済み**: 署名は Mac (Developer ID + 公証) と Windows (SignPath) を 1 つの手動発火
 > ワークフロー `.github/workflows/release-build.yml` にまとめてある (`windows` ジョブが SignPath 担当)。
 > Mac 側の手順は `Docs/MACOS_SIGNING_SETUP.md` を参照。以下は Windows (SignPath) 固有の設定。
-> ASIO 入り特殊ビルドは再配布制限のある SDK を CI に置けないため、従来通りローカル手動 (=未署名) になる。
+> **ASIO 対応も CI で行う**: 再配布制限のある SDK は非公開 repo `AsteroidApp-hub/utawave-asiosdk` に置き、
+> `windows` ジョブが read-only deploy key (secret `ASIOSDK_DEPLOY_KEY`) で取得してビルドする
+> (詳細は `RELEASE.md`)。よって ASIO 入り Windows 版もローカル手動ではなく CI で作れる
+> (現状 SignPath 未設定なので署名は付かないが、ASIO は有効)。
 
 ---
 
