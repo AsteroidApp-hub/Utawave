@@ -107,6 +107,8 @@ jobs:
     env:
       # SignPath API トークン未登録のうちは署名をスキップして未署名 exe を zip 化する
       HAS_SIGNING: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      # ASIO SDK の deploy key 未登録なら取得をスキップ (= WASAPI/DirectSound のみ・fork 安全)
+      HAS_ASIO: ${{ secrets.ASIOSDK_DEPLOY_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -116,6 +118,27 @@ jobs:
         with:
           path: build/_deps
           key: juce-8.0.12-${{ runner.os }}
+
+      # ── ASIO SDK を非公開 repo (utawave-asiosdk) から read-only deploy key で取得 ──
+      # 再配布制限のため public repo には置かない。配置されると CMake が
+      # Source/ThirdParty/asiosdk/common/iasiodrv.h を検出して JUCE_ASIO=1 を自動有効化する。
+      # deploy key 未登録 (fork 等) では skip し、WASAPI/DirectSound のみでビルドする。
+      - name: Fetch ASIO SDK (private repo)
+        if: env.HAS_ASIO == 'true'
+        shell: bash
+        env:
+          ASIOSDK_DEPLOY_KEY: ${{ secrets.ASIOSDK_DEPLOY_KEY }}
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$ASIOSDK_DEPLOY_KEY" > "$HOME/.ssh/asio_key"
+          chmod 600 "$HOME/.ssh/asio_key"
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/asio_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+            git clone --depth 1 git@github.com:AsteroidApp-hub/utawave-asiosdk.git Source/ThirdParty/asiosdk
+          rm -f "$HOME/.ssh/asio_key"
+          rm -rf Source/ThirdParty/asiosdk/.git
+          test -f Source/ThirdParty/asiosdk/common/iasiodrv.h \
+            && echo "ASIO SDK ready (JUCE_ASIO will be enabled)" \
+            || { echo "ASIO SDK missing iasiodrv.h"; exit 1; }
 
       - name: Build (Release)
         run: |

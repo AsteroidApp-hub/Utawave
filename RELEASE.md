@@ -15,8 +15,10 @@
 > (SignPath) を参照。必要な GitHub Secrets / Variables が未登録のうちは、macOS は ad-hoc (未署名)
 > ビルドのまま zip 化されます。
 >
-> **ASIO 対応の Windows 版**は再配布制限のある SDK を CI に置けないため、CI では作れません。必要な場合
-> のみ従来どおりローカル手動ビルド (=未署名) で作ります (末尾「補足」参照)。
+> **ASIO 対応の Windows 版も CI で作れます**: 再配布制限のある ASIO SDK は public repo に置けないため、
+> **非公開 repo `AsteroidApp-hub/utawave-asiosdk`** に置き、CI が read-only deploy key (secret
+> `ASIOSDK_DEPLOY_KEY`) で取得してビルドします。deploy key 未登録の環境 (fork 等) では取得を skip し、
+> WASAPI/DirectSound のみでビルドします (= fork 安全)。ローカル手動ビルドの手順は末尾「補足」にも残します。
 
 zip のファイル名にはバージョン + アーキテクチャを含めます（例: `Utawave-0.1.0-macOS-arm64.zip` /
 `Utawave-0.1.0-Windows-x64.zip`）。
