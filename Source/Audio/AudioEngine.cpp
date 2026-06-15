@@ -719,6 +719,12 @@ void AudioEngine::preparePlayback(TrackManager& tm)
                 && prevSnap->synths[(size_t)mp.trackIdx])
             {
                 syn = prevSnap->synths[(size_t)mp.trackIdx];   // 持ち回し (UI からは触らない)
+                // 持ち越したシンセは旧 transpose で鳴っているボイスを保持している。lastTranspose も
+                // 引き継がないと、再生中の Octave/Semitone 変更が invalidatePlayback で再構築を
+                // 起こした際 (Undo の SnapshotAction::perform 経由) に lastTranspose が現在値へ
+                // リセットされ、audio thread の差分検知が空振りして旧ピッチの音が鳴り続ける。
+                for (const auto& pm : prevSnap->midi)
+                    if (pm.trackIdx == mp.trackIdx) { mp.lastTranspose = pm.lastTranspose; break; }
             }
             else
             {
@@ -1807,13 +1813,16 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             mb.clear();
 
             // ── 移調量変更検知: 旧 NoteOn と新 NoteOff のミスマッチで残る音を止める ──
-            // 旧シフトで鳴っていた音を all-notes-off で打ち切ってから、新シフトで以降を処理。
+            // 旧シフトで鳴っていた音を all-notes-off で打ち切る。保持中ノートの「鳴らし直し」は
+            // PC/CC 再送 (needsStateRefresh) の後で行う (プラグイン音源の音色が確定してから鳴らす)。
+            bool transposeChanged = false;
             if (transpose != mp.lastTranspose)
             {
                 syn->allNotesOff();
                 for (int ch = 1; ch <= 16; ++ch)
                     mb.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
                 mp.lastTranspose = transpose;
+                transposeChanged = true;
             }
 
             // 状態再送: posStart より前にあった Program Change / Control Change /
@@ -1861,6 +1870,36 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                     if (lastChanPressure[(size_t)ch] >= 0)
                         mb.addEvent(juce::MidiMessage::channelPressureChange(ch + 1,
                                         lastChanPressure[(size_t)ch]), 0);
+            }
+
+            // 移調量が変わった場合は、posStart 時点で保持中のノート (note-on 済み・未 note-off) を
+            // 新シフトで sample 0 に鳴らし直す ("再度鳴らす")。これで Octave/Semitone をリアルタイムに
+            // 切り替えても、伸ばしている音が途切れず新しいピッチへ即移行する。allNotesOff / PC/CC 再送の
+            // 後に入れる (mb の同一 sample は挿入順を保つので「止める→音色確定→鳴らす」になる)。
+            // transpose 変更は手動操作なので低頻度で、線形スキャンでも実時間負荷は無視できる。
+            if (transposeChanged)
+            {
+                std::array<juce::uint8, 16 * 128> heldVel {};   // (channel*128+note) → velocity, 0 = off
+                for (const auto& m : mp.events)
+                {
+                    if (m.getTimeStamp() >= posStart) break;
+                    if (!m.isNoteOnOrOff()) continue;
+                    const int ch   = m.getChannel() - 1;
+                    const int note = m.getNoteNumber();
+                    if (ch < 0 || ch >= 16 || note < 0 || note > 127) continue;
+                    if (m.isNoteOn() && m.getVelocity() > 0)
+                        heldVel[(size_t)(ch * 128 + note)] = (juce::uint8) m.getVelocity();
+                    else
+                        heldVel[(size_t)(ch * 128 + note)] = 0;
+                }
+                for (int ch = 0; ch < 16; ++ch)
+                    for (int note = 0; note < 128; ++note)
+                    {
+                        const auto vel = heldVel[(size_t)(ch * 128 + note)];
+                        if (vel == 0) continue;
+                        mb.addEvent(juce::MidiMessage::noteOn(ch + 1,
+                                        juce::jlimit(0, 127, note + transpose), (juce::uint8) vel), 0);
+                    }
             }
 
             // posStart 以上の最初のイベントへ二分探索でジャンプ（線形スキャン回避）

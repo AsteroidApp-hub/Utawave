@@ -648,13 +648,15 @@ void TimelineRuler::paint(juce::Graphics& g)
     {
         g.setColour(juce::Colour(0xff5a8aaa).withAlpha(0.15f));
         g.fillRect(0, yTempo, W, hTempo);
-        // 固定ラベル "X BPM" はクリップ左端が 200px 未満のときだけ描画
-        // (数字 + BPM で自明なため "Tempo" の語は付けない)
+        // 固定ラベル "X BPM" はクリップ左端が 200px 未満のときだけ描画。
+        // 値は「表示中の左端位置」の BPM を出す (スクロール追従)。初期値固定だと、テンポ変化を
+        // 越えてスクロールした先で実際と違う BPM が出てしまうため。(数字 + BPM で自明なので "Tempo" は付けない)
         if (clipL < 200)
         {
+            const double leftTime = juce::jmax(0.0, scrollX / pxPerSec);
             g.setColour(juce::Colour(0xffaaccdd));
             g.setFont(sharedHeaderFont());
-            g.drawText(juce::String(currentBpm, 2) + " BPM",
+            g.drawText(juce::String(bpmAt(leftTime), 2) + " BPM",
                        6, yTempo, 200, hTempo, juce::Justification::centredLeft);
         }
         for (auto& bc : bpmChanges)
@@ -680,9 +682,13 @@ void TimelineRuler::paint(juce::Graphics& g)
         g.fillRect(0, yMeter, W, hMeter);
         if (clipL < 200)
         {
+            // 値は「表示中の左端位置」の拍子を出す (スクロール追従)。初期拍子固定だと、拍子変化を
+            // 越えてスクロールした先で実際と違う拍子 (例: ずっと 4/4) が出てしまうため。
+            const double leftTime = juce::jmax(0.0, scrollX / pxPerSec);
+            int ln, ld; getMeterAtBar1(barAtTime(leftTime), ln, ld);
             g.setColour(juce::Colour(0xffddbb99));
             g.setFont(sharedHeaderFont());
-            g.drawText("Meter  " + juce::String(meterNum) + "/" + juce::String(meterDen),
+            g.drawText("Meter  " + juce::String(ln) + "/" + juce::String(ld),
                        6, yMeter, 200, hMeter, juce::Justification::centredLeft);
         }
         for (auto& mc : meterChanges)

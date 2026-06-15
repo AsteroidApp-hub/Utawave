@@ -402,15 +402,19 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
             }
             else
             {
-                // 1 小節移動 (現在位置を小節グリッドに合わせて進める/戻す)
-                const double bar    = juce::jmax(1e-6, timelineView.barLengthSecs());
-                const int    curBar = (int) std::floor((cur + 1e-4) / bar);
+                // 1 小節移動: ルーラーと同じ小節グリッド (barAtTime / barStartSecs) で動かす。
+                // 旧実装の barLengthSecs() は一様な小節長で拍子分母も使う前提だったため、ルーラーが
+                // 描く実際の小節線 (分母を使わず 1 拍 = 四分音符・1 小節 = numerator 拍、テンポ/拍子
+                // 変化も反映) とずれ、初回の移動が 1 小節ぶんにならないことがあった。表示中の小節線へ揃える。
+                auto& ruler = timelineView.getRuler();
+                const int    curBar1     = ruler.barAtTime(cur);              // cur を含む 1-based 小節
+                const double curBarStart = ruler.barStartSecs(curBar1);
                 if (isN)
-                    t = (curBar + 1) * bar;
+                    t = ruler.barStartSecs(curBar1 + 1);                      // 次の小節頭
                 else
-                    t = (std::abs(cur - curBar * bar) < 1e-3)
-                            ? juce::jmax(0.0, (curBar - 1) * bar)   // 小節頭にいる → 前の小節
-                            : curBar * bar;                          // 小節途中 → 現在小節の頭
+                    t = (std::abs(cur - curBarStart) < 1e-3)
+                            ? ruler.barStartSecs(juce::jmax(1, curBar1 - 1))  // 小節頭にいる → 前の小節
+                            : curBarStart;                                    // 小節途中 → 現在小節の頭
                 doSeek = true;
             }
 

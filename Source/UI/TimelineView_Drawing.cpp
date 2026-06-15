@@ -896,7 +896,7 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
                 if (s == 0) pa.startNewSubPath(x, y);
                 else        pa.lineTo(x, y);
             }
-            g.setColour(juce::Colours::white.withAlpha(0.85f * ovVis));
+            g.setColour(juce::Colours::white.withAlpha(0.55f * ovVis));
             g.strokePath(pa, juce::PathStrokeType(1.4f));
         }
 
@@ -913,7 +913,7 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
                 if (s == 0) pb.startNewSubPath(x, y);
                 else        pb.lineTo(x, y);
             }
-            g.setColour(juce::Colours::white.withAlpha(0.85f * ovVis));
+            g.setColour(juce::Colours::white.withAlpha(0.55f * ovVis));
             g.strokePath(pb, juce::PathStrokeType(1.4f));
         }
 
@@ -925,7 +925,7 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
                                && selectedCrossfade.clipB == clipB);
         juce::Colour handleColour = selected
                                       ? juce::Colour(0xffff8800).withAlpha(0.95f)
-                                      : juce::Colours::white.withAlpha(0.55f);
+                                      : juce::Colours::white.withAlpha(0.33f);
         const float lineW = selected ? 2.0f : 1.0f;
         g.setColour(handleColour);
         g.drawLine((float)xL, (float)(laneBounds.getY() + 2),
@@ -1300,9 +1300,10 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
                     int xRight = juce::jmin(axR, bxR);  // clip B が存在する範囲の右端
                     if (xRight <= xLeft) continue;
 
-                    // 重なり領域の暗化（対向グラデ 2 枚の合成 ≒ ほぼ均一な暗化を単色塗りで近似）
+                    // 重なり領域の暗化（対向グラデ 2 枚の合成 ≒ ほぼ均一な暗化を単色塗りで近似）。
+                    // 目立ちすぎないよう控えめのアルファにする (波形が透ける程度)。
                     {
-                        g.setColour(juce::Colours::black.withAlpha(0.28f));
+                        g.setColour(juce::Colours::black.withAlpha(0.16f));
                         g.fillRect(xLeft, laneTop, xRight - xLeft, laneH);
                     }
 
@@ -1324,9 +1325,9 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
                                                          (float)(xRight - xLeft), (float)(laneH - 2)), 1.5f);
                     }
 
-                    // 両端のリサイズハンドル（縦バー）。非選択時は控えめの白。
+                    // 両端のリサイズハンドル（縦バー）。非選択時は控えめの白（目立ちすぎ防止）。
                     g.setColour(xfadeSelected ? juce::Colour(0xffff8800).withAlpha(0.85f)
-                                              : juce::Colours::white.withAlpha(0.4f));
+                                              : juce::Colours::white.withAlpha(0.24f));
                     g.fillRect(xLeft - 2,  laneTop + 2, 3, laneH - 4);
                     g.fillRect(xRight - 1, laneTop + 2, 3, laneH - 4);
                 }

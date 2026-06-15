@@ -299,6 +299,81 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
 
     if (undoManager) undoManager->beginNewTransaction();
 
+    // ペーストは「最新 (上) を優先」: 追加するクリップと重なる既存クリップの重なり分をカットして
+    // 重ならないようにする (録音やドラッグ重ねと同じ挙動)。重なったままだと最小クロスフェードを
+    // 組めないことがあったため。すでに追加したペーストクリップ同士はカットしない (コピーした塊を保つ)。
+    std::vector<AudioClip*> pastedClips;
+    auto cutOverlapForPaste =
+        [this](Lane* lane, double pStart, double pEnd,
+               juce::AudioFormatManager& fmt, juce::AudioThumbnailCache& cache,
+               const std::vector<AudioClip*>& pasted)
+    {
+        if (!lane || !undoManager) return;
+        constexpr double kEps = 1e-4;
+        // 先に対象を集める (アクションがレーンを変更するので live イテレートしない)
+        std::vector<AudioClip*> targets;
+        for (auto& cp : lane->clips)
+        {
+            auto* c = cp.get();
+            bool isPasted = false;
+            for (auto* p : pasted) if (p == c) { isPasted = true; break; }
+            if (!isPasted) targets.push_back(c);
+        }
+        for (auto* c : targets)
+        {
+            const double cS = c->getStartPosition();
+            const double cE = c->getEndPosition();
+            if (cE <= pStart + kEps || cS >= pEnd - kEps) continue;  // 重なり無し / 接触のみ
+
+            if (cS >= pStart - kEps && cE <= pEnd + kEps)
+            {
+                // 既存がペースト範囲に完全に覆われる → 削除
+                undoManager->perform(new EditActions::ClipDeleteAction(lane, c, editChangeCb));
+            }
+            else if (cS < pStart && cE > pEnd)
+            {
+                // 既存がペースト範囲を内包 → 左 [cS,pStart] に縮め、右 [pEnd,cE] を別クリップで残す
+                EditActions::ClipState before; before.capture(c);
+                EditActions::ClipState left = before;
+                left.duration = juce::jmax(0.01, pStart - cS);
+                if (left.fadeOut > left.duration * 0.5) left.fadeOut = left.duration * 0.5;
+                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { left }, editChangeCb));
+
+                EditActions::ClipParams rp;
+                rp.file       = c->getFile();
+                rp.startPos   = pEnd;
+                rp.duration   = juce::jmax(0.01, cE - pEnd);
+                rp.fileOffset = before.fileOffset + (pEnd - cS);
+                rp.gain       = before.gain;
+                rp.name       = before.name;
+                rp.colour     = c->getColour();
+                rp.fadeIn     = juce::jmin(0.010, rp.duration * 0.5);     // カット端のクリック防止
+                rp.fadeOut    = juce::jmin(before.fadeOut, rp.duration * 0.5);
+                undoManager->perform(new EditActions::ClipAddAction(lane, rp, fmt, cache, editChangeCb));
+            }
+            else if (cS < pStart)
+            {
+                // 既存の右側が重なる → 末尾を pStart まで詰める
+                EditActions::ClipState before; before.capture(c);
+                EditActions::ClipState after = before;
+                after.duration = juce::jmax(0.01, pStart - cS);
+                if (after.fadeOut > after.duration * 0.5) after.fadeOut = after.duration * 0.5;
+                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+            }
+            else
+            {
+                // 既存の左側が重なる → 開始を pEnd まで詰める (fileOffset 補正)
+                EditActions::ClipState before; before.capture(c);
+                EditActions::ClipState after = before;
+                after.startPos   = pEnd;
+                after.fileOffset = before.fileOffset + (pEnd - cS);
+                after.duration   = juce::jmax(0.01, cE - pEnd);
+                if (after.fadeIn > after.duration * 0.5) after.fadeIn = after.duration * 0.5;
+                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+            }
+        }
+    };
+
     for (auto& e : clipboard)
     {
         Track* targetTrack = nullptr;
@@ -341,11 +416,16 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
 
         if (undoManager)
         {
-            undoManager->perform(new EditActions::ClipAddAction(
-                targetLane, params,
-                targetTrack->getFormatManager(),
-                targetTrack->getThumbnailCache(),
-                editChangeCb));
+            auto& fmt   = targetTrack->getFormatManager();
+            auto& cache = targetTrack->getThumbnailCache();
+            // 先に重なる既存クリップをカット (最新=ペーストを上に・録音と同様に重ねない)
+            cutOverlapForPaste(targetLane, params.startPos,
+                               params.startPos + params.duration, fmt, cache, pastedClips);
+            // ペーストクリップを追加し、以降のカット対象から除外するため記録する
+            auto* add = new EditActions::ClipAddAction(targetLane, params, fmt, cache, editChangeCb);
+            if (undoManager->perform(add))
+                if (auto* added = add->getAddedClip())
+                    pastedClips.push_back(added);
         }
     }
     repaint();
