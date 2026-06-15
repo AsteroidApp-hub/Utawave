@@ -113,6 +113,13 @@ target_compile_definitions(Utawave PRIVATE
     # プラグインホスティング: VST3 のみ (AU は非対応)
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_AU=0
+    # macOS で Metal レイヤレンダラを使う。既定の CoreGraphics 非同期レイヤ描画だと、AppKit が
+    # ディスプレイリンク同期で CA トランザクションをフラッシュする際に CA::Transaction::commit が
+    # メッセージスレッドで描画完了を待ち (DispatchGroup cond_wait)、トラック数/ズームに比例して
+    # 再生バー等の UI が周期的に数百 ms 固まる (調査で確定した根本原因)。Metal は GPU ネイティブに
+    # 合成するためこの待ちが消え、メモリ使用量も削減される (実機で表示不具合・スリープ/Spaces
+    # 復帰も問題なしを確認済み)。macOS 専用フラグなので Darwin のみで有効化する。
+    $<$<PLATFORM_ID:Darwin>:JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS=1>
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Utawave,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Utawave,JUCE_VERSION>"
 )

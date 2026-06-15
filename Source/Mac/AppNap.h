@@ -16,12 +16,3 @@
     非 macOS では何もしない (スタブ)。
 */
 void disableAppNap();
-
-// NSView のバッキングレイヤを同期描画 (drawsAsynchronously=NO) に強制する。
-// JUCE は macOS でレイヤを drawsAsynchronously=YES にするため、AppKit が
-// ディスプレイリンク同期で CA トランザクションをフラッシュする際に
-// CA::Transaction::commit が非同期描画の完了を DispatchGroup の cond_wait で
-// メッセージスレッド上で待ち、描画が重い/詰まると再生バー等の UI が数百 ms 固まる。
-// これを NO にすると描画がインラインで走り「非同期描画の完了待ち」が消える。
-// nsViewHandle は ComponentPeer::getNativeHandle() の戻り値 (NSView*)。
-void forceSyncLayerDrawing(void* nsViewHandle);

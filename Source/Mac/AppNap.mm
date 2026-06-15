@@ -3,7 +3,6 @@
 
 #include "AppNap.h"
 #import <Foundation/Foundation.h>
-#import <Cocoa/Cocoa.h>
 
 // beginActivityWithOptions が返す activity token を static で保持し、プロセス寿命の間
 // App Nap (とアイドルスリープ) を抑止する。endActivity は呼ばない (= 終了まで有効)。
@@ -25,15 +24,4 @@ void disableAppNap()
 
     sActivityToken = [[pi beginActivityWithOptions:opts
                                             reason:@"Utawave playback/recording UI responsiveness"] retain];
-}
-
-void forceSyncLayerDrawing(void* nsViewHandle)
-{
-    if (nsViewHandle == nullptr) return;
-    NSView* v = (NSView*) nsViewHandle;   // JUCE は非 ARC なのでブリッジキャスト不要
-    // レイヤが無ければ生成させてから同期描画に。subviews も念のため辿る。
-    [v setWantsLayer:YES];
-    if (v.layer != nil) v.layer.drawsAsynchronously = NO;
-    for (NSView* sub in [v subviews])
-        if (sub.layer != nil) sub.layer.drawsAsynchronously = NO;
 }

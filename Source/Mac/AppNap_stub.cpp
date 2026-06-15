@@ -5,4 +5,3 @@
 
 // 非 macOS では App Nap が存在しないため何もしない。
 void disableAppNap() {}
-void forceSyncLayerDrawing(void*) {}
