@@ -19,6 +19,9 @@
 /Distribution/*.app/
 # 旧名時代のベータ配布物 (歴史的アーティファクトなのでフォルダ名はリネームしない)
 /Trakova-beta-v0.1.0/*.app/
+# ルート直下に書き出した macOS パッケージ / 配布 zip
+/Utawave-macOS/
+/Utawave-*-macOS-*.zip
 
 # 派生アイコン (Icon/*.png から JUCE が生成。元素材の PNG はコミットする)
 /Icon/Utawave.icns
