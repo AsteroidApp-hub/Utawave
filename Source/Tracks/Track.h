@@ -23,7 +23,7 @@ struct Lane
 class Track
 {
 public:
-    static constexpr int minHeight     { 50 };
+    static constexpr int minHeight     { 30 };   // 名前行 (M/S/R/I) だけが見える最小サイズ
     static constexpr int maxHeight     { 500 };
     static constexpr int defaultHeight { 100 };  // 基本: 上段 + Vol/Pan + メータ + In/TList 行
     static constexpr int laneHeight    { 48 };

@@ -44,6 +44,9 @@ public:
     void setLoudnessTargetLufs(float lufs) { loudnessTargetLufs = lufs; }
 
     std::function<void()>      onChanged;
+    // メイン高さリサイズのドラッグ中に新しい高さ (px) を通知する。Panel 側で複数選択トラックへ
+    // 同じ高さを追従反映する用途 (未設定ならビューが自トラックへ直接 setCustomHeight する)。
+    std::function<void(int)>   onResizeTo;
     std::function<void(bool)>  onInputMonitorChanged;
     std::function<int()>       getNumInputChannels;
     std::function<void()>      onSelected;   // トラック選択コールバック (互換用)
@@ -71,6 +74,8 @@ public:
 
     void setSelected(bool s) { selected = s; repaint(); }
     bool isSelected() const  { return selected; }
+    // メイン/レーン高さのリサイズドラッグ中か。Panel が reorder ドラッグの誤発火を抑止する判定に使う。
+    bool isResizing() const  { return draggingResize || draggingLaneResize; }
 
     Track& getTrack() { return track; }
 

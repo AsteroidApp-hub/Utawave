@@ -179,6 +179,10 @@ private:
     double zoomStartPpb   { 80.0 };
     double zoomCenterTime { 0.0 };
     int    zoomCenterXLocal { 0 };
+    // クリックでのシークは mouseUp で確定する。マウスダウン即シークだと、上下ドラッグでの
+    // ズーム (や横ドラッグでのループ範囲指定) の最中に再生バーがクリック位置へ飛んでしまい、
+    // 再生中の操作で再生位置が乱れるため。ドラッグがズーム/ループに化けたら予約を取り消す。
+    bool   seekArmed { false };
     // マーカードラッグ用
     int    draggingMarkerIdx { -1 };
     int    markerDragStartX  { 0 };

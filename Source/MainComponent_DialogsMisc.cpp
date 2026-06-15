@@ -42,7 +42,7 @@ void MainComponent::showAboutDialog()
             addAndMakeVisible(versionLabel);
 
             copyrightLabel.setText(
-                tr(u8"© 2025-2026 Utawave  ・  オープンソース (AGPL v3)"),
+                tr(u8"© 2025-2026 Utawave"),
                 juce::dontSendNotification);
             copyrightLabel.setFont(juce::FontOptions(12.0f));
             copyrightLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8a9097));
@@ -82,8 +82,8 @@ void MainComponent::showAboutDialog()
             juce::String t;
             t << tr(u8"Utawave © 2025-2026\n");
             t << tr(u8"本アプリは AGPL v3 ライセンスの下で配布されています。\n")
-              << tr(u8"ソースコードは GitHub にて公開しています。\n")
-              << "  https://github.com/AsteroidApp-hub/Utawave\n\n";
+              << tr(u8"ソースコードは公式サイトで公開しています。\n")
+              << "  https://utawave.com\n\n";
 
             t << tr(u8"── 免責事項 ──\n")
               << tr(u8"本ソフトウェアは無料で「現状のまま」提供されます。万一、使用（または使用できないこと）により損害が生じた場合でも、作者は責任を負いかねます。大切なデータはバックアップしてください。(詳細は AGPL v3 第15条・第16条)\n\n");

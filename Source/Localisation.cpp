@@ -388,11 +388,9 @@ static const char* const englishTranslations =
     "\"波形の読み込みが完了しました\" = \"Waveform loading complete\"\n"
     // ── About ──
     "\"バージョン \" = \"Version \"\n"
-    "\"オープンソース (AGPL v3)\" = \"Open source (AGPL v3)\"\n"
-    "\"© 2025-2026 Utawave  ・  オープンソース (AGPL v3)\" = \"© 2025-2026 Utawave  ·  Open source (AGPL v3)\"\n"
         "\"ライセンス情報 / 利用しているオープンソース\" = \"License / Open-source acknowledgements\"\n"
     "\"本アプリは AGPL v3 ライセンスの下で配布されています。\\n\" = \"This app is distributed under the AGPL v3 license.\\n\"\n"
-    "\"ソースコードは GitHub にて公開しています。\\n\" = \"The source code is available on GitHub.\\n\"\n"
+    "\"ソースコードは公式サイトで公開しています。\\n\" = \"The source code is available on the official website.\\n\"\n"
     "\"── 免責事項 ──\\n\" = \"── Disclaimer ──\\n\"\n"
     "\"本ソフトウェアは無料で「現状のまま」提供されます。万一、使用（または使用できないこと）により損害が生じた場合でも、作者は責任を負いかねます。大切なデータはバックアップしてください。(詳細は AGPL v3 第15条・第16条)\\n\\n\" = \"This software is free and provided AS IS. The author cannot accept liability for damages arising from the use of, or inability to use, this software. Please back up important data. (See Sections 15 and 16 of the AGPL v3 for details)\\n\\n\"\n"
     "\"開発を応援する (寄付):\\n\" = \"Support development (donations):\\n\"\n"

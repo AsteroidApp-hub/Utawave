@@ -338,10 +338,12 @@ void TimelineRuler::beginSeekDrag(const juce::MouseEvent& e)
     dragStartY     = e.y;
     isDraggingLoop = false;
     isDraggingZoom = false;
+    seekArmed      = true;   // クリック確定 (mouseUp) でシーク。ズーム/ループに化けたら取り消す
     zoomStartPpb     = pixelsPerBeat;
     zoomCenterTime   = xToSeconds(e.x);
     zoomCenterXLocal = e.x;
-    if (onSeek) onSeek(t0);
+    // ここでは即シークしない: 上下ドラッグでのズーム操作中に再生バーが飛ぶのを防ぐため、
+    // ドラッグ方向が確定するまでシークを保留する (純粋なクリックは mouseUp で確定)。
 }
 
 void TimelineRuler::mouseDrag(const juce::MouseEvent& e)
@@ -410,6 +412,7 @@ void TimelineRuler::mouseDrag(const juce::MouseEvent& e)
 
     if (isDraggingZoom)
     {
+        seekArmed = false;   // ズーム操作は再生位置を動かさない
         // 下方向 = 拡大、上方向 = 縮小
         // 1px ≈ 1.2% の指数変化で滑らかに
         const double factor = std::pow(1.012, (double) dy);
@@ -420,22 +423,23 @@ void TimelineRuler::mouseDrag(const juce::MouseEvent& e)
 
     if (isDraggingLoop)
     {
+        seekArmed = false;   // ループ範囲ドラッグも再生位置を動かさない
         double t1 = dragStartTime;
         double t2 = xToSeconds(e.x);
         if (onSnapTime) t2 = onSnapTime(t2);
         if (t1 > t2) std::swap(t1, t2);
         if (onSetLoopRange) onSetLoopRange(t1, t2);
     }
-    else
-    {
-        double t = xToSeconds(e.x);
-        if (onSnapTime) t = onSnapTime(t);
-        if (onSeek) onSeek(t);
-    }
+    // 方向未確定の微小移動ではシークしない (純粋なクリックは mouseUp で確定する)
 }
 
 void TimelineRuler::mouseUp(const juce::MouseEvent&)
 {
+    // ドラッグがズーム/ループに化けず純粋なクリックだった場合のみ、ここでシークを確定する
+    // (マウスダウン即シークだと上下ドラッグのズーム中に再生バーが飛ぶため保留していた)
+    if (seekArmed && onSeek) onSeek(dragStartTime);
+    seekArmed         = false;
+
     draggingMarkerIdx = -1;
     draggingBpmIdx    = -1;
     draggingMeterIdx  = -1;
@@ -644,12 +648,13 @@ void TimelineRuler::paint(juce::Graphics& g)
     {
         g.setColour(juce::Colour(0xff5a8aaa).withAlpha(0.15f));
         g.fillRect(0, yTempo, W, hTempo);
-        // 固定ラベル "Tempo X BPM" はクリップ左端が 200px 未満のときだけ描画
+        // 固定ラベル "X BPM" はクリップ左端が 200px 未満のときだけ描画
+        // (数字 + BPM で自明なため "Tempo" の語は付けない)
         if (clipL < 200)
         {
             g.setColour(juce::Colour(0xffaaccdd));
             g.setFont(sharedHeaderFont());
-            g.drawText("Tempo  " + juce::String(currentBpm, 2) + " BPM",
+            g.drawText(juce::String(currentBpm, 2) + " BPM",
                        6, yTempo, 200, hTempo, juce::Justification::centredLeft);
         }
         for (auto& bc : bpmChanges)

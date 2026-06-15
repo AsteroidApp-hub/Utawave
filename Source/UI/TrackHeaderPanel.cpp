@@ -125,7 +125,11 @@ void TrackHeaderPanel::mouseDown(const juce::MouseEvent& e)
             const bool isInteractive = dynamic_cast<juce::Button*>(e.eventComponent)   != nullptr
                                     || dynamic_cast<juce::Slider*>(e.eventComponent)   != nullptr
                                     || dynamic_cast<juce::ComboBox*>(e.eventComponent) != nullptr;
-            if (!isInteractive && !e.mods.isCommandDown() && !e.mods.isShiftDown())
+            // リサイズ grab (ビュー下端のドラッグ) では並べ替えを arm しない。ビューの mouseDown が
+            // 先に走って draggingResize を立てているのでここで判定できる (リサイズが並べ替えに化けて
+            // トラックが入れ替わるのを防ぐ。複数選択の高さ追従ドラッグでも同様に抑止される)。
+            const bool resizingHit = headerViews[(size_t) hitIdx]->isResizing();
+            if (!isInteractive && !resizingHit && !e.mods.isCommandDown() && !e.mods.isShiftDown())
             {
                 dragSourceIndex   = hitIdx;
                 dragReorderStart  = e.getEventRelativeTo(this).getPosition();
@@ -470,6 +474,21 @@ void TrackHeaderPanel::refresh()
         auto view = std::make_unique<TrackHeaderView>(*track);
         int  idx  = i;  // キャプチャ用コピー
         view->onChanged             = [this] { if (onTrackChanged) onTrackChanged(); };
+        // メイン高さリサイズ: 複数選択中で対象トラックがその選択に含まれていれば、全選択トラックを
+        // 同じ高さへリアルタイム追従させる。そうでなければ対象トラックだけをリサイズする。
+        view->onResizeTo            = [this, idx](int newH)
+        {
+            if (selectedIndices.size() > 1 && selectedIndices.count(idx))
+            {
+                for (int i : selectedIndices)
+                    if (auto* t = trackManager.getTrack(i))
+                        t->setCustomHeight(newH);
+            }
+            else if (auto* t = trackManager.getTrack(idx))
+            {
+                t->setCustomHeight(newH);
+            }
+        };
         view->onInputMonitorChanged = [this](bool) { if (onTrackChanged) onTrackChanged(); };
         // 名前/色/シンセ設定の編集を Undo 対応で適用 (対象 Track* を束ねて委譲)
         view->onEditUndoable        = [this, track](std::function<void()> m)

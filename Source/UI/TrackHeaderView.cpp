@@ -668,19 +668,25 @@ void TrackHeaderView::paint(juce::Graphics& g)
         const int frameX = controlsWidth + 4;
         const int frameY = 0;            // 上端から
         const int frameW = w - controlsWidth - 8;
-        const int frameH = juce::jmin(insFrameH, mainH);   // 固定サイズに上限
+        // INS パネルは圧縮しない: 常に固定サイズ (insFrameH / insSlotH) で描き、トラックを縮めた
+        // 時はメイン部の高さでクリップして「そのままのサイズで下が隠れる」ようにする。
+        const int insVisibleH = juce::jmin(insFrameH, mainH);
 
         // 既存コントロール領域との区切り（縦の太線）
         g.setColour(juce::Colour(0xff121316));
         g.fillRect(controlsWidth, 0, 4, mainH);
 
-        // 背景パネル（やや暗め）
+        // 可視領域でクリップしてから固定サイズで描く (はみ出しがレーン/タイムラインに侵食しない)
+        juce::Graphics::ScopedSaveState clipState(g);
+        g.reduceClipRegion(controlsWidth, 0, w - controlsWidth, insVisibleH);
+
+        // 背景パネル（やや暗め）— 常に固定 insFrameH。下端はクリップで隠れる
         g.setColour(juce::Colour(0xff1c1f24));
-        g.fillRoundedRectangle((float)frameX, (float)frameY, (float)frameW, (float)frameH, 4.0f);
+        g.fillRoundedRectangle((float)frameX, (float)frameY, (float)frameW, (float)insFrameH, 4.0f);
         // 外枠
         g.setColour(juce::Colour(0xff3a3d42));
         g.drawRoundedRectangle((float)frameX + 0.5f, (float)frameY + 0.5f,
-                               (float)frameW - 1.0f, (float)frameH - 1.0f, 4.0f, 1.0f);
+                               (float)frameW - 1.0f, (float)insFrameH - 1.0f, 4.0f, 1.0f);
 
         // 上端の "INSERTS" ヘッダ
         g.setColour(AppColours::textDim.withAlpha(0.7f));
@@ -688,10 +694,9 @@ void TrackHeaderView::paint(juce::Graphics& g)
         g.drawText("INSERTS", frameX + 6, frameY + 1, frameW - 12, 12,
                    juce::Justification::centredLeft);
 
-        // スロットを 4 等分する区切り線
+        // スロット区切り線 — 固定スロット高 (insSlotH) で。圧縮しない (はみ出しはクリップ)
         const int innerY = frameY + 13;
-        const int innerH = frameH - 14;
-        const int slotH  = innerH / Track::insertSlotCount;
+        const int slotH  = insSlotH;
         g.setColour(juce::Colour(0xff2a2d31));
         for (int i = 1; i < Track::insertSlotCount; ++i)
         {
@@ -717,10 +722,14 @@ void TrackHeaderView::paint(juce::Graphics& g)
 
     g.setColour(AppColours::textDim);
     g.setFont(juce::FontOptions(10.0f));
-    // スライダーと同じ Y/高さで描画 → 縦中央揃え
-    g.drawText("Vol", 6, 30, 22, 12, juce::Justification::centredLeft);
-    g.drawText("Pan", 6, 44, 22, 12, juce::Justification::centredLeft);
+    // スライダーと同じ Y/高さで描画 → 縦中央揃え。
+    // トラックを縮めて収まらない行は resized() でコントロールを隠すので、ラベルも描かない
+    // (mainH 基準は resized() の showVolRow / showPanRevRow と一致させる)。
+    if (mainH >= 44)
+        g.drawText("Vol", 6, 30, 22, 12, juce::Justification::centredLeft);
+    if (mainH >= 58)
     {
+        g.drawText("Pan", 6, 44, 22, 12, juce::Justification::centredLeft);
         // Rev ラベルは Pan スライダー右端の少し先 (Pan は左半分まで)
         const int wLbl = juce::jmin(getWidth(), controlsWidth);
         const int panW = (wLbl - 34) / 2;
@@ -728,8 +737,8 @@ void TrackHeaderView::paint(juce::Graphics& g)
         g.drawText("Rev", revLblX, 44, 22, 12, juce::Justification::centredLeft);
     }
 
-    // 入力レベルメータ（Peak + VU）-- クリックトラックは表示しない
-    if (!track.isClickTrack())
+    // 入力レベルメータ（Peak + VU）-- クリックトラックや、縮めて収まらない時は表示しない
+    if (!track.isClickTrack() && mainH >= 77)
     {
         const int meterX = 30;
         // INS スロット表示中はそちらに侵食しないよう、コントロール領域内に収める
@@ -858,6 +867,16 @@ void TrackHeaderView::resized()
     const int insAreaW = juce::jmax(0, getWidth() - controlsWidth);
     const int bW = 20, bH = 17, bY = 8, gap = 2;
 
+    // メイン部の高さに応じて、収まらない行のコントロールを隠す。コントロールは固定 Y に
+    // 置かれるため、足りない行を出すと半端に見切れる。これで「トラック名 (M/S/R/I) の行だけ」
+    // まで縮められるようにする (paint() の各行描画も同じ mainH 基準でガードする)。
+    const int  lanesForVis  = track.getLaneCount();
+    const int  mainHForVis  = (track.isLanesCollapsed() || lanesForVis <= 1)
+                                 ? getHeight() : track.getMainHeight();
+    const bool showVolRow    = mainHForVis >= 44;   // Vol     (y=30..42)
+    const bool showPanRevRow = mainHForVis >= 58;   // Pan/Rev (y=44..56)
+    const bool showBottomRow = mainHForVis >= 96;   // 底部行  (y=80..95)
+
     int bx = w - bW - 4;
     monBtn.setBounds (bx, bY, bW, bH); bx -= bW + gap;
     recBtn.setBounds (bx, bY, bW, bH); bx -= bW + gap;
@@ -887,6 +906,9 @@ void TrackHeaderView::resized()
         panSlider.setBounds(30, 44, panW, 12);
         revSlider.setBounds(revX, 44, revW, 12);
     }
+    volSlider.setVisible(showVolRow);
+    panSlider.setVisible(showPanRevRow);
+    revSlider.setVisible(showPanRevRow);
 
     // INS スロット 4 枠 (paint() で描いた外枠の内側にチップを敷く)
     if (slotsVisible && insAreaW > 0)
@@ -895,20 +917,24 @@ void TrackHeaderView::resized()
         const int laneCount = track.getLaneCount();
         const bool collapsed = track.isLanesCollapsed() || laneCount <= 1;
         const int mainH = collapsed ? totalH : track.getMainHeight();
+        // INS パネルは圧縮しない: スロットは常に固定高 (insSlotH) で配置し、メイン部の高さに
+        // 収まらないスロットは「そのままのサイズで」非表示にする (paint() も同じ基準でクリップ)。
+        const int insVisibleH = juce::jmin(insFrameH, mainH);
 
         const int frameX = controlsWidth + 4;
-        const int frameY = 0;
         const int frameW = getWidth() - controlsWidth - 8;
-        const int frameH = juce::jmin(insFrameH, mainH);
-        const int innerY = frameY + 13;       // "INSERTS" ヘッダ分
-        const int innerH = frameH - 14;
-        const int slotH  = innerH / Track::insertSlotCount;
+        const int innerY = 13;            // "INSERTS" ヘッダ分
+        const int slotH  = insSlotH;      // 固定スロット高 (圧縮しない)
         const int padX   = 6;
         for (int i = 0; i < fxChips.size(); ++i)
         {
-            fxChips[i]->setVisible(true);
-            fxChips[i]->setBounds(frameX + padX, innerY + i * slotH + 1,
-                                   frameW - padX * 2, slotH - 2);
+            const int chipY = innerY + i * slotH + 1;
+            const int chipH = slotH - 2;
+            // スロット全体が可視領域に収まる時だけ表示 (収まらない分は隠す)
+            const bool fits = (chipY + chipH) <= insVisibleH;
+            fxChips[i]->setVisible(fits);
+            if (fits)
+                fxChips[i]->setBounds(frameX + padX, chipY, frameW - padX * 2, chipH);
         }
     }
     else
@@ -927,9 +953,21 @@ void TrackHeaderView::resized()
     inputLabel.setBounds(inStart, botY, inLabelW, botH);
     inputChBox.setBounds(inStart + inLabelW, botY, w - inStart - inLabelW - 6, botH);
 
+    // 底部行は音声トラックのみ (MIDI/Click はコンストラクタで非表示。ここで再表示しない)
+    if (!track.isMidiTrack() && !track.isClickTrack())
+    {
+        lanesBtn.setVisible(showBottomRow);
+        inputLabel.setVisible(showBottomRow);
+        inputChBox.setVisible(showBottomRow);
+    }
+
     // クリックトラック専用レイアウト: 底部 [Sound][½][x2][ACC]
     if (track.isClickTrack())
     {
+        clickSoundBox.setVisible(showBottomRow);
+        clickAccentBtn.setVisible(showBottomRow);
+        clickHalfBtn.setVisible(showBottomRow);
+        clickDoubleBtn.setVisible(showBottomRow);
         const int accW = 30, halfW = 22, dblW = 26;
         const int rightMargin = 6, gap = 2;
         int rx = w - rightMargin;
@@ -942,6 +980,12 @@ void TrackHeaderView::resized()
     // MIDI トラック専用レイアウト: 底部 [Oct▼][Oct▲][±info][♭][♯]   [Wav]
     if (track.isMidiTrack())
     {
+        octDownBtn.setVisible(showBottomRow);
+        octUpBtn.setVisible(showBottomRow);
+        semiDownBtn.setVisible(showBottomRow);
+        semiUpBtn.setVisible(showBottomRow);
+        midiInfoLabel.setVisible(showBottomRow);
+        waveformBtn.setVisible(showBottomRow);
         const int leftMargin  = 8;
         const int rightMargin = 6;
         const int gap         = 2;

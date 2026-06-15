@@ -376,7 +376,10 @@ void TrackHeaderView::mouseDrag(const juce::MouseEvent& e)
     int delta = e.getScreenY() - dragStartScreenY;
     if (draggingResize)
     {
-        track.setCustomHeight(dragStartHeight + delta);
+        const int newH = dragStartHeight + delta;
+        // 複数選択時は Panel が全選択トラックへ同じ高さを追従反映する。未設定なら自トラックへ。
+        if (onResizeTo) onResizeTo(newH);
+        else            track.setCustomHeight(newH);
         if (onChanged) onChanged();
     }
     else if (draggingLaneResize)
