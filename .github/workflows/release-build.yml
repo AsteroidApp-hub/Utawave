@@ -98,7 +98,9 @@ jobs:
   #   GitHub artifact としてアップロードしてから署名要求を出す。
   # ──────────────────────────────────────────────────────────────
   windows:
-    runs-on: windows-latest
+    # windows-latest が Visual Studio 18 2026 / CMake 4.x に更新され、JUCE FetchContent の
+    # サブビルドがジェネレータ不整合で configure 失敗するため、安定版 (VS 2022) に固定する。
+    runs-on: windows-2022
     permissions:
       contents: read
       actions: read    # SignPath connector が artifact / 実行メタデータを読むのに必要
