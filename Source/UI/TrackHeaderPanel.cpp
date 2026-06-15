@@ -7,6 +7,8 @@
 
 TrackHeaderPanel::TrackHeaderPanel(TrackManager& tm) : trackManager(tm)
 {
+    setOpaque(true);   // paint() が fillAll で全面を塗る (GPU コンポジット軽量化)
+
     auto styleBtn = [this](juce::TextButton& btn, juce::String text)
     {
         btn.setButtonText(text);

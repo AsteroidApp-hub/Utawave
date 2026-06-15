@@ -31,6 +31,7 @@ AppPreferences AppPreferences::load()
         p.recLatencyAutoComp = xml->getBoolAttribute("recLatencyAutoComp", p.recLatencyAutoComp);
         p.recLatencyManualMs = juce::jlimit(-500.0, 500.0,
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
+        p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
     }
     return p;
 }
@@ -43,6 +44,7 @@ bool AppPreferences::save() const
     xml.setAttribute("midiPagingEnabled", midiPagingEnabled);
     xml.setAttribute("recLatencyAutoComp", recLatencyAutoComp);
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
+    xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     const bool ok = xml.writeTo(getStoreFile());
     if (!ok)
         DBG("AppPreferences::save failed (disk full / permission?): "

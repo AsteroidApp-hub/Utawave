@@ -49,6 +49,14 @@ public:
     // 合計遅延サンプル（PDC 用）。現状は呼び出し側で参照のみ
     int getTotalLatencySamples() const;
 
+    // 指定 SR / blockSize で既に prepareToPlay 済みか。モニター経路 (setMonitorChain) が
+    // 同設定での二重 prepare (プラグイン状態リセット = グリッチ) を避けるための軽量判定。
+    // prepared* は message thread でのみ書かれる (prepareToPlay) ので同スレッド read は安全。
+    bool isPreparedFor(double sr, int bs) const noexcept
+    {
+        return preparedSampleRate == sr && preparedBlockSize == bs;
+    }
+
     // 変更通知
     std::function<void()> onChainChanged;
 

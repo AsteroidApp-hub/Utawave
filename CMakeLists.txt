@@ -78,6 +78,8 @@ target_sources(Utawave PRIVATE
     Source/MIDI/InternalSynth.cpp
     $<$<PLATFORM_ID:Darwin>:Source/Mac/GlobalKeyMonitor.mm>
     $<$<NOT:$<PLATFORM_ID:Darwin>>:Source/Mac/GlobalKeyMonitor_stub.cpp>
+    $<$<PLATFORM_ID:Darwin>:Source/Mac/AppNap.mm>
+    $<$<NOT:$<PLATFORM_ID:Darwin>>:Source/Mac/AppNap_stub.cpp>
     Source/UI/PluginManagerDialog.cpp
     Source/UI/StartupComponent.cpp
     Source/UI/AdPanel.cpp

@@ -18,6 +18,8 @@ juce::String shortenPluginName(const juce::String& full)
 
 MasterPanel::MasterPanel()
 {
+    setOpaque(true);   // paint() が fillAll で全面を塗る (GPU コンポジット軽量化)
+
     masterLabel.setText("MASTER", juce::dontSendNotification);
     masterLabel.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
     masterLabel.setColour(juce::Label::textColourId, AppColours::textDim);

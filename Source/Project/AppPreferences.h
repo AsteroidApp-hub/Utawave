@@ -29,6 +29,11 @@ public:
     // 追加の手動オフセット (ms, +で手前へ)。報告値が不正確なデバイス向けの微調整。
     double recLatencyManualMs { 0.0 };
 
+    // 入力モニター中、トラックの INS (インサート FX) を返し音にも通すか (既定: ON)。
+    // INS が空のトラックでは無影響 (チェーンをスキップ)。ルックアヘッド系プラグインで
+    // モニタ遅延が気になるユーザー向けの逃げ道として OFF にできる。録音ファイルには焼かない。
+    bool monitorThroughInserts { true };
+
     // 広告機能のコンパイル時マスタースイッチ。公開ソースの既定は OFF (起動画面は 2 列・通信なし)。
     // 公式配布ビルドのみ CMake の UTAWAVE_ADS_ENABLED=1 で有効化する (詳細は CMakeLists / CLAUDE.md)。
     static bool adsCompiledIn();

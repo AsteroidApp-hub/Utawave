@@ -9,6 +9,7 @@
 #include "Project/AppPreferences.h"
 #include "Project/CrashReporter.h"
 #include "VST/PluginScannerProcess.h"
+#include "Mac/AppNap.h"
 
 class UtawaveApplication : public juce::JUCEApplication
 {
@@ -45,6 +46,9 @@ public:
         }
 
         CrashReporter::install();   // クラッシュ時にスタックトレースをローカルへ保存
+        // macOS の App Nap を無効化する。これをしないと App Nap が周期的にタイマー/VBlank 配信を
+        // スロットルし、再生バー (onVBlank) が数秒ごとに一瞬止まって見える (音は実時間スレッドで無傷)。
+        disableAppNap();
         Localisation::install(Localisation::getSavedLanguage());
         mainWindow.reset(new MainWindow(getApplicationName()));
 
@@ -136,6 +140,15 @@ public:
                 mc->createNewProject(projectFile, sampleRate, bitDepth);
             else
                 mc->openExistingProject(projectFile);
+
+            // ウィンドウのバッキングレイヤを同期描画 (drawsAsynchronously=NO) に。JUCE 既定の
+            // 非同期レイヤ描画だと、AppKit がディスプレイリンク同期で CA トランザクションをフラッシュ
+            // する際に CA::Transaction::commit がメッセージスレッドで描画完了を待ち、内容が重いと
+            // 数百 ms 固まりうる (再生バーのカクツキ要因)。レイヤが落ち着いてから設定する。
+            juce::MessageManager::callAsync([this] {
+                if (auto* peer = getPeer())
+                    forceSyncLayerDrawing(peer->getNativeHandle());
+            });
         }
 
         void closeButtonPressed() override

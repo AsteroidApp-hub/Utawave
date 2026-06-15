@@ -217,9 +217,36 @@ public:
         juce::int64 samplesFinished { -1 };
         // 物理ピクセル倍率 (Retina = 2.0)。倍率が変わったら作り直す (ディスプレイ間移動)
         float pixelScale { 0.0f };
+
+        // ── 巨大クリップ用 (キャッシュ上限超え scaledW>8192) の「ビューポート可視範囲スライス」キャッシュ ──
+        // 以前は useCache=false の clip を毎ペイント fillPath で描き直していたが、JUCE の CALayer は
+        // drawsAsynchronously のため CA::Transaction::commit がその描画完了をメインスレッドで待ち、
+        // 重い波形 fillPath でメッセージスレッドが数百 ms 固まる (再生バー/UI のカクツキ)。可視範囲を
+        // ここに 1 枚キャッシュして blit にすれば、定常再生 (スクロール/ズーム不変) では再描画されない。
+        // 可視範囲はコンポーネント全幅でクランプする (プレイヘッド帯 g.getClipBounds() では無い) ので
+        // 再生バーが動いても毎フレーム同じキー = キャッシュヒット = blit のみ。
+        juce::Image  bigImage;
+        int          bigVisX0 { -1 };          // コンポーネント座標の可視左端 (px)
+        int          bigVisX1 { -1 };          // 可視右端 (px, exclusive)
+        int          bigHeight { 0 };
+        double       bigScrollX { -1.0 };
+        double       bigPixelsPerBeat { -1.0 };
+        double       bigBpm { -1.0 };
+        double       bigFileOffset { -1.0 };
+        float        bigGain { -1.0f };
+        double       bigVZoom { -1.0 };
+        juce::uint32 bigColourARGB { 0 };
+        juce::int64  bigSamplesFinished { -1 };
+        float        bigPixelScale { 0.0f };
     };
     WaveformCache& getWaveformCache() { return waveformCache; }
-    void invalidateWaveformCache() { waveformCache.width = -1; }
+    // width=-1 で useCache 経路を、bigVisX0=-1 + bigImage 解放で巨大クリップ経路を無効化する。
+    void invalidateWaveformCache()
+    {
+        waveformCache.width = -1;
+        waveformCache.bigVisX0 = -1;
+        waveformCache.bigImage = juce::Image();
+    }
 
 private:
     WaveformCache waveformCache;

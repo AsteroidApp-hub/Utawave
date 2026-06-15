@@ -248,6 +248,10 @@ public:
     void setSampleRate(double sr) { sampleRate = sr; }
     // 録音中のライブ波形が伸びる領域だけを部分 repaint する (全面 repaint のちらつき防止)
     void repaintRecordingArea();
+    // 指定の時間範囲 [startSec, endSec] を覆う縦帯だけを部分 repaint する。
+    // サムネイル非同期ロードの進捗通知で、変わったクリップの領域だけを描き直す用途
+    // (全面 repaint だと巨大クリップ全体を fillPath で描き直して数百 ms 固まるため)。
+    void repaintTimeRange(double startSec, double endSec);
     void setPlayheadPosition(double seconds);
     void setScrollY(int y);
 

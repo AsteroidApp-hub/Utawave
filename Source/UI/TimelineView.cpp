@@ -749,6 +749,9 @@ void TimelineRuler::paint(juce::Graphics& g)
 //==============================================================================
 TimelineView::TimelineView(TrackManager& tm) : trackManager(tm)
 {
+    // paint() が fillAll で全面を塗るため不透明 (GPU コンポジットのブレンドを省く)。
+    setOpaque(true);
+
     // ルーラーのシーククリックを TimelineView → MainComponent へ伝達
     ruler.onSeek = [this](double seconds)
     {
@@ -926,6 +929,17 @@ bool TimelineView::isClipInSelection(const AudioClip* clip) const
     if (selectedClip.clip == clip) return true;
     for (auto& r : extraSelections) if (r.clip == clip) return true;
     return false;
+}
+
+void TimelineView::repaintTimeRange(double startSec, double endSec)
+{
+    // setPlayheadPosition と同じ座標系 (positionToX = コンテンツ x = コンポーネント x)。
+    // 縦は全トラック行を覆う full height、横は対象範囲だけに絞る。
+    const int x1 = (int) positionToX(startSec) - 2;
+    const int x2 = (int) positionToX(endSec)   + 3;
+    const int left = juce::jmin(x1, x2);
+    const int w    = juce::jmax(1, juce::jmax(x1, x2) - left);
+    repaint(left, 0, w, getHeight());
 }
 
 void TimelineView::repaintRecordingArea()

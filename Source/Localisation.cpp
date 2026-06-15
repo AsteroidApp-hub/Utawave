@@ -243,6 +243,7 @@ static const char* const englishTranslations =
     "\"再生中バックグラウンド録音 (遡及録音 Cmd+Shift+R で確定)\" = \"Background recording while playing (commit retrospective with Cmd+Shift+R)\"\n"
     "\"録音をデバイスのレイテンシ分だけ自動で手前にずらす\" = \"Auto-compensate recording latency reported by the device\"\n"
     "\"追加の録音補正 (ms, +で手前へ)\" = \"Extra recording offset (ms, + = earlier)\"\n"
+    "\"入力モニター中、トラックの INS (インサート FX) を返し音にも通す\" = \"Run the track's INS (insert FX) on the input-monitor return too\"\n"
     "\"インポート時にラウドネスを上記ターゲットへ自動調整\" = \"Auto-adjust loudness to the target above on import\"\n"
     "\"ピーク超過時に内部で減衰させて書き出す (クリッピング防止)\" = \"Attenuate on peak overshoot when exporting (prevents clipping)\"\n"
     "\"デフォルトに戻す\" = \"Restore Defaults\"\n"

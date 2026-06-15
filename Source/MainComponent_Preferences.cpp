@@ -26,6 +26,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
         juce::ToggleButton recCompBtn;          // 録音レイテンシ自動補正 (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton monInsBtn;           // 入力モニターに INS を通す (アプリ全体設定。初期状態は showPreferences 側)
         juce::Label        recCompOffsetLabel;
         juce::Slider       recCompOffsetSlider; // 追加の手動オフセット (ms)
         juce::Label        exportLabel, startupLabel;
@@ -53,6 +54,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onShowAdsChanged;
         std::function<void(bool)>  onRecCompChanged;
         std::function<void(double)> onRecCompOffsetChanged;
+        std::function<void(bool)>  onMonInsChanged;
         std::function<void()>      onResetDefaults;
 
         PrefsDlg(int curBits, bool curFollowSel, bool curRetro, bool curRtz,
@@ -191,6 +193,16 @@ void MainComponent::showPreferences()
                 if (onRecCompOffsetChanged) onRecCompOffsetChanged(recCompOffsetSlider.getValue());
             };
             addAndMakeVisible(recCompOffsetSlider);
+
+            // 入力モニターに INS (インサート FX) を通すか (アプリ全体設定。初期状態は showPreferences 側)。
+            // 空チェーンのトラックでは無影響。歌枠/配信で生声に EQ/Comp を掛けながら歌うための機能。
+            monInsBtn.setButtonText(
+                tr(u8"入力モニター中、トラックの INS (インサート FX) を返し音にも通す"));
+            monInsBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            monInsBtn.onClick = [this] {
+                if (onMonInsChanged) onMonInsChanged(monInsBtn.getToggleState());
+            };
+            addAndMakeVisible(monInsBtn);
 
             // 自動保存: 無効 + 5 分刻み (5/10/15/20/25/30)
             // ID = minutes + 1 (無効=1, 5分=6, ...)
@@ -397,6 +409,7 @@ void MainComponent::showPreferences()
             recCompBtn.setBounds(14, y, w - 28, 24); y += 26;
             recCompOffsetLabel.setBounds(14, y, 250, 24);
             recCompOffsetSlider.setBounds(270, y, w - 270 - 14, 24); y += 34;
+            monInsBtn.setBounds(14, y, w - 28, 24); y += 32;
             autoSaveLabel.setBounds(14, y, w - 28, 22); y += 26;
             autoSaveCombo.setBounds(14, y, w - 28, 26); y += 32;
             backupCountLabel.setBounds(14, y, w - 28, 22); y += 26;
@@ -623,6 +636,13 @@ void MainComponent::showPreferences()
                                                 appPrefs.recLatencyManualMs);
         };
     }
+    // 入力モニターに INS を通す (アプリ全体設定)。即時保存 + モニタ状態を再同期して即反映。
+    dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
+    dlg->onMonInsChanged = [this](bool v) {
+        appPrefs.monitorThroughInserts = v;
+        appPrefs.save();
+        syncInputMonitorStateToEngine();   // 返しのチェーン経路 (setMonitorChain) を即切替
+    };
     dlg->onResetDefaults = [this, dlg]
     {
         // AppSettings の各フィールドをデフォルト値 (構造体の初期化子) に揃える
@@ -655,17 +675,20 @@ void MainComponent::showPreferences()
         appPrefs.midiPagingEnabled  = defPrefs.midiPagingEnabled;
         appPrefs.recLatencyAutoComp = defPrefs.recLatencyAutoComp;
         appPrefs.recLatencyManualMs = defPrefs.recLatencyManualMs;
+        appPrefs.monitorThroughInserts = defPrefs.monitorThroughInserts;
         appPrefs.save();
         menuItemsChanged();
         applyMidiPagingToOpenEditors();
         audioEngine.setRecordingLatencyComp(appPrefs.recLatencyAutoComp,
                                             appPrefs.recLatencyManualMs);
+        syncInputMonitorStateToEngine();   // モニタ FX 経路を既定 (ON) に戻す
         dlg->showMidiExportBtn.setToggleState(appPrefs.showMidiExportMenu, juce::dontSendNotification);
         dlg->midiPagingBtn.setToggleState(appPrefs.midiPagingEnabled, juce::dontSendNotification);
         if (AppPreferences::adsCompiledIn())
             dlg->showAdsBtn.setToggleState(appPrefs.showAds, juce::dontSendNotification);
         dlg->recCompBtn.setToggleState(appPrefs.recLatencyAutoComp, juce::dontSendNotification);
         dlg->recCompOffsetSlider.setValue(appPrefs.recLatencyManualMs, juce::dontSendNotification);
+        dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
 
         // ダイアログの UI を新しい値に同期
         dlg->syncUiToValues(appSettings.resampleOutputBits,

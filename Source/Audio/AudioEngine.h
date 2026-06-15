@@ -225,6 +225,11 @@ public:
     void setAnyTrackRecArmed(bool b)      { anyTrackRecArmed.store(b); }
     // モニター返しに掛けるリバーブ量 (0..1)。モニター中トラックの Rev を反映。録音には焼かない。
     void setMonitorReverbSend(float v)    { monitorReverbSend.store(juce::jlimit(0.0f, 1.0f, v)); }
+    // 入力モニターの返し音に通す INS チェーン (主モニタトラックのチェーン)。nullptr / 空チェーン
+    // なら従来のドライ返しのまま (空チェーンは audio thread でスキップ)。チェーンの所有は Track 側で、
+    // Track 破棄 (= clearPlayback) 時に空 config を drain 公開して audio が手放すまで待つ
+    // (チェーンのダングリング防止バリア)。停止中モニタでも叩けるよう現 SR/blockSize で prepare する。
+    void setMonitorChain(class PluginChain* chain);
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -350,9 +355,10 @@ private:
     void applyTrackDelay(std::vector<TrackDelay>& delays, int trackIdx,
                          juce::AudioBuffer<float>& trackBuf, int numSamples);
     // 入力モニターの返しを出力へミックス (ドライ + モニターリバーブ)。録音には焼かない。
+    // monChain が非 null かつ非空なら、返し音をそのチェーンに通す (INS をライブに掛ける)。
     void mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
                             float* const* outputChannelData, int numOutputChannels,
-                            int numSamples);
+                            int numSamples, class PluginChain* monChain);
     // UI スレッド読み出し用 (preparePlayback の autoCrossfade / zeroCrossingFade)。
     AppSettings               appSettings;
     // audio スレッド読み出し用スナップショット (メトロノーム区間が bpmChanges/meterChanges の vector を
@@ -484,6 +490,24 @@ private:
     std::vector<std::shared_ptr<const RecordingConfig>> retiredRecConfigs;
     void publishRecConfig(std::shared_ptr<const RecordingConfig> next, bool drain);
     void sweepRetiredRecConfigs();
+
+    // ── モニター FX チェーン公開 (入力モニターの返しに INS を通す) ──
+    // 主モニタトラックの PluginChain* を不変 config にまとめ、shared_ptr を monConfigLock
+    // (極小 SpinLock) 下で差し替える (recConfig と同じ作法)。audio thread はブロック先頭で
+    // 1 回 grab するだけ。チェーンの所有は Track 側。Track 破棄を伴う clearPlayback() が空
+    // config を drain 公開し、audio が旧 config を手放すまで待つ (チェーンの UAF 防止バリア)。
+    struct MonitorConfig
+    {
+        class PluginChain* chain { nullptr };
+    };
+    std::shared_ptr<const MonitorConfig>              activeMonConfig;
+    juce::SpinLock                                    monConfigLock;
+    std::vector<std::shared_ptr<const MonitorConfig>> retiredMonConfigs;
+    void publishMonConfig(std::shared_ptr<const MonitorConfig> next, bool drain);
+    void sweepRetiredMonConfigs();
+    // モニター FX 経由用スクラッチ (audioDeviceAboutToStart で確保・audio thread 専用)。
+    juce::AudioBuffer<float> monitorChainBuf;
+    juce::MidiBuffer         monitorMidiScratch;
     std::atomic<bool>                             inputMonitoringActive { false };
     std::atomic<bool>                             anyTrackRecArmed      { false };
     // setRecordingActive(true) 以降に recordingTarget へ書き込んだサンプル累計

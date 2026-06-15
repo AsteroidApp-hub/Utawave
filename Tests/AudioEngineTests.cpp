@@ -22,11 +22,43 @@
 #include "../Source/Tracks/TrackManager.h"
 #include "../Source/Tracks/Track.h"
 #include "../Source/Tracks/AudioClip.h"
+#include "../Source/VST/PluginChain.h"
 
 namespace
 {
 constexpr double kSR    = 48000.0;
 constexpr int    kBlock = 512;
+
+// 一定ゲインを掛けるだけの最小スタブプラグイン (モニタ FX 経路の検証用)。
+// 信号がチェーンを通ったか (= ゲインが乗ったか) を出力ピークで判定できる。
+class GainFakePlugin : public juce::AudioPluginInstance
+{
+public:
+    explicit GainFakePlugin(float g)
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())),
+          gain(g) {}
+    float gain { 1.0f };
+    const juce::String getName() const override            { return "Gain"; }
+    void prepareToPlay(double, int) override               {}
+    void releaseResources() override                       {}
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override { b.applyGain(gain); }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override           { return 0.0; }
+    bool acceptsMidi() const override                      { return false; }
+    bool producesMidi() const override                     { return false; }
+    juce::AudioProcessorEditor* createEditor() override    { return nullptr; }
+    bool hasEditor() const override                        { return false; }
+    int getNumPrograms() override                          { return 1; }
+    int getCurrentProgram() override                       { return 0; }
+    void setCurrentProgram(int) override                   {}
+    const juce::String getProgramName(int) override        { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override  {}
+    void setStateInformation(const void*, int) override    {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
 
 // audioDeviceAboutToStart に渡す最小スタブ。SR / buffer size / チャンネル構成だけを返す。
 struct FakeAudioIODevice : public juce::AudioIODevice
@@ -132,6 +164,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testDeferredDestructionRebuild();
         testRecordingLatencyComp();
         testRecordingWriteGate();
+        testMonitorThroughInserts();
 
         tempDir.deleteRecursively();
     }
@@ -439,6 +472,109 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         tw.reset();
         bg.stopThread(2000);
         expect(wav.existsAsFile() && wav.getSize() > 0, "recorded file has data");
+    }
+
+    // 入力モニターの返しがトラックの INS チェーンを尊重すること (Phase A の回帰テスト)。
+    // ゲイン×2 のスタブプラグインで「信号がチェーンを通ったか」を出力ピークで判定する。
+    void testMonitorThroughInserts()
+    {
+        beginTest("input monitoring honours the track INS chain (FX on the live return)");
+
+        // 入力 const を流して全ブロックの L ピークを返すローカルヘルパ (停止 / 再生どちらでも)。
+        auto runWithInput = [](AudioEngine& eng, int n, float inVal) -> float
+        {
+            juce::AudioBuffer<float> out(2, kBlock), in(1, kBlock);
+            juce::FloatVectorOperations::fill(in.getWritePointer(0), inVal, kBlock);
+            const float* ins[1] = { in.getReadPointer(0) };
+            float peak = 0.0f;
+            for (int i = 0; i < n; ++i)
+            {
+                out.clear();
+                float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+                eng.audioDeviceIOCallbackWithContext(ins, 1, chans, 2, kBlock, {});
+                peak = juce::jmax(peak, out.getMagnitude(0, 0, kBlock));
+            }
+            return peak;
+        };
+
+        // ── (1) ドライモニタ: チェーン未設定なら入力がそのまま返る (~0.25) ──
+        {
+            Scene s;
+            auto* t = s.tm->addTrack({}, false);   // 空トラック (クリップ無し)
+            t->setVolume(0.0f); t->setPan(0.0f);
+            s.start();                              // 停止中 (play しない)
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+            s.engine.setMonitorChain(nullptr);
+            const float peak = runWithInput(s.engine, 4, 0.25f);
+            expect(std::abs(peak - 0.25f) < 0.01f, "dry monitor returns input unchanged (~0.25)");
+        }
+
+        // ── (2) FX モニタ: ゲイン×2 を通すと返しが ~0.5 になる ──
+        {
+            Scene s;
+            auto* t = s.tm->addTrack({}, false);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            t->getPluginChain().addPlugin(std::make_unique<GainFakePlugin>(2.0f));
+            s.start();
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+            s.engine.setMonitorChain(&t->getPluginChain());
+            const float peak = runWithInput(s.engine, 4, 0.25f);
+            expect(std::abs(peak - 0.5f) < 0.01f, "INS (gain x2) is applied to the monitor return (~0.5)");
+        }
+
+        // ── (3) 逃げ道: プラグインがあっても setMonitorChain(nullptr) ならドライに戻る ──
+        // (環境設定 monitorThroughInserts=false 相当の経路)
+        {
+            Scene s;
+            auto* t = s.tm->addTrack({}, false);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            t->getPluginChain().addPlugin(std::make_unique<GainFakePlugin>(2.0f));
+            s.start();
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+            s.engine.setMonitorChain(nullptr);
+            const float peak = runWithInput(s.engine, 4, 0.25f);
+            expect(std::abs(peak - 0.25f) < 0.01f,
+                   "monitor chain off: dry return even with a plugin present (~0.25)");
+        }
+
+        // ── (4) 二重処理ガード: 再生中、モニタ対象トラックのクリップはチェーンを通さない ──
+        // クリップ 0.25 + ゲイン×2。4a: モニタ OFF → 再生がチェーンを通り 0.5。
+        // 4b: モニタ ON (対象=このトラック) + 入力無音 → クリップはチェーンを通らず dry 0.25
+        // (ガードが無いと再生で 1 回 + モニタで 1 回 = 同一インスタンス二重処理になる)。
+        {
+            auto wav = tempDir.getChildFile("mon_clip.wav");
+            expect(writeMonoConstWav(wav, (int)kSR, 0.25f), "source write");
+
+            // 4a: モニタ OFF → 再生クリップにチェーンが掛かる
+            {
+                Scene s;
+                auto* t = s.addConstTrack(wav, 1.0);
+                t->getPluginChain().addPlugin(std::make_unique<GainFakePlugin>(2.0f));
+                s.start();
+                s.engine.play();
+                float pl = 0, pr = 0;
+                runBlocks(s.engine, 10, &pl, &pr);
+                expect(std::abs(pl - 0.5f) < 0.01f, "monitor off: clip plays through the chain (x2 ~0.5)");
+            }
+
+            // 4b: モニタ ON (対象トラック) + 入力無音 → クリップはチェーンを通らず dry
+            {
+                Scene s;
+                auto* t = s.addConstTrack(wav, 1.0);
+                t->getPluginChain().addPlugin(std::make_unique<GainFakePlugin>(2.0f));
+                s.start();
+                s.engine.setInputMonitoringActive(true);
+                s.engine.setMonitorReverbSend(0.0f);
+                s.engine.setMonitorChain(&t->getPluginChain());
+                s.engine.play();
+                const float peak = runWithInput(s.engine, 12, 0.0f);
+                expect(std::abs(peak - 0.25f) < 0.01f,
+                       "monitor target: clip bypasses the chain during playback (no double-process ~0.25)");
+            }
+        }
     }
 };
 

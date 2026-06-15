@@ -244,22 +244,47 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
             }
             else
             {
-                // 巨大クリップ (キャッシュ上限超え): 可視範囲だけを物理解像度の一時 Image に
-                // 描いて、キャッシュ経路と同じ blit で貼る。直描画と blit で見た目 (エッジの
-                // 出方=色の濃さ) が変わり「拡大すると活性化したように色が変わる」のを防ぐため、
-                // どの幅でも常に「Image を blit」に統一する。
-                const auto clipB = g.getClipBounds();
-                const int vx0 = juce::jmax(wfRect.getX(),     clipB.getX());
-                const int vx1 = juce::jmin(wfRect.getRight(), clipB.getRight());
+                // 巨大クリップ (キャッシュ上限超え): 毎ペイント fillPath で描き直すと、JUCE の CALayer は
+                // drawsAsynchronously のため CA::Transaction::commit がメインスレッドでその完了を待ち、
+                // 重い波形描画で数百 ms 固まる (再生バーのカクツキ)。可視範囲スライスを per-clip Image に
+                // キャッシュして blit にし、スクロール/ズーム/内容が変わった時だけ再生成する。可視範囲は
+                // コンポーネント全幅でクランプ (プレイヘッド帯 g.getClipBounds() では無い) ので、再生バーが
+                // 動いても毎フレーム同じキー = キャッシュヒット = blit のみ → CA コミットの待ちが消える。
+                auto& cache = clip.getWaveformCache();
+                const auto comp = getLocalBounds();
+                const int vx0 = juce::jmax(wfRect.getX(),     comp.getX());
+                const int vx1 = juce::jmin(wfRect.getRight(), comp.getRight());
                 if (vx1 > vx0)
                 {
                     const int vW = vx1 - vx0;
                     const int sW = juce::jmax(1, juce::roundToInt(vW    * pixelScale));
                     const int sH = juce::jmax(1, juce::roundToInt(needH * pixelScale));
-                    juce::Image tmp(juce::Image::ARGB, sW, sH, true);
+                    const juce::uint32 colourArgb = wfColour.getARGB();
+                    const juce::int64  samplesDone = clip.getThumbnail().getNumSamplesFinished();
+                    const bool dirty =
+                           cache.bigVisX0 != vx0 || cache.bigVisX1 != vx1
+                        || cache.bigHeight != needH
+                        || cache.bigScrollX != scrollX
+                        || cache.bigPixelsPerBeat != pixelsPerBeat
+                        || cache.bigBpm != bpm
+                        || cache.bigFileOffset != fo
+                        || cache.bigGain != clip.getGain()
+                        || cache.bigVZoom != waveformZoom
+                        || cache.bigColourARGB != colourArgb
+                        || cache.bigSamplesFinished != samplesDone
+                        || cache.bigPixelScale != pixelScale
+                        || !cache.bigImage.isValid()
+                        || cache.bigImage.getWidth() != sW || cache.bigImage.getHeight() != sH;
+                    if (dirty)
                     {
-                        juce::Graphics ig(tmp);
-                        // 可視範囲 [vx0, vx1) に対応するファイル時刻範囲を求めて描く
+                        cache.bigVisX0 = vx0; cache.bigVisX1 = vx1; cache.bigHeight = needH;
+                        cache.bigScrollX = scrollX; cache.bigPixelsPerBeat = pixelsPerBeat; cache.bigBpm = bpm;
+                        cache.bigFileOffset = fo; cache.bigGain = clip.getGain(); cache.bigVZoom = waveformZoom;
+                        cache.bigColourARGB = colourArgb; cache.bigSamplesFinished = samplesDone;
+                        cache.bigPixelScale = pixelScale;
+                        cache.bigImage = juce::Image(juce::Image::ARGB, sW, sH, true);
+                        juce::Graphics ig(cache.bigImage);
+                        // 可視範囲 [vx0, vx1) に対応するファイル時刻範囲を求めて Image 全体に描く
                         const double pxPerSec     = pixelsPerBeat * (bpm / 60.0);
                         const double fileStartVis = fo + ((vx0 + scrollX) / pxPerSec
                                                           - clip.getStartPosition());
@@ -268,7 +293,7 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                                          fileStartVis, durVis, verticalZoom, wfColour);
                     }
                     g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
-                    g.drawImageTransformed(tmp,
+                    g.drawImageTransformed(cache.bigImage,
                         juce::AffineTransform::scale((float) vW    / (float) sW,
                                                      (float) needH / (float) sH)
                             .translated((float) vx0, (float) wfRect.getY()));

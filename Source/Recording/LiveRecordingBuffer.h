@@ -80,13 +80,22 @@ public:
 
         g.setColour(colour.withAlpha(0.85f));
 
+        // 可視範囲 (現在のクリップ矩形) と交差する px 列だけを組み立てる。bounds は録音全長ぶんの
+        // 幅を持つ (画面外まで伸びる) ので、全幅を毎回 0..width で組むと録音が長くなるほど線形に
+        // 重くなり、20Hz の再描画でメッセージスレッドが詰まる (再生バー/ライブ波形のカクツキ)。
+        // クリップ域に絞ることで、組み立てるパスは録音長に依存せずビューポート幅で頭打ちになる。
+        const auto clipB = g.getClipBounds();
+        const int pxStart = juce::jmax(0, clipB.getX() - bounds.getX());
+        const int pxEnd   = juce::jmin(bounds.getWidth(), clipB.getRight() - bounds.getX());
+        if (pxEnd <= pxStart) return;
+
         // 1px 毎に drawLine を呼ぶと長尺で UI が詰まるので、
         // 全列を 1 つの Path に積んでから strokePath で一括描画する。
         juce::Path wavePath;
-        wavePath.preallocateSpace(bounds.getWidth() * 3);
+        wavePath.preallocateSpace((pxEnd - pxStart) * 3);
         const float cyF = (float) bounds.getCentreY();
         const float boundsH = (float) bounds.getHeight();
-        for (int px = 0; px < bounds.getWidth(); ++px)
+        for (int px = pxStart; px < pxEnd; ++px)
         {
             double p0 = startPeak + px * peaksPerPixel;
             double p1 = p0 + peaksPerPixel;

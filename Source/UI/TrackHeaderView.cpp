@@ -20,6 +20,10 @@ juce::String shortenPluginName(const juce::String& full)
 
 TrackHeaderView::TrackHeaderView(Track& t) : track(t)
 {
+    // paint() が fillAll で全面を塗るため不透明。CoreAnimation のブレンド合成を省いて
+    // GPU コンポジットを軽くする (トラック数に比例して効く → 多トラック時のカクツキ低減)。
+    setOpaque(true);
+
     // ── トラック名 ──
     nameLabel.setText(track.getName(), juce::dontSendNotification);
     nameLabel.setFont(juce::FontOptions(13.0f));  // 少し大きく

@@ -1077,6 +1077,10 @@ void MainComponent::onVBlank (double timestampSec)
     }
     else
     {
+        // 実位置 (rawPos) が後退したか。後方シーク / ループラップの判定に使う
+        // (rawPos はサンプルカウンタなので、後退は本物のジャンプ時のみ起きる)。
+        const bool rawWentBackward = rawPos < lastRawPlayheadPos - 0.001;
+
         // ループラップの実検出: ループ末尾付近 → ループ頭付近への後退ジャンプのみを
         // ラップとみなす (単なる後方シークでは誤発火させない)
         if (loopActive && loopEndSecs > loopStartSecs + 0.001
@@ -1090,10 +1094,18 @@ void MainComponent::onVBlank (double timestampSec)
         const double dt = juce::jlimit(0.0, 0.1, timestampSec - lastPlayheadWallSec);
         smoothedPlayhead += dt;                  // 再生速度 1.0 で前進
         const double err = rawPos - smoothedPlayhead;
-        if (std::abs(err) > 0.10)
-            smoothedPlayhead = rawPos;           // シーク/ループ/大ズレはスナップ
+        // スナップは「実位置が飛んだ」時だけ: 前方ジャンプ (前方シーク) か、後方ジャンプ
+        // (後方シーク / ループラップ = rawPos が実際に後退) のみ。それ以外で smoothed が
+        // rawPos を追い越して err が大きく負になるのは「rawPos が一瞬止まっただけ」
+        // (オーディオコールバックの一瞬の遅延・ファイル読み出しの詰まり等) なので、後方
+        // スナップで戻さず緩く再収束させる。これで「数秒に1回バーが一瞬戻って止まる」
+        // 視覚的ヒッチを防ぐ (壁時計前進は続くのでバーは滑らかに流れたまま)。
+        if (err > 0.10 || (err < -0.10 && rawWentBackward))
+            smoothedPlayhead = rawPos;           // 本物のシーク / ループ → スナップ
+        else if (err < 0.0)
+            smoothedPlayhead += err * 0.04;      // 追い越し (詰まり) → ゆっくり再収束・戻さない
         else
-            smoothedPlayhead += err * 0.12;      // ゆるく真値へ追従 (ドリフト防止)
+            smoothedPlayhead += err * 0.12;      // 通常の前方追従 (ドリフト防止)
     }
     lastPlayheadWallSec = timestampSec;
 
@@ -1143,6 +1155,7 @@ void MainComponent::syncInputMonitorStateToEngine()
     bool  anyMonitoring = false;
     bool  anyRecArmed   = false;
     float monRev        = 0.0f;   // モニター中トラックの Rev (複数なら最大)
+    PluginChain* monChain = nullptr;   // 主モニタトラック (先頭の input-monitor) の INS チェーン
     for (int i = 0; i < trackManager.getTrackCount(); ++i)
     {
         auto* t = trackManager.getTrack(i);
@@ -1151,12 +1164,16 @@ void MainComponent::syncInputMonitorStateToEngine()
         {
             anyMonitoring = true;
             monRev = juce::jmax(monRev, t->getReverbSend());
+            if (monChain == nullptr)   // 先頭の input-monitor トラックを FX の主対象にする
+                monChain = &t->getPluginChain();
         }
         if (t->isRecArmed()) anyRecArmed = true;
     }
     audioEngine.setInputMonitoringActive(anyMonitoring);
     audioEngine.setAnyTrackRecArmed(anyRecArmed);
     audioEngine.setMonitorReverbSend(monRev);
+    // 返し音に INS を通すか (アプリ全体設定)。OFF のときはドライ返しのまま (nullptr を渡す)。
+    audioEngine.setMonitorChain(appPrefs.monitorThroughInserts ? monChain : nullptr);
 }
 
 void MainComponent::syncClickTrackToEngine()
@@ -1592,7 +1609,11 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* src)
     {
         if (&c.getThumbnail() != src) return true;  // 続行
         c.invalidateWaveformCache();
-        timelineView.repaint();
+        // 全面 repaint をやめ、変わったクリップの時間範囲だけを部分 repaint する。
+        // 全面だと画面内の巨大クリップ全体を drawClipWaveform→fillPath で描き直し、
+        // デコード進捗ごと (数秒おき) に約 250ms メッセージスレッドが固まる (再生バーが一瞬停止)。
+        timelineView.repaintTimeRange(c.getStartPosition(),
+                                      c.getStartPosition() + c.getDuration());
         if (c.getThumbnail().isFullyLoaded())
             c.getThumbnail().removeChangeListener(this);
         // ロード残数の進捗を更新 (完了で「完了」メッセージ)
