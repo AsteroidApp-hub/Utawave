@@ -32,7 +32,7 @@ jobs:
 
       - name: Build (Release)
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUTAWAVE_CRASH_REPORT_URL="${{ vars.UTAWAVE_CRASH_REPORT_URL }}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUTAWAVE_CRASH_REPORT_URL="${{ vars.UTAWAVE_CRASH_REPORT_URL }}" -DUTAWAVE_ADS_ENABLED=ON -DUTAWAVE_AD_FEED_URL="https://utawave.com/ads/feed.json"
           cmake --build build --config Release --target Utawave
 
       - name: Locate .app
@@ -146,7 +146,7 @@ jobs:
 
       - name: Build (Release)
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUTAWAVE_CRASH_REPORT_URL="${{ vars.UTAWAVE_CRASH_REPORT_URL }}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUTAWAVE_CRASH_REPORT_URL="${{ vars.UTAWAVE_CRASH_REPORT_URL }}" -DUTAWAVE_ADS_ENABLED=ON -DUTAWAVE_AD_FEED_URL="https://utawave.com/ads/feed.json"
           cmake --build build --config Release --target Utawave
 
       - name: Stage unsigned exe
