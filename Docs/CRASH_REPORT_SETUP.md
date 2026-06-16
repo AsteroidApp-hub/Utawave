@@ -10,7 +10,7 @@
    `~/Library/Logs/Utawave/crash-YYYYMMDD_HHMMSS.log` に保存（送信はしない）
    - **Windows**: 例外コード（例 `0xC0000005 (EXCEPTION_ACCESS_VIOLATION)`）・発生アドレス・
      AV の read/write 種別と対象アドレスも記録。バックトレースは**全フレームを
-     「モジュール名 + RVA」形式**（例 `Utawave.exe + 0x1a2b3c` / `Melodyne.vst3 + 0x...`）で
+     「モジュール名 + RVA」形式**（例 `Utawave.exe + 0x1a2b3c` / `SomePlugin.vst3 + 0x...`）で
      出力するため、シンボルが無くても本体かプラグイン DLL かを即判別でき、保管した PDB で
      関数・行番号へオフライン解決できる（下記「PDB の保管と解決」）
    - **macOS / Linux**: シグナル番号（例 `signal: 11 (SIGSEGV)`）を記録
@@ -62,7 +62,7 @@ Windows の Release ビルドでは `Utawave.exe` の隣に **`Utawave.pdb`** �
 llvm-symbolizer --obj=Utawave.exe --relative-address 0x1a2b3c
 ```
 
-（Visual Studio / WinDbg でも可。プラグイン DLL 内のフレーム（例 `Melodyne.vst3 + 0x...`）は
+（Visual Studio / WinDbg でも可。プラグイン DLL 内のフレーム（例 `SomePlugin.vst3 + 0x...`）は
 プラグインベンダーのシンボルが無い限り解決できないが、「プラグイン内で落ちた」事実は
 モジュール名だけで確定する）
 

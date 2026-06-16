@@ -1,8 +1,9 @@
 # リリース手順 / Release Guide
 
 配布物（macOS / Windows のビルド済みアプリ）は **公式サイト (utawave.com)** で公開します。
-署名 (macOS: Developer ID + 公証 / Windows: SignPath) を付けるため、**配布ビルドは GitHub Actions
-(手動発火) で行います**。署名済み zip は **GitHub Releases（アプリ repo `AsteroidApp-hub/Utawave`）へ
+署名 (macOS: Developer ID + 公証 = **設定済み・有効** / Windows: SignPath = **未設定 = 現状未署名**) を
+付けるため、**配布ビルドは GitHub Actions (手動発火) で行います**。zip は **GitHub Releases（アプリ
+repo `AsteroidApp-hub/Utawave`）へ
 アップロード**し、**公式サイト (utawave.com) の `download.html` から、その Release アセットへ直リンク**する。
 サイトリポジトリ (Utawave-Site) には**バイナリを置かない**（zip は GitHub が配信。容量上限や repo 履歴の
 肥大を気にせず済む）。
@@ -12,8 +13,10 @@
 > 溜まり SEO 上の不利も無い。
 
 > **署名のセットアップ**は `Docs/MACOS_SIGNING_SETUP.md` (Apple) と `Docs/WINDOWS_SIGNING_SETUP.md`
-> (SignPath) を参照。必要な GitHub Secrets / Variables が未登録のうちは、macOS は ad-hoc (未署名)
-> ビルドのまま zip 化されます。
+> (SignPath) を参照。**macOS は署名 + 公証の Secrets を登録済みで、CI が自動で署名 + 公証 + ステープル
+> します**（成果物はそのままダブルクリックで起動可能）。**Windows は SignPath を未設定のため現状は
+> 未署名 exe** を zip 化します（ASIO 対応は有効）。SignPath を設定すれば次回実行から署名されます。
+> なお Secrets 未登録の環境 (fork 等) では macOS も自動で ad-hoc (未署名) にフォールバックします。
 >
 > **ASIO 対応の Windows 版も CI で作れます**: 再配布制限のある ASIO SDK は public repo に置けないため、
 > **非公開 repo `AsteroidApp-hub/utawave-asiosdk`** に置き、CI が read-only deploy key (secret
@@ -67,12 +70,15 @@ zip のファイル名にはバージョン + アーキテクチャを含めま�
 
 1. GitHub の **Actions タブ → "Release Build (macOS + Windows)" → Run workflow**。
 2. **version** に今回のバージョン（例 `0.1.0`）を入力して実行。
-3. Windows は SignPath 署名で**承認待ちになる**ので、SignPath.io で署名要求を**承認**する。
+3. macOS は自動で署名 + 公証 + ステープルされる（追加操作なし）。
+   **Windows は現状 SignPath 未設定のため未署名のまま完了する**（SignPath を設定済みの場合のみ、
+   SignPath.io で署名要求を**承認**する）。
 4. 完了後、ワークフローの成果物 (Artifacts) から以下の 2 つの zip をダウンロード:
-   - `Utawave-<version>-macOS-arm64`（署名 + 公証済み / 未設定時は ad-hoc）
-   - `Utawave-<version>-Windows-x64`（SignPath 署名済み exe を zip 化済み）
+   - `Utawave-<version>-macOS-arm64`（**署名 + 公証済み** / Secrets 未登録の fork 等では ad-hoc）
+   - `Utawave-<version>-Windows-x64`（**現状は未署名** exe を zip 化 / SignPath 設定後は署名済み。ASIO 対応）
 
-> 両 zip ともライセンス類（LICENSE / THIRD_PARTY_LICENSES.txt / MANUAL.html / README.md / README.ja.md）を同梱済み。
+> 両 zip とも利用者向けドキュメント（LICENSE.txt / THIRD_PARTY_LICENSES.txt / MANUAL.html / README.txt）を同梱済み。
+> **同梱物は利用者がそのまま開けるよう .txt / .html のみ**（`.md` は配布しない。`README.txt` は `Docs/README.txt`、`LICENSE.txt` は `LICENSE` をリネームしたもの）。
 > ローカルでの再パッケージは不要。
 
 > **Windows の `Utawave.pdb` を必ず保管すること**: Release ビルドでは exe の隣に PDB が生成される。
@@ -142,8 +148,8 @@ CI やトークンは不要で、push すると Cloudflare Pages が自動デプ
 
 > 本リリースは AGPL-3.0-or-later で配布されます。対応するソースコードは同じタグのリポジトリです
 > （同梱ライブラリのライセンスは THIRD_PARTY_LICENSES.txt を参照）。
-> macOS 署名 + 公証が未設定 (ad-hoc) のうちは、初回は Finder で右クリック →「開く」で起動してください
-> （公証が有効になればこの注記は不要）。
+> macOS 版は署名 + 公証済みなので、ダウンロード後そのままダブルクリックで起動できます。
+> Windows 版は現状未署名のため、初回のみ SmartScreen で「詳細情報 → 実行」が必要です。
 
 ---
 
@@ -166,7 +172,9 @@ cmake --build build-win --config Release
 $exe = Get-ChildItem -Path build-win -Recurse -Filter Utawave.exe | Select-Object -First 1
 New-Item -ItemType Directory -Force -Path Utawave-Windows | Out-Null
 Copy-Item $exe.FullName Utawave-Windows/
-Copy-Item LICENSE,THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,README.md,README.ja.md Utawave-Windows/
+# 同梱物は利用者がそのまま開ける .txt / .html のみ (LICENSE は LICENSE.txt にリネーム)
+Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
+Copy-Item LICENSE Utawave-Windows/LICENSE.txt
 Compress-Archive -Path Utawave-Windows -DestinationPath Utawave-0.1.0-win64-asio.zip -Force
 
 # クラッシュレポート解決用に exe + PDB のペアを保管する (zip には入れない)

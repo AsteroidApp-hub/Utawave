@@ -83,7 +83,10 @@ jobs:
         run: |
           mkdir -p Utawave-macOS
           cp -R "${{ steps.app.outputs.path }}" Utawave-macOS/
-          cp LICENSE THIRD_PARTY_LICENSES.txt Docs/MANUAL.html README.md README.ja.md Utawave-macOS/
+          # 利用者がそのまま読めるよう、同梱ドキュメントはテキスト/HTML で入れる
+          # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
+          cp THIRD_PARTY_LICENSES.txt Docs/MANUAL.html Docs/README.txt Utawave-macOS/
+          cp LICENSE Utawave-macOS/LICENSE.txt
           ditto -c -k --sequesterRsrc --keepParent Utawave-macOS "Utawave-${{ inputs.version }}-macOS.zip"
 
       - name: Upload macOS zip
@@ -93,7 +96,8 @@ jobs:
           path: Utawave-${{ inputs.version }}-macOS.zip
 
   # ──────────────────────────────────────────────────────────────
-  # Windows: ビルド → SignPath で署名 → zip
+  # Windows: ビルド → (SignPath トークンがあれば署名) → zip
+  #   現状は SIGNPATH_API_TOKEN 未登録のため署名はスキップされ、未署名 exe を zip 化する。
   #   SignPath の出所検証 (Origin Verification) のため、未署名 exe を
   #   GitHub artifact としてアップロードしてから署名要求を出す。
   # ──────────────────────────────────────────────────────────────
@@ -178,7 +182,10 @@ jobs:
           $src = if (Test-Path signed/Utawave.exe) { 'signed/Utawave.exe' } else { 'artifact/Utawave.exe' }
           New-Item -ItemType Directory -Force -Path Utawave-Windows | Out-Null
           Copy-Item $src Utawave-Windows/Utawave.exe
-          Copy-Item LICENSE,THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,README.md,README.ja.md Utawave-Windows/
+          # 利用者がそのまま読めるよう、同梱ドキュメントはテキスト/HTML で入れる
+          # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
+          Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
+          Copy-Item LICENSE Utawave-Windows/LICENSE.txt
           Compress-Archive -Path Utawave-Windows -DestinationPath "Utawave-${{ inputs.version }}-win64.zip" -Force
 
       - name: Upload Windows zip
