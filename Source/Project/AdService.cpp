@@ -296,7 +296,7 @@ std::vector<Ad> AdService::loadCache(const juce::File& dir, const juce::String& 
 }
 
 void AdService::fetch(juce::String feedUrl, juce::String lang, juce::File dir, CancelFlag cancel,
-                      std::function<void(std::vector<Ad>, bool)> cb)
+                      std::function<void(std::vector<Ad>, FetchResult)> cb)
 {
     // feedUrl / lang / dir / cancel / cb は値コピーされ、デタッチスレッドが所有する。
     // run 中に呼び出し元 (StartupComponent / AdPanel) のメンバへは一切触れない。
@@ -305,7 +305,7 @@ void AdService::fetch(juce::String feedUrl, juce::String lang, juce::File dir, C
         const auto cancelled = [&cancel] { return cancel != nullptr && cancel->load(); };
 
         std::vector<Ad> ads;
-        bool ok = false;
+        FetchResult result = FetchResult::Failed;
 
         juce::URL feed(feedUrlForLanguage(feedUrl, lang));
         if (! cancelled())
@@ -314,21 +314,31 @@ void AdService::fetch(juce::String feedUrl, juce::String lang, juce::File dir, C
             {
                 // フィード JSON は最大 1MB / 10 秒で打ち切り
                 const juce::String json = readBounded(*in, 1024 * 1024, 10000).toString();
-                // 現在言語で絞り込んでから画像 DL / キャッシュ (不要言語の画像を落とさない)
-                ads = selectAdsForLanguage(parseAds(json), lang, kMaxAds);
-                ok  = ! ads.empty();
 
-                if (ok && ! cancelled())
+                if (json.isNotEmpty())   // 本文を読めた = サーバーに到達できた (Empty/HasAds を判定)
                 {
-                    for (auto& ad : ads)
-                    {
-                        if (cancelled()) { ok = false; break; }   // 破棄されたら画像 DL を打ち切る
-                        if (ad.imageUrl.isNotEmpty())
-                            ad.image = downloadImage(ad.imageUrl, kConnectTimeoutMs);
-                    }
+                    // 現在言語で絞り込んでから画像 DL / キャッシュ (不要言語の画像を落とさない)
+                    ads    = selectAdsForLanguage(parseAds(json), lang, kMaxAds);
+                    result = ads.empty() ? FetchResult::Empty : FetchResult::HasAds;
 
-                    if (ok && ! cancelled())
-                        saveCache(dir, lang, json, ads);
+                    if (result == FetchResult::HasAds && ! cancelled())
+                    {
+                        for (auto& ad : ads)
+                        {
+                            if (cancelled()) { result = FetchResult::Failed; break; }   // 破棄されたら画像 DL を打ち切る
+                            if (ad.imageUrl.isNotEmpty())
+                                ad.image = downloadImage(ad.imageUrl, kConnectTimeoutMs);
+                        }
+
+                        if (result == FetchResult::HasAds && ! cancelled())
+                            saveCache(dir, lang, json, ads);
+                    }
+                    else if (result == FetchResult::Empty && ! cancelled())
+                    {
+                        // サーバーが「今は広告なし」を返したら直近のキャッシュを破棄する。
+                        // 最新の配信を権威とし、次回オフライン時に古い広告が蘇らないようにする。
+                        adsJsonFile(dir, lang).deleteFile();
+                    }
                 }
             }
         }
@@ -337,10 +347,10 @@ void AdService::fetch(juce::String feedUrl, juce::String lang, juce::File dir, C
             return;   // 呼び出し元が消えていれば結果は捨てる (callAsync すら投げない)
 
         // 結果はメッセージスレッドへ。cb は SafePointer で自身の生存を確認する想定。
-        juce::MessageManager::callAsync([cb, ads = std::move(ads), ok]() mutable
+        juce::MessageManager::callAsync([cb, ads = std::move(ads), result]() mutable
         {
             if (cb)
-                cb(std::move(ads), ok);
+                cb(std::move(ads), result);
         });
     });
 }

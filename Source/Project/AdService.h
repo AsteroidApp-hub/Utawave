@@ -32,15 +32,24 @@ public:
     // 打ち切る。呼び出し元が取得完了前に破棄される時に立てることで、無駄な処理を早めに止める。
     using CancelFlag = std::shared_ptr<std::atomic<bool>>;
 
+    // fetch() の結果区分。「広告 0 件の空フィード」と「取得失敗」を区別するための列挙
+    // (両者を同じ扱いにすると、サーバーが意図的に空配信した時に接続エラー文言が出てしまう)。
+    enum class FetchResult
+    {
+        HasAds,   // フィードを取得でき、表示できる広告が 1 件以上あった
+        Empty,    // サーバーには到達できたが広告が 0 件 (= 今は掲載なし。エラーではない)
+        Failed    // 接続 / 取得に失敗 (ネットワーク不通・応答なし・本文空・取得中のキャンセル)
+    };
+
     // 非同期でフィードを取得する。完了時 (またはキャンセルされなかった時) に cb を
     // 「メッセージスレッド」で 1 回呼ぶ。lang ("ja"/"en") をフィード URL に反映し、取得後も
     // その言語で絞り込んでから画像 DL / キャッシュする。
-    //   ads: 取得できた広告 (失敗時は空)
-    //   ok : 取得に成功したか (false = ネットワーク / パース失敗)
+    //   ads   : 取得できた広告 (HasAds 以外は空)
+    //   result: 取得結果 (HasAds / Empty / Failed)。Empty と Failed を呼び出し側で出し分ける
     // バックグラウンドスレッドは feedUrl / lang / cacheDir / cancel / cb を値コピーして保持するので、
     // 呼び出し元が取得完了前に破棄されても安全 (cb 側で自身の生存を SafePointer 等で確認すること)。
     static void fetch(juce::String feedUrl, juce::String lang, juce::File cacheDir, CancelFlag cancel,
-                      std::function<void(std::vector<Ad>, bool)> cb);
+                      std::function<void(std::vector<Ad>, FetchResult)> cb);
 
     // ── ネットワーク非依存のテスト可能な純関数 ──
     // JSON 文字列を広告リストへパースする ( { "ads": [...] } もしくはトップレベル配列を受理)。

@@ -555,6 +555,7 @@ static const char* const englishTranslations =
     "\"広告\" = \"Sponsored\"\n"
     "\"広告を読み込み中...\" = \"Loading ads...\"\n"
     "\"広告を読み込めませんでした\" = \"Couldn't load ads\"\n"
+    "\"現在表示できる広告はありません\" = \"No ads to show right now\"\n"
     "\"インターネット接続を確認してください\" = \"Please check your internet connection\"\n"
     "\"再読み込み\" = \"Reload\"\n"
     "\"詳しく見る ↗\" = \"Learn more ↗\"\n"

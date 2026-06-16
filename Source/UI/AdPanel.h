@@ -29,11 +29,13 @@ public:
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
-    enum class State { Loading, ShowingAds, NoData };
+    // NoAds : サーバーに到達できたが広告が 0 件 (中立表示。エラーではない)
+    // NoData: 取得に失敗しキャッシュも無い (接続エラー文言 + 再読み込みボタン)
+    enum class State { Loading, ShowingAds, NoAds, NoData };
 
     void setState(State);
     void setAds(std::vector<Ad>);
-    void onFetchDone(std::vector<Ad>, bool ok);
+    void onFetchDone(std::vector<Ad>, AdService::FetchResult);
 
     void timerCallback() override;
     void startScroll(int dir);    // +1: 次へ (上へスクロール) / -1: 前へ (下へスクロール)

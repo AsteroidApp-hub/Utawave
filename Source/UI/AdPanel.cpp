@@ -40,30 +40,38 @@ void AdPanel::load()
     cancelFlag = std::make_shared<std::atomic<bool>>(false);
     AdService::fetch(AdService::defaultFeedUrl(), lang, AdService::cacheDir(), cancelFlag,
         [safe = juce::Component::SafePointer<AdPanel>(this)]
-        (std::vector<Ad> fetched, bool ok) mutable
+        (std::vector<Ad> fetched, AdService::FetchResult result) mutable
         {
             if (auto* p = safe.getComponent())
-                p->onFetchDone(std::move(fetched), ok);
+                p->onFetchDone(std::move(fetched), result);
         });
 }
 
-void AdPanel::onFetchDone(std::vector<Ad> fetched, bool ok)
+void AdPanel::onFetchDone(std::vector<Ad> fetched, AdService::FetchResult result)
 {
     fetching = false;
 
-    // 最新が取れたらそれを表示
-    if (ok && ! fetched.empty())
+    // 最新が取れたらそれを表示 (言語フィルタ後に空なら setAds が NoAds へ)
+    if (result == AdService::FetchResult::HasAds)
     {
         setAds(std::move(fetched));
         return;
     }
 
-    // 最新が取れない時だけキャッシュ (前回の広告) にフォールバック
+    // サーバーに到達できたが広告 0 件 = 今は掲載なし。エラーではなく中立表示にする
+    // (キャッシュは fetch 側で破棄済みなのでフォールバックしない)。
+    if (result == AdService::FetchResult::Empty)
+    {
+        setState(State::NoAds);
+        return;
+    }
+
+    // Failed: 取得に失敗した時だけキャッシュ (前回の広告) にフォールバック
     auto cached = AdService::loadCache(AdService::cacheDir(), AdService::languageCode());
     if (! cached.empty())
         setAds(std::move(cached));
     else
-        setState(State::NoData);
+        setState(State::NoData);   // 接続エラー文言 + 再読み込み
 }
 
 void AdPanel::setState(State s)
@@ -80,7 +88,8 @@ void AdPanel::setAds(std::vector<Ad> newAds)
     // ja は日本語向け + 全言語向け、en (日本語以外) は英語圏向け + 全言語向けを表示。
     auto filtered = AdService::selectAdsForLanguage(std::move(newAds),
                                                     AdService::languageCode(), AdService::kMaxAds);
-    if (filtered.empty()) { setState(State::NoData); return; }
+    // データはあったが現在言語向けが 0 件 = 掲載なしと同じ中立表示 (接続エラーではない)
+    if (filtered.empty()) { setState(State::NoAds); return; }
 
     ads = std::move(filtered);
 
@@ -335,6 +344,17 @@ void AdPanel::paint(juce::Graphics& g)
         g.setColour(juce::Colour(0xff8a8f95));
         g.setFont(juce::FontOptions(13.0f));
         g.drawText(tr(u8"広告を読み込み中..."), full, juce::Justification::centred, true);
+        return;
+    }
+
+    if (state == State::NoAds)
+    {
+        // サーバーには到達できたが広告 0 件。エラーではないので中立的な案内のみ
+        // (赤系の警告色・再読み込みボタンは出さない)。
+        g.setColour(juce::Colour(0xff8a8f95));
+        g.setFont(juce::FontOptions(13.0f));
+        g.drawFittedText(tr(u8"現在表示できる広告はありません"),
+                         full.reduced(14), juce::Justification::centred, 2);
         return;
     }
 
