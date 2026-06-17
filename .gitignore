@@ -23,6 +23,10 @@
 /Utawave-macOS/
 /Utawave-*-macOS-*.zip
 
+# Windows クラッシュ解決用シンボル (PDB)。リリースごとに CI artifact から保管する (~80MB)。
+# git には入れず Dropbox バックアップのみ (手順は RELEASE.md / Docs/CRASH_REPORT_SETUP.md)。
+/Symbols/
+
 # 派生アイコン (Icon/*.png から JUCE が生成。元素材の PNG はコミットする)
 /Icon/Utawave.icns
 /Icon/Trakova.icns
