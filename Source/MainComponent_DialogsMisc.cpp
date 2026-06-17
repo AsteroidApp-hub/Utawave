@@ -707,7 +707,15 @@ void MainComponent::showExportDialog()
         if (ok)
         {
             if (options.revealAfter)
-                lastWritten.revealToUser();   // Finder/Explorer で書き出したファイル/フォルダを開く
+            {
+                // 出力先フォルダ自体を開く。書き出したファイルの親 = 出力フォルダ
+                // (stems・ミックスダウンとも全ファイルが同じ出力フォルダに入る)。
+                // revealToUser はファイルを選択表示するだけで環境によってはフォルダが
+                // 前面に来ないため、フォルダを直接開く (Finder / Explorer)。
+                auto outFolder = lastWritten.getParentDirectory();
+                if (outFolder.isDirectory())
+                    outFolder.startAsProcess();
+            }
 
             juce::AlertWindow::showAsync(juce::MessageBoxOptions()
                 .withIconType(juce::MessageBoxIconType::InfoIcon)

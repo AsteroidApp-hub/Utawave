@@ -140,6 +140,48 @@ void MainComponent::pushTrackAddUndo(Track* t, bool newTransaction)
         }));
 }
 
+void MainComponent::pushTrackDeleteUndo(std::vector<Track*> tracks)
+{
+    if (tracks.empty()) return;
+    undoManager.beginNewTransaction();
+    undoManager.perform(new EditActions::TrackDeleteAction(
+        trackManager, std::move(tracks),
+        /*willRemove*/ [this](Track* tr)
+        {
+            if (!tr) return;
+            // 開いているプラグインエディタを閉じる (pushTrackAddUndo / deleteTracks と同じ手順)
+            auto& chain = tr->getPluginChain();
+            for (int i = 0; i < chain.getNumPlugins(); ++i)
+                closePluginEditorFor(chain.getPlugin(i));
+            // このトラックの MIDI クリップを開いているピアノロールも閉じる (dangling 防止)
+            for (int wi = pianoRollWindows.size(); --wi >= 0;)
+            {
+                auto* w = pianoRollWindows[wi];
+                if (!w) continue;
+                for (int ci = 0; ci < tr->getMidiClipCount(); ++ci)
+                    if (w->getClip() == tr->getMidiClip(ci))
+                    {
+                        pianoRollWindows.remove(wi);
+                        break;
+                    }
+            }
+            // Track* / AudioClip* の参照を再生スナップショットから切る (UAF バリア)
+            audioEngine.clearPlayback();
+        },
+        /*onChange*/ [this]
+        {
+            // 削除 / 復元のたびに選択をリセットし UI と再生スナップショットを更新する
+            selectedTrackIndex = -1;
+            trackHeaderPanel.clearTrackSelection();
+            trackHeaderPanel.refresh();
+            timelineView.refresh();
+            scheduleWaveformRefresh();
+            audioEngine.invalidatePlayback();
+            if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
+            markProjectDirty();
+        }));
+}
+
 void MainComponent::pushTrackReorderUndo(std::vector<Track*> before, std::vector<Track*> after,
                                          std::vector<Track*> selected)
 {

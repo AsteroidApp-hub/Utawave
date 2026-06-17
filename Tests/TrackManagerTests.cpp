@@ -35,6 +35,7 @@ public:
         testAudioFolderSignature();
         testExtractInsertIndexOf();
         testTrackAddAction();
+        testTrackDeleteAction();
         testReorderTo();
         testTrackReorderAction();
     }
@@ -320,6 +321,62 @@ public:
         expect(action.perform(), "third redo succeeds");
         expect(action.perform() == false, "redo without a preceding undo is rejected");
     }
+    // ── TrackDeleteAction: 削除の Undo/Redo (複数・同一インスタンス復帰・元位置再構成) ──
+    void testTrackDeleteAction()
+    {
+        beginTest("TrackDeleteAction: perform deletes (multi), undo restores same instances at original positions");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        auto* a = tm.addTrack("A", false);
+        auto* b = tm.addTrack("B", true);
+        auto* c = tm.addTrack("C", false);
+        auto* d = tm.addTrack("D", false);
+        juce::ignoreUnused(a, c);
+
+        int willRemoveCount = 0, changeCount = 0;
+        std::vector<Track*> removedArgs;
+        EditActions::TrackDeleteAction action(tm, { b, d },
+            [&](Track* t) { ++willRemoveCount; removedArgs.push_back(t); },
+            [&] { ++changeCount; });
+
+        // perform → B,D が消え A,C が残る (降順削除で index ずれなし)
+        expect(action.perform(), "perform deletes the tracks");
+        expect(tm.getTrackCount() == 2, "two tracks removed");
+        expect(tm.indexOf(b) == -1 && tm.indexOf(d) == -1, "B and D are gone");
+        expect(tm.getTrack(0) == a && tm.getTrack(1) == c, "A and C remain in order");
+        expect(willRemoveCount == 2, "willRemove fired once per deleted track");
+        expect(removedArgs.size() == 2
+               && std::find(removedArgs.begin(), removedArgs.end(), b) != removedArgs.end()
+               && std::find(removedArgs.begin(), removedArgs.end(), d) != removedArgs.end(),
+               "willRemove received both deleted tracks");
+        expect(changeCount == 1, "onChange fired once for the whole delete");
+
+        // undo → 同一インスタンスが元の位置 (B=1, D=3) へ復帰し並びを再構成
+        expect(action.undo(), "undo restores the tracks");
+        expect(tm.getTrackCount() == 4, "all four tracks back");
+        expect(tm.getTrack(0) == a && tm.getTrack(1) == b
+            && tm.getTrack(2) == c && tm.getTrack(3) == d,
+            "original order [A,B,C,D] reconstructed with the same instances");
+        expect(b->getName() == "B" && b->isStereo(), "restored instance keeps its state");
+        expect(changeCount == 2, "onChange fired on undo");
+
+        // redo → 再び B,D を削除
+        expect(action.perform(), "redo deletes again");
+        expect(tm.getTrackCount() == 2 && tm.indexOf(b) == -1 && tm.indexOf(d) == -1,
+               "redo removes B and D again");
+        expect(changeCount == 3, "onChange fired on redo");
+        expect(action.undo(), "final undo restores for cleanup");
+        expect(tm.getTrackCount() == 4, "restored to four tracks");
+
+        // ガード: このマネージャに無いトラックを削除しようとしても安全に no-op
+        TrackManager other(fmt);
+        auto* alien = other.addTrack("Alien", false);
+        EditActions::TrackDeleteAction foreign(tm, { alien }, [](Track*){}, []{});
+        expect(foreign.perform() == false, "perform on a track not in this manager is a safe no-op");
+        expect(other.getTrackCount() == 1 && tm.getTrackCount() == 4,
+               "foreign delete touches neither manager");
+    }
+
     // ── reorderTo: 任意順への並べ替え / 検証ガード (並べ替え Undo の土台) ──
     void testReorderTo()
     {

@@ -1320,9 +1320,85 @@ void MainComponent::stopTransport()
     }
 }
 
+int MainComponent::countRecArmedTracks() const
+{
+    int n = 0;
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+        if (auto* t = trackManager.getTrack(i); t != nullptr && t->isRecArmed())
+            ++n;
+    return n;
+}
+
+Track* MainComponent::findEmptyRecordTrack()
+{
+    auto recordable = [](const Track* t)
+    { return t != nullptr && !t->isMidiTrack() && !t->isClickTrack(); };
+    auto isEmpty = [](const Track* t)
+    {
+        if (t->getMidiClipCount() > 0) return false;
+        for (int li = 0; li < t->getLaneCount(); ++li)
+            if (auto* l = t->getLane(li); l != nullptr && !l->clips.empty())
+                return false;   // クリップを持つ (= オケ等) は録音先にしない
+        return true;
+    };
+    // 1) 選択中トラックが「空の録音可能オーディオ」なら最優先 (ユーザーの明示選択)
+    if (selectedTrackIndex >= 0 && selectedTrackIndex < trackManager.getTrackCount())
+        if (auto* s = trackManager.getTrack(selectedTrackIndex); recordable(s) && isEmpty(s))
+            return s;
+    // 2) それ以外は先頭の「空の録音可能オーディオ」
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+        if (auto* t = trackManager.getTrack(i); recordable(t) && isEmpty(t))
+            return t;
+    return nullptr;
+}
+
+void MainComponent::promptRecordingSetup()
+{
+    juce::Component::SafePointer<MainComponent> self(this);
+
+    if (auto* cand = findEmptyRecordTrack())
+    {
+        // 空の録音用トラックがある → アームして録音するか確認 (ワンタップ録音準備)
+        Track* t = cand;
+        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::QuestionIcon)
+            .withTitle(tr(u8"録音の準備"))
+            .withMessage(tr(u8"このトラックを録音状態にして録音を開始しますか？")
+                         + juce::String("\n\n") + t->getName())
+            .withButton(tr(u8"録音する"))
+            .withButton(tr(u8"キャンセル")),
+            [self, t](int r)
+            {
+                if (r != 1 || self == nullptr) return;
+                if (self->trackManager.indexOf(t) < 0) return;   // 表示中に消えた場合に備える
+                t->setRecArmed(true);
+                self->syncInputMonitorStateToEngine();
+                self->trackHeaderPanel.refresh();
+                self->startRecording();
+            });
+        return;
+    }
+
+    // 空の録音用トラックが無い (トラック未作成 / オケしか無い等) → 新規トラック追加をうながすだけ。
+    // (自動でトラックを足して録音まで始めるのは大袈裟なので、案内に留めてユーザーに追加させる)
+    juce::ignoreUnused(self);
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::MessageBoxIconType::InfoIcon,
+        tr(u8"録音の準備"),
+        tr(u8"録音できる空のトラックがありません。\n新規トラックを追加してください。"));
+}
+
 void MainComponent::startRecording()
 {
     if (isRecording) return;
+
+    // Rec アーム済みトラックが無ければ、ここで案内する。
+    // (従来は警告も無く「再生だけ」始まって何も録れず、完璧なテイクが残らない事故になっていた)
+    if (countRecArmedTracks() == 0)
+    {
+        promptRecordingSetup();
+        return;
+    }
 
     // 録音開始位置 = 現在の再生位置
     const double recStart = audioEngine.getCurrentPositionSeconds();
@@ -1714,49 +1790,16 @@ void MainComponent::deleteTracks(std::vector<int> indices)
         [this](int i) { return i < 0 || i >= trackManager.getTrackCount(); }), indices.end());
     if (indices.empty()) return;
 
-    auto doDelete = [this, indices]() mutable
-    {
-        // index ずれを避けるため降順で削除する
-        std::sort(indices.begin(), indices.end(), std::greater<int>());
+    // index は削除で変わるため Track* に解決してから Undo アクションへ渡す。
+    // 削除は Undo 可能 (TrackDeleteAction) になったので、以前の「取り消せません」確認は廃止
+    // (Cmd+Z で同一インスタンスが元の位置へ復帰する。クリップ削除と同じ作法)。
+    std::vector<Track*> tracks;
+    tracks.reserve(indices.size());
+    for (int idx : indices)
+        if (auto* t = trackManager.getTrack(idx)) tracks.push_back(t);
+    if (tracks.empty()) return;
 
-        // UAF防止: Track 破棄前に PlaybackClip の参照を切る (audio thread と排他)。一括なので 1 回。
-        audioEngine.clearPlayback();
-        for (int idx : indices)
-        {
-            if (auto* t = trackManager.getTrack(idx))
-            {
-                auto& chain = t->getPluginChain();
-                for (int i = 0; i < chain.getNumPlugins(); ++i)
-                    closePluginEditorFor(chain.getPlugin(i));
-            }
-            trackManager.removeTrack(idx);   // onChanged → refreshTracks (panel/timeline/statusBar)
-        }
-        audioEngine.invalidatePlayback();
-
-        // 選択をリセット (消えた index を参照しないように)
-        selectedTrackIndex = -1;
-        trackHeaderPanel.clearTrackSelection();
-        // モニター/メトロノーム同期 + レイアウト更新 (click トラック削除等に追従)
-        if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
-        markProjectDirty();
-    };
-
-    // 2 本以上はまとめ削除なので確認を出す (トラック削除は Undo 非対応)。
-    if (indices.size() >= 2)
-    {
-        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::QuestionIcon)
-            .withTitle(tr(u8"トラックを削除"))
-            .withMessage(juce::String((int) indices.size())
-                         + tr(u8" 個のトラックを削除します。\nこの操作は取り消せません。"))
-            .withButton(tr(u8"削除"))
-            .withButton(tr(u8"キャンセル")),
-            [doDelete](int r) mutable { if (r == 1) doDelete(); });
-    }
-    else
-    {
-        doDelete();   // 1 本は従来どおり即削除 (確認なし)
-    }
+    pushTrackDeleteUndo(std::move(tracks));
 }
 
 // ───────────────────── 音楽情報 (マーカー/テンポ/拍子/曲BPM) の Undo ─────────────────────

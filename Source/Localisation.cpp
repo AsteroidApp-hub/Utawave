@@ -71,6 +71,11 @@ static const char* const englishTranslations =
     "\"停止\" = \"Stop\"\n"
     "\"録音\" = \"Record\"\n"
     "\"録音切替\" = \"Toggle record\"\n"
+    // ── 録音の準備 (アーム済みトラックが無いまま R を押したときの案内) ──
+    "\"録音の準備\" = \"Recording setup\"\n"
+    "\"このトラックを録音状態にして録音を開始しますか？\" = \"Arm this track for recording and start?\"\n"
+    "\"録音する\" = \"Record\"\n"
+    "\"録音できる空のトラックがありません。\\n新規トラックを追加してください。\" = \"There is no empty track to record on.\\nPlease add a new track.\"\n"
     "\"トランスポートの再生切替\" = \"Toggle play\"\n"
     "\"ループ再生のオン/オフ\" = \"Loop on/off\"\n"
     "\"横方向を拡大 (再生バー中心)\" = \"Zoom in (around playhead)\"\n"

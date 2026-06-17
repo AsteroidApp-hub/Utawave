@@ -108,6 +108,13 @@ private:
     void startRecording();
     void stopRecording();
     void toggleRecord();
+    // 録音可能 (Rec アーム済み) トラックが無いまま R を押したときの案内。
+    // 空の録音用トラックがあればアームして録音、無ければ追加して録音するか確認する
+    // (オケ等クリップを持つトラックには誤って重ねない)。詳細は MainComponent.cpp。
+    void promptRecordingSetup();
+    int  countRecArmedTracks() const;
+    // 録音に使える「空のオーディオトラック」を返す (選択中の空トラック優先 / 無ければ nullptr)。
+    Track* findEmptyRecordTrack();
     void showAudioSettings();
     void showImportDialog();
     void showImportMidiDialog();
@@ -247,9 +254,11 @@ private:
     // selected = 移動したトラック群。undo/redo 後に identity で選択を貼り直し選択状態を維持する。
     void pushTrackReorderUndo(std::vector<Track*> before, std::vector<Track*> after,
                               std::vector<Track*> selected);
+    // トラック削除を Undo 履歴へ積んで実行する (TrackDeleteAction)。延命所有なので Cmd+Z で
+    // 同一インスタンス (プラグイン / クリップ / テイク含む) が元の位置へ復帰する。
+    void pushTrackDeleteUndo(std::vector<Track*> tracks);
 
-    // 指定 index 群のトラックをまとめて削除する (プラグイン後処理 + 再生スナップショット更新)。
-    // 2 本以上は確認ダイアログを出す (トラック削除は Undo 非対応のため)。
+    // 指定 index 群のトラックをまとめて削除する (Undo 可能・プラグイン後処理 + 再生スナップショット更新)。
     void deleteTracks(std::vector<int> indices);
 
     // ── 音楽情報 (マーカー / テンポ変更 / 拍子変更 / 曲全体 BPM) の Undo ──

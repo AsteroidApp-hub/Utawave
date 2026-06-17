@@ -66,6 +66,88 @@ private:
     JUCE_DECLARE_NON_COPYABLE(TrackAddAction)
 };
 
+// トラック削除の Undo アクション (TrackAddAction の逆)。
+//
+// 設計:
+//  - 呼び出し側はまだ削除していない状態で作る (TrackAddAction は「追加済み」で作り最初の
+//    perform を no-op にするのに対し、こちらは perform() が実際の削除を行う)。
+//  - 複数トラックを 1 アクションで扱う (まとめ削除を 1 つの Undo トランザクションにする)。
+//  - 削除した Track は破棄せずアクションが unique_ptr で延命所有する。undo で同一インスタンス
+//    (プラグイン / クリップ / レーン含む) がそのまま元の位置へ復帰するため、履歴中の他アクションが
+//    持つ Track* / Lane* もダングリングしない。
+//  - perform (削除) は index 降順、undo (復元) は元 index 昇順で処理し、index ずれを防いで
+//    元の並びを正確に再構成する。位置解決は indexOf (ポインタ一致)。
+//  - willRemove は各トラックをリストから外す直前に呼ばれる。呼び出し側はここでプラグイン
+//    エディタ / ピアノロールを閉じ、audioEngine.clearPlayback() (UAF バリア) を張る。
+class TrackDeleteAction : public juce::UndoableAction
+{
+public:
+    TrackDeleteAction(TrackManager& tmIn, std::vector<Track*> tracksToDelete,
+                      std::function<void(Track*)> willRemoveCb,
+                      std::function<void()> onChangeCb)
+        : tm(tmIn), willRemove(std::move(willRemoveCb)), onChange(std::move(onChangeCb))
+    {
+        for (auto* t : tracksToDelete)
+            if (t != nullptr) entries.push_back({ t, nullptr, -1 });
+    }
+
+    bool perform() override   // 削除 (redo も同じ)
+    {
+        // 現在 index を解決し、降順に外す (外すたびに後続 index がずれるのを防ぐ)。
+        std::vector<Entry*> order;
+        for (auto& e : entries)
+            if (tm.indexOf(e.track) >= 0) order.push_back(&e);
+        std::sort(order.begin(), order.end(),
+                  [this](Entry* a, Entry* b){ return tm.indexOf(a->track) > tm.indexOf(b->track); });
+
+        bool any = false;
+        for (auto* e : order)
+        {
+            const int idx = tm.indexOf(e->track);
+            if (idx < 0) continue;
+            if (willRemove) willRemove(e->track);
+            e->index  = idx;                       // undo で戻す位置
+            e->stored = tm.extractTrack(idx);      // 破棄せず延命所有
+            any = any || (e->stored != nullptr);
+        }
+        if (any && onChange) onChange();
+        return any;
+    }
+
+    bool undo() override   // 復元
+    {
+        // 元 index 昇順に挿入して並びを再構成する。
+        std::vector<Entry*> order;
+        for (auto& e : entries)
+            if (e.stored != nullptr) order.push_back(&e);
+        std::sort(order.begin(), order.end(),
+                  [](Entry* a, Entry* b){ return a->index < b->index; });
+
+        bool any = false;
+        for (auto* e : order)
+        {
+            tm.insertTrack(e->index, std::move(e->stored));   // 所有権を TrackManager へ返す
+            any = true;
+        }
+        if (any && onChange) onChange();
+        return any;
+    }
+
+private:
+    struct Entry
+    {
+        Track* track { nullptr };          // 同一性の解決用 (所有は stored / TrackManager)
+        std::unique_ptr<Track> stored;     // 削除中の延命所有
+        int    index { -1 };               // 削除時の位置 (undo の復元先)
+    };
+    TrackManager& tm;
+    std::vector<Entry> entries;
+    std::function<void(Track*)> willRemove;
+    std::function<void()>       onChange;
+
+    JUCE_DECLARE_NON_COPYABLE(TrackDeleteAction)
+};
+
 // トラック並べ替えの Undo アクション。
 //
 // 設計:
