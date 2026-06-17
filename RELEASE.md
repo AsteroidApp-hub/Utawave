@@ -84,9 +84,11 @@ zip のファイル名にはバージョン + アーキテクチャを含めま�
 > **Windows の `Utawave.pdb` を必ず保管すること**: Release ビルドでは exe の隣に PDB が生成され、
 > CI が **`Utawave-<version>-Windows-x64-pdb`** という artifact (exe + PDB のペア) として上げる。
 > 配布 zip には入れない。**リリースごとにこの artifact を DL して手元へ永久保管**する（artifact 自体は
-> 90 日で消えるため）。クラッシュレポートのスタックトレース（`Utawave.exe + 0x<RVA>` 形式）を
-> 関数・行番号へ解決するのに必要（手順は `Docs/CRASH_REPORT_SETUP.md`）。RVA はビルドごとに変わるため、
-> 該当バージョンの PDB が無いと解決できない。
+> 90 日で消えるため）。**`./scripts/save-symbols.sh <version>` を実行すれば、その版の artifact を自動で
+> DL → `Symbols/Utawave-<version>-Windows-x64/`（gitignore 済・Dropbox バックアップ）へ保管できる**
+> （引数省略時は `CMakeLists.txt` の版を使う）。クラッシュレポートのスタックトレース
+> （`Utawave.exe + 0x<RVA>` 形式）を関数・行番号へ解決するのに必要（手順は `Docs/CRASH_REPORT_SETUP.md`）。
+> RVA はビルドごとに変わるため、該当バージョンの PDB が無いと解決できない。
 
 ## 3. ユニットテスト（任意・推奨）
 
