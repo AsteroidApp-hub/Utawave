@@ -1107,7 +1107,7 @@ void TimelineView::paint(juce::Graphics& g)
             {
                 double fo = selectedClip.clip->getFileOffset();
                 float vz = juce::jlimit(0.05f, 4.0f,
-                    0.85f * selectedClip.clip->getGain() * (float)waveformZoom);
+                    1.0f * selectedClip.clip->getGain() * (float)waveformZoom);
                 drawClipWaveform(g, *selectedClip.clip, ghostRect.reduced(0, 4),
                     fo, selectedClip.clip->getDuration(), vz,
                     selectedClip.track->getColour().brighter(0.9f).withAlpha(0.5f));

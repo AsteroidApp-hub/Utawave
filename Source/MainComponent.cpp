@@ -260,6 +260,10 @@ MainComponent::MainComponent()
     trackHeaderPanel.setLoudnessTargetLufs(appSettings.loudnessTargetLufs);
 
     // Undo/Redo
+    // スナップショット系 Action は getSizeInUnits を override せず既定 10 を返すため、
+    // 既定上限 (30000 ユニット ≒ 3000 トランザクション) では延命所有が溜まりやすい。
+    // 初心者向け DAW には 200 トランザクションで十分なので明示的に上限を絞る。
+    undoManager.setMaxNumberOfStoredUnits (30000, 200);
     timelineView.setUndoManager(&undoManager);
     timelineView.setEditChangeCallback([this]
     {

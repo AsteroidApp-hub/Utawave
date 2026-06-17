@@ -513,7 +513,7 @@ void TrackHeaderView::updateInputLevels(float peakL, float peakR, float vuL, flo
     };
     auto smoothVU = [](float current, float target)
     {
-        return current * 0.82f + target * 0.18f;             // 上下とも穏やかに
+        return current * 0.62f + target * 0.38f;             // 上下とも穏やかに (やや機敏)
     };
 
     const float newPeakL = smoothPeak(inPeakL, peakL);
@@ -752,31 +752,37 @@ void TrackHeaderView::paint(juce::Graphics& g)
             return juce::jlimit(0.0f, 1.0f, (db + 60.0f) / 60.0f);
         };
 
-        auto drawBar = [&](int x, int y, int width, float db, juce::Colour col)
+        // 閾値 (overThreshDb) を超えた区間だけ別色 (overCol) で塗り重ねる:
+        //   Peak → -3dB 超を赤 (クリッピング近傍) / VU → 0VU 基準超を黄
+        auto drawBar = [&](int x, int y, int width, float db,
+                           juce::Colour col, float overThreshDb, juce::Colour overCol)
         {
             if (width <= 0) return;
             int lvW = (int)(norm(db) * width);
             if (lvW <= 0) return;
             g.setColour(col);
             g.fillRect(x, y, lvW, meterH);
-            if (db > -3.0f)  // クリッピング近傍は赤
+            if (db > overThreshDb)
             {
-                int redStart = (int)(norm(-3.0f) * width);
-                g.setColour(juce::Colour(0xffd04444));
-                g.fillRect(x + redStart, y, lvW - redStart, meterH);
+                int overStart = (int)(norm(overThreshDb) * width);
+                g.setColour(overCol);
+                g.fillRect(x + overStart, y, lvW - overStart, meterH);
             }
         };
 
         // ステレオでも 1 本に集約 (L/R の最大値)
-        auto drawMeter = [&](int y, float dbL, float dbR, juce::Colour col)
+        auto drawMeter = [&](int y, float dbL, float dbR, juce::Colour col,
+                             float overThreshDb, juce::Colour overCol)
         {
             g.setColour(juce::Colour(0xff1a1a1a));
             g.fillRect(meterX, y, meterW, meterH);
-            drawBar(meterX, y, meterW, juce::jmax(dbL, dbR), col);
+            drawBar(meterX, y, meterW, juce::jmax(dbL, dbR), col, overThreshDb, overCol);
         };
 
-        drawMeter(peakY, inPeakL, inPeakR, juce::Colour(0xff44dd88));
-        drawMeter(vuY,   inVUL,   inVUR,   juce::Colour(0xff5599cc));
+        drawMeter(peakY, inPeakL, inPeakR, juce::Colour(0xff44dd88),
+                  -3.0f, juce::Colour(0xffd04444));
+        drawMeter(vuY,   inVUL,   inVUR,   juce::Colour(0xff5599cc),
+                  vuReferenceLevel, AppColours::meterYellow);
 
         // 0 VU 基準線（VU メータ上に短い縦線、モノ/ステレオ共通で 1 本）
         if (vuReferenceLevel > -60.0f && vuReferenceLevel < 0.0f)

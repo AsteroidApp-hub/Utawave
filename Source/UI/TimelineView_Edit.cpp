@@ -1082,7 +1082,7 @@ void TimelineView::applyVerticalZoomStep(double deltaY)
 }
 void TimelineView::resetVerticalZoom()
 {
-    // 波形振幅を既定 (ピーク 0dB がレーンに収まる見た目) に戻す
+    // 波形振幅を既定 (ピーク 0dB がレーン全高まで届く見た目) に戻す
     waveformZoom = 1.0;
     repaint();
 }

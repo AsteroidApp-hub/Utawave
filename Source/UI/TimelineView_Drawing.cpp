@@ -179,12 +179,15 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
 
     // 波形サムネイル（fileOffset 対応、ゲイン × 波形ズームで振幅をスケール）
     // キャッシュ: 同じ条件なら drawChannels を呼ばず Image を blit するだけ
+    // 既定 (waveformZoom=1.0・gain=1.0) では係数 1.0 = ピーク 0dB がレーン全高まで届く。
+    // 超過 (ゲイン等で >0dB) は drawClipWaveform / drawClipSamples の jlimit(topY,botY) で
+    // レーン端に頭打ち = クリップしたように平らな天井で描かれる
     if (clip.getThumbnail().getTotalLength() > 0.0)
     {
         const juce::Colour wfColour = trackColour.brighter(0.9f).withAlpha(0.9f * alphaMul);
         const double fo = clip.getFileOffset();
         const float verticalZoom = juce::jlimit(0.05f, 4.0f,
-                                                0.85f * clip.getGain() * (float)waveformZoom);
+                                                1.0f * clip.getGain() * (float)waveformZoom);
         auto wfRect = clipRect.reduced(0, 4);
 
         // 全ズームでサムネイル塗りに統一 (サンプル単位描画は廃止)。
