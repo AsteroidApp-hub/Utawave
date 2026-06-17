@@ -163,6 +163,26 @@ jobs:
           name: utawave-unsigned
           path: artifact/Utawave.exe
 
+      # PDB を保管 (クラッシュレポートの「Utawave.exe + 0x<RVA>」を関数/行へ解決するのに必要)。
+      # 配布 zip には入れず、別 artifact として上げる。リリースごとに DL して手元へ永久保管すること
+      #   (RVA はビルドごとに変わるため、その版の PDB が無いと後からスタックトレースを解決できない)。
+      # 署名は RVA を変えないので、未署名 exe と PDB のペアで解決できる。手順は Docs/CRASH_REPORT_SETUP.md。
+      - name: Stage PDB (symbols)
+        shell: pwsh
+        run: |
+          $pdb = Get-ChildItem -Path build -Recurse -Filter Utawave.pdb | Select-Object -First 1
+          if ($null -eq $pdb) { Write-Host "::error::Utawave.pdb が見つかりません (Release で /Zi /DEBUG が付いているか CMakeLists を確認)"; exit 1 }
+          New-Item -ItemType Directory -Force -Path symbols | Out-Null
+          Copy-Item $pdb.FullName symbols/
+          Copy-Item artifact/Utawave.exe symbols/   # exe + PDB をペアで (RVA 解決用)
+
+      - name: Upload PDB (symbols, not distributed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Utawave-${{ inputs.version }}-Windows-x64-pdb
+          path: symbols/
+          retention-days: 90
+
       - name: Submit signing request to SignPath
         if: env.HAS_SIGNING == 'true'
         uses: signpath/github-action-submit-signing-request@v2

@@ -81,10 +81,12 @@ zip のファイル名にはバージョン + アーキテクチャを含めま�
 > **同梱物は利用者がそのまま開けるよう .txt / .html のみ**（`.md` は配布しない。`README.txt` は `Docs/README.txt`、`LICENSE.txt` は `LICENSE` をリネームしたもの）。
 > ローカルでの再パッケージは不要。
 
-> **Windows の `Utawave.pdb` を必ず保管すること**: Release ビルドでは exe の隣に PDB が生成される。
-> 配布 zip には入れず、**リリースごとに exe + PDB のペアを手元に保管**する。クラッシュレポートの
-> スタックトレース（`Utawave.exe + 0x<RVA>` 形式）を関数・行番号へ解決するのに必要
-> （手順は `Docs/CRASH_REPORT_SETUP.md`）。RVA はビルドごとに変わるため、該当バージョンの PDB が無いと解決できない。
+> **Windows の `Utawave.pdb` を必ず保管すること**: Release ビルドでは exe の隣に PDB が生成され、
+> CI が **`Utawave-<version>-Windows-x64-pdb`** という artifact (exe + PDB のペア) として上げる。
+> 配布 zip には入れない。**リリースごとにこの artifact を DL して手元へ永久保管**する（artifact 自体は
+> 90 日で消えるため）。クラッシュレポートのスタックトレース（`Utawave.exe + 0x<RVA>` 形式）を
+> 関数・行番号へ解決するのに必要（手順は `Docs/CRASH_REPORT_SETUP.md`）。RVA はビルドごとに変わるため、
+> 該当バージョンの PDB が無いと解決できない。
 
 ## 3. ユニットテスト（任意・推奨）
 
