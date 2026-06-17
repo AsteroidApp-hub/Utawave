@@ -1,7 +1,7 @@
 name: Release Build (macOS + Windows)
 
 # 手動発火のみ (push では走らない)。Actions タブ → このワークフロー → "Run workflow" から実行する。
-# version を入力すると zip 名 (Utawave-<version>-macOS.zip / -win64.zip) に使われる。
+# version を入力すると zip 名 (Utawave-<version>-macOS-arm64.zip / -Windows-x64.zip) に使われる。
 on:
   workflow_dispatch:
     inputs:
@@ -87,13 +87,13 @@ jobs:
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           cp THIRD_PARTY_LICENSES.txt Docs/MANUAL.html Docs/README.txt Utawave-macOS/
           cp LICENSE Utawave-macOS/LICENSE.txt
-          ditto -c -k --sequesterRsrc --keepParent Utawave-macOS "Utawave-${{ inputs.version }}-macOS.zip"
+          ditto -c -k --sequesterRsrc --keepParent Utawave-macOS "Utawave-${{ inputs.version }}-macOS-arm64.zip"
 
       - name: Upload macOS zip
         uses: actions/upload-artifact@v4
         with:
-          name: Utawave-${{ inputs.version }}-macOS
-          path: Utawave-${{ inputs.version }}-macOS.zip
+          name: Utawave-${{ inputs.version }}-macOS-arm64
+          path: Utawave-${{ inputs.version }}-macOS-arm64.zip
 
   # ──────────────────────────────────────────────────────────────
   # Windows: ビルド → (SignPath トークンがあれば署名) → zip
@@ -186,10 +186,10 @@ jobs:
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
           Copy-Item LICENSE Utawave-Windows/LICENSE.txt
-          Compress-Archive -Path Utawave-Windows -DestinationPath "Utawave-${{ inputs.version }}-win64.zip" -Force
+          Compress-Archive -Path Utawave-Windows -DestinationPath "Utawave-${{ inputs.version }}-Windows-x64.zip" -Force
 
       - name: Upload Windows zip
         uses: actions/upload-artifact@v4
         with:
-          name: Utawave-${{ inputs.version }}-win64
-          path: Utawave-${{ inputs.version }}-win64.zip
+          name: Utawave-${{ inputs.version }}-Windows-x64
+          path: Utawave-${{ inputs.version }}-Windows-x64.zip

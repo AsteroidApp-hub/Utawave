@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
 
-project(Utawave VERSION 0.1.0)
+project(Utawave VERSION 0.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,7 +29,7 @@ juce_add_gui_app(Utawave
     PRODUCT_NAME                    "Utawave"
     COMPANY_NAME                    "Utawave"
     BUNDLE_ID                       "com.utawave.app"
-    VERSION                         "0.1.0"
+    VERSION                         "0.2.0"
     ICON_BIG                        "${CMAKE_CURRENT_SOURCE_DIR}/Icon/icon_1024.png"
     ICON_SMALL                      "${CMAKE_CURRENT_SOURCE_DIR}/Icon/icon_256.png"
     MICROPHONE_PERMISSION_ENABLED   TRUE
