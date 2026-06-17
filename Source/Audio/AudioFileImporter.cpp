@@ -3,6 +3,7 @@
 
 #include "AudioFileImporter.h"
 #include "CDSPResampler.h"  // r8brain (header-only)
+#include <cstring>          // std::memcpy (64bit サンプルのビット解釈)
 
 juce::File AudioFileImporter::getDefaultCacheFolder()
 {
@@ -40,23 +41,52 @@ AudioFileImporter::importFile(const juce::File& src, double projectSampleRate, i
     Result r;
     if (!src.existsAsFile()) { r.errorMessage = "File not found"; return r; }
 
+    // 64bit (>32bit) WAV は JUCE がデコードできないため、まず 32bit float の一時 WAV へ変換し、
+    // 以降はその変換済みファイルを処理対象 (working) とする。変換済み一時ファイルは処理後に削除する
+    // (SR一致時は呼び出し側が Audio/ へ移してから削除する = リサンプルキャッシュと同じ扱い)。
+    juce::File working = src;
+    bool didTranscode = false;
+    if (needsHighBitTranscode(src))
+    {
+        auto cache = getCacheFolder();
+        // クリップ名がファイル名由来になるため、変換物も元の名前を保つ (Audio/ へは元名でコピーされる)。
+        working = cache.getChildFile(juce::File::createLegalFileName(src.getFileName()))
+                       .getNonexistentSibling();
+        juce::String terr;
+        if (!transcodeHighBitWavToFloat(src, working, terr))
+        {
+            working.deleteFile();
+            r.errorMessage = terr.isNotEmpty() ? terr : juce::String("Unsupported 64-bit WAV");
+            return r;
+        }
+        didTranscode = true;
+    }
+
     std::unique_ptr<juce::AudioFormatReader> reader(
-        formatManager.createReaderFor(src));
-    if (!reader) { r.errorMessage = "Unsupported format"; return r; }
+        formatManager.createReaderFor(working));
+    if (!reader)
+    {
+        if (didTranscode) working.deleteFile();
+        r.errorMessage = "Unsupported format";
+        return r;
+    }
 
     r.sampleRate  = reader->sampleRate;
     r.numChannels = (int)reader->numChannels;
     r.durationSec = (double)reader->lengthInSamples / juce::jmax(1.0, reader->sampleRate);
 
-    // SR一致なら元ファイルをそのまま使う
+    // SR一致なら変換不要 (元ファイルをそのまま使う)。64bit を変換した場合は変換物を返し、
+    // リサンプルと同じく「Audio/ へコピー後に一時ファイルを消す」扱い (wasResampled=true) にする。
     if (std::abs(reader->sampleRate - projectSampleRate) < 0.01)
     {
+        reader.reset();   // working を開いたままにしない (Windows では削除/移動が阻まれる)
         r.success = true;
-        r.file    = src;
+        if (didTranscode) { r.file = working; r.wasResampled = true; }
+        else              { r.file = src; }
         return r;
     }
 
-    // リサンプル: キャッシュフォルダにユニーク名でWAV出力
+    // リサンプル: キャッシュフォルダにユニーク名でWAV出力 (変換済みなら working を読む)
     auto cache = getCacheFolder();
     auto stem  = src.getFileNameWithoutExtension()
                  + juce::String::formatted("_%dHz_%lld.wav",
@@ -65,14 +95,19 @@ AudioFileImporter::importFile(const juce::File& src, double projectSampleRate, i
     auto dst   = cache.getChildFile(juce::File::createLegalFileName(stem));
 
     juce::String err;
-    if (!resampleToFile(src, dst, reader->sampleRate, projectSampleRate,
+    if (!resampleToFile(working, dst, reader->sampleRate, projectSampleRate,
                         (int)reader->numChannels, *reader, outputBits, err, onProgress))
     {
         r.errorMessage = err;
         r.cancelled    = (err == "cancelled");
+        reader.reset();
         dst.deleteFile();   // 中断/失敗時の部分ファイルを片付ける (破損キャッシュを残さない)
+        if (didTranscode) working.deleteFile();
         return r;
     }
+
+    reader.reset();
+    if (didTranscode) working.deleteFile();   // 中間変換ファイルはもう不要
 
     r.success      = true;
     r.file         = dst;
@@ -295,6 +330,166 @@ bool AudioFileImporter::copyStrippingMetadata(const juce::File& src, const juce:
         errorOut = "Failed to copy samples";
         return false;
     }
+    writer->flush();
+    return true;
+}
+
+//==============================================================================
+// 64bit WAV サポート: RIFF ヘッダの覗き見 + 32bit float への自前変換
+//==============================================================================
+AudioFileImporter::WavFormatInfo AudioFileImporter::peekWavFormat(const juce::File& src)
+{
+    WavFormatInfo info;
+    if (!src.hasFileExtension("wav")) return info;
+
+    auto in = src.createInputStream();
+    if (in == nullptr) return info;
+
+    auto readTag = [&in](char tag[4]) { return in->read(tag, 4) == 4; };
+
+    char riff[4];
+    if (!readTag(riff)) return info;
+    // RF64 (>4GB) は data サイズが ds64 チャンク側にあり扱いが異なるため非対応 (ok=false)。
+    if (std::memcmp(riff, "RIFF", 4) != 0) return info;
+    in->skipNextBytes(4);                       // RIFF サイズ
+    char wave[4];
+    if (!readTag(wave) || std::memcmp(wave, "WAVE", 4) != 0) return info;
+
+    bool haveFmt = false, haveData = false;
+    while (!in->isExhausted() && !(haveFmt && haveData))
+    {
+        char id[4];
+        if (!readTag(id)) break;
+        const juce::uint32 sz = (juce::uint32) in->readInt();   // little-endian
+        const juce::int64 chunkStart = in->getPosition();
+
+        if (std::memcmp(id, "fmt ", 4) == 0)
+        {
+            info.formatTag  = (int) (juce::uint16) in->readShort();
+            info.channels   = (int) (juce::uint16) in->readShort();
+            info.sampleRate = (double) (juce::uint32) in->readInt();
+            in->skipNextBytes(4);                               // byteRate
+            in->skipNextBytes(2);                               // blockAlign
+            info.bits       = (int) (juce::uint16) in->readShort();
+
+            if (info.formatTag == 3)        info.isFloat = true;     // WAVE_FORMAT_IEEE_FLOAT
+            else if (info.formatTag == 1)   info.isFloat = false;    // WAVE_FORMAT_PCM
+            else if (info.formatTag == 0xFFFE && sz >= 40)           // WAVE_FORMAT_EXTENSIBLE
+            {
+                in->skipNextBytes(2);                           // cbSize
+                in->skipNextBytes(2);                           // validBitsPerSample
+                in->skipNextBytes(4);                           // channelMask
+                const int sub = (int) (juce::uint16) in->readShort();   // SubFormat の先頭 = 実フォーマット
+                info.isFloat = (sub == 3);
+            }
+            haveFmt = true;
+        }
+        else if (std::memcmp(id, "data", 4) == 0)
+        {
+            if (sz == 0xFFFFFFFFu) return WavFormatInfo{};       // RF64 マーカー → 非対応
+            info.dataOffset = chunkStart;
+            info.dataBytes  = (juce::int64) sz;
+            haveData = true;
+        }
+
+        // 次のチャンクへ (チャンクは 2 バイト境界にパディングされる)
+        const juce::int64 next = chunkStart + (juce::int64) sz + ((sz & 1u) ? 1 : 0);
+        in->setPosition(next);
+        if (in->getPosition() != next) break;
+    }
+
+    info.ok = haveFmt && haveData
+              && info.channels > 0 && info.bits > 0 && info.sampleRate > 0.0;
+    return info;
+}
+
+bool AudioFileImporter::needsHighBitTranscode(const juce::File& src)
+{
+    const auto info = peekWavFormat(src);
+    return info.ok && info.bits > 32;
+}
+
+bool AudioFileImporter::transcodeHighBitWavToFloat(const juce::File& src, const juce::File& dst,
+                                                   juce::String& errorOut)
+{
+    const auto info = peekWavFormat(src);
+    if (!info.ok)         { errorOut = "Cannot parse WAV header"; return false; }
+    if (info.bits != 64)  { errorOut = "Unsupported bit depth";  return false; }   // 現状 64bit のみ
+
+    const int ch             = info.channels;
+    const int bytesPerSample = info.bits / 8;          // 8
+    const int frameBytes     = ch * bytesPerSample;
+    if (frameBytes <= 0)  { errorOut = "Bad frame size"; return false; }
+    const juce::int64 totalFrames = info.dataBytes / frameBytes;
+
+    auto in = src.createInputStream();
+    if (in == nullptr)    { errorOut = "Cannot open source"; return false; }
+    in->setPosition(info.dataOffset);
+
+    juce::WavAudioFormat wav;
+    auto outStreamUP = std::make_unique<juce::FileOutputStream>(dst);
+    if (!outStreamUP->openedOk()) { errorOut = "Cannot open destination"; return false; }
+    outStreamUP->setPosition(0);
+    outStreamUP->truncate();
+
+    using SF = juce::AudioFormatWriterOptions::SampleFormat;
+    auto opts = juce::AudioFormatWriterOptions{}
+                    .withSampleRate(info.sampleRate)
+                    .withNumChannels(ch)
+                    .withBitsPerSample(32)
+                    .withSampleFormat(SF::floatingPoint);
+
+    std::unique_ptr<juce::OutputStream> outStream = std::move(outStreamUP);
+    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(outStream, opts));
+    if (!writer) { errorOut = "Cannot create WAV writer"; return false; }
+
+    const int blockFrames = 4096;
+    juce::AudioBuffer<float> buf(ch, blockFrames);
+    std::vector<char> raw((size_t) blockFrames * (size_t) frameBytes);
+
+    juce::int64 done = 0;
+    while (done < totalFrames)
+    {
+        const int n         = (int) juce::jmin((juce::int64) blockFrames, totalFrames - done);
+        const int wantBytes = n * frameBytes;
+        const int gotBytes  = in->read(raw.data(), wantBytes);
+        const int framesGot = (frameBytes > 0) ? (gotBytes / frameBytes) : 0;
+        if (framesGot <= 0) break;   // EOF / 途中切れ
+
+        for (int f = 0; f < framesGot; ++f)
+            for (int c = 0; c < ch; ++c)
+            {
+                const void* p = raw.data() + (size_t) (f * frameBytes + c * bytesPerSample);
+                // WAV は LE。littleEndianInt64 は数値として正しい値を返す (PCM 経路で利用)。
+                // float 経路はビットパターンを double として解釈するが、対象プラットフォーム
+                // (macOS / Windows) は LE なので le の格納バイト列 = p のバイト列で一致する。
+                const juce::uint64 le = juce::ByteOrder::littleEndianInt64(p);
+                float v;
+                if (info.isFloat)
+                {
+                    double d;
+                    std::memcpy(&d, &le, sizeof(d));
+                    v = (float) d;
+                }
+                else
+                {
+                    // 64bit 符号付き PCM → [-1, 1)
+                    v = (float) ((double) (juce::int64) le / 9223372036854775808.0);
+                }
+                buf.setSample(c, f, v);
+            }
+
+        if (!writer->writeFromAudioSampleBuffer(buf, 0, framesGot))
+        {
+            errorOut = "Failed to write samples (disk full?)";
+            writer.reset();
+            dst.deleteFile();
+            return false;
+        }
+        done += framesGot;
+        if (framesGot < n) break;    // 途中切れ: 読めた分だけ書いて終了
+    }
+
     writer->flush();
     return true;
 }

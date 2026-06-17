@@ -20,6 +20,7 @@
 
 #include <JuceHeader.h>
 #include <cmath>
+#include <cstring>
 #include "../Source/Audio/AudioFileImporter.h"
 
 namespace
@@ -50,6 +51,51 @@ public:
                 buf.setSample(c, i,
                     (float) (0.3 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / sr)));
         w->writeFromAudioSampleBuffer(buf, 0, n);
+        return f;
+    }
+
+    // 64bit WAV (Float64 / 64bit PCM) を手書きで書く。JUCE の WavAudioFormat は 64bit を
+    // 書けないため (writer も 8/16/24/32 のみ)、RIFF を直接組む。サンプルは LE で並べる
+    // (juce::OutputStream の writeInt/Short/Int64 は LE)。
+    juce::File writeWav64(const juce::String& name, double sr, int ch, double secs, bool asInt64)
+    {
+        auto f = dir.getChildFile(name);
+        f.deleteFile();
+        juce::FileOutputStream os(f);
+        if (!os.openedOk()) return {};
+
+        const int bits        = 64;
+        const int blockAlign  = ch * bits / 8;
+        const int byteRate    = (int) (sr * blockAlign);
+        const int n           = (int) (sr * secs);
+        const int dataBytes   = n * blockAlign;
+
+        auto w4 = [&os](const char* s) { os.write(s, 4); };
+        w4("RIFF"); os.writeInt(36 + dataBytes); w4("WAVE");
+        w4("fmt "); os.writeInt(16);
+        os.writeShort((short) (asInt64 ? 1 : 3));   // 1=PCM / 3=IEEE float
+        os.writeShort((short) ch);
+        os.writeInt((int) sr);
+        os.writeInt(byteRate);
+        os.writeShort((short) blockAlign);
+        os.writeShort((short) bits);
+        w4("data"); os.writeInt(dataBytes);
+
+        for (int i = 0; i < n; ++i)
+            for (int c = 0; c < ch; ++c)
+            {
+                const double s = 0.3 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / sr)
+                                     * (c == 0 ? 1.0 : 0.5);   // R は半分にして ch 独立性も確認
+                if (asInt64)
+                    os.writeInt64((juce::int64) std::llround(s * 9223372036854775807.0));
+                else
+                {
+                    juce::uint64 bitsv;
+                    std::memcpy(&bitsv, &s, sizeof(bitsv));   // double のビットパターンを LE で書く
+                    os.writeInt64((juce::int64) bitsv);
+                }
+            }
+        os.flush();
         return f;
     }
 
@@ -94,6 +140,7 @@ public:
         testImportResamples(fmt);
         testImportProgressAndCancel(fmt);
         testImportMissingFile(fmt);
+        testImport64BitWav(fmt);
 
         dir.deleteRecursively();
     }
@@ -287,6 +334,83 @@ public:
         expect(!r2.success && r2.cancelled, "returning false cancels (success=false, cancelled=true)");
         expect(cache.getNumberOfChildFiles(juce::File::findFiles) == before,
                "cancelled import leaves no new cache file");
+    }
+
+    // ── 64bit WAV (Float64 / 64bit PCM) を 32bit float へ変換して取り込む ──
+    // JUCE の WavAudioFormat は 64bit を読めない (createReaderFor が bitsPerSample>32 で nullptr)。
+    // peek / transcode の純関数と、importFile の統合 (SR一致変換 + リサンプル) を検証する。
+    void testImport64BitWav(juce::AudioFormatManager& fmt)
+    {
+        beginTest("64-bit WAV: peek + transcode to 32f, and importFile integration");
+
+        auto src64 = writeWav64("f64.wav", 48000.0, 2, 0.5, /*asInt64*/ false);
+        expect(src64.existsAsFile(), "64-bit float source written");
+
+        // peekWavFormat: ヘッダを正しく読む
+        auto info = AudioFileImporter::peekWavFormat(src64);
+        expect(info.ok, "peek parses 64-bit WAV header");
+        expect(info.bits == 64, "peek reports 64 bits");
+        expect(info.isFloat, "peek reports float");
+        expect(info.channels == 2, "peek reports stereo");
+        expect(std::abs(info.sampleRate - 48000.0) < 0.01, "peek reports 48000 Hz");
+
+        // needsHighBitTranscode: 64bit は true / 通常の 24bit は false
+        expect(AudioFileImporter::needsHighBitTranscode(src64), "64-bit needs transcode");
+        auto src24 = writeWavInt("not64.wav", 48000.0, 1, 24, 0.2, {});
+        expect(!AudioFileImporter::needsHighBitTranscode(src24), "24-bit does not need transcode");
+
+        // transcodeHighBitWavToFloat: 32f になり、サンプルが一致する
+        auto conv = dir.getChildFile("f64_to_f32.wav");
+        juce::String terr;
+        expect(AudioFileImporter::transcodeHighBitWavToFloat(src64, conv, terr),
+               ("transcode succeeds: " + terr).toRawUTF8());
+        auto out = readBack(fmt, conv);
+        expect(out.ok, "transcoded file readable");
+        expect(out.bits == 32 && out.isFloat, "transcoded file is 32-bit float");
+        expect(out.channels == 2, "channels preserved");
+        expect(std::abs(out.sampleRate - 48000.0) < 0.01, "sample rate preserved");
+        const int expN = (int) (48000.0 * 0.5);
+        expect(std::abs((double) out.length - expN) < 2.0, "sample count preserved");
+
+        bool samplesMatch = (out.length >= expN);
+        for (int i = 0; i < expN && samplesMatch; ++i)
+        {
+            const double ref = 0.3 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / 48000.0);
+            if (std::abs(out.samples.getSample(0, i) - (float) ref) > 1.0e-4) samplesMatch = false;
+            if (std::abs(out.samples.getSample(1, i) - (float) (ref * 0.5)) > 1.0e-4) samplesMatch = false;
+        }
+        expect(samplesMatch, "transcoded samples match the 64-bit source (both channels)");
+
+        // 64bit 符号付き PCM も変換できる
+        auto srcI64 = writeWav64("i64.wav", 48000.0, 1, 0.2, /*asInt64*/ true);
+        auto convI  = dir.getChildFile("i64_to_f32.wav");
+        expect(AudioFileImporter::transcodeHighBitWavToFloat(srcI64, convI, terr),
+               ("64-bit PCM transcode succeeds: " + terr).toRawUTF8());
+        auto outI = readBack(fmt, convI);
+        expect(outI.ok && outI.bits == 32 && outI.isFloat, "64-bit PCM -> 32f readable");
+        expect(outI.length > 0 && outI.samples.getMagnitude(0, 0, (int) outI.length) > 0.05,
+               "64-bit PCM transcode is non-silent");
+
+        // importFile 統合 (SR 一致): 変換物を返し wasResampled=true (Audio/ へ移して消す扱い)
+        auto cache = dir.getChildFile("cache64");
+        cache.deleteRecursively(); cache.createDirectory();
+        AudioFileImporter importer(fmt);
+        importer.getCacheFolderCb = [cache] { return cache; };
+
+        auto r = importer.importFile(src64, 48000.0);
+        expect(r.success, "importFile succeeds for 64-bit at matching SR");
+        expect(r.wasResampled, "64-bit transcode is treated like a cache file (wasResampled=true)");
+        expect(r.file != src64, "returns the converted file, not the 64-bit source");
+        expect(r.numChannels == 2, "importFile reports channel count");
+        auto ir = readBack(fmt, r.file);
+        expect(ir.ok && ir.bits == 32 && ir.isFloat, "imported 64-bit file is now 32f and readable");
+
+        // importFile 統合 (リサンプル): 48k 64bit -> 44.1k で変換 + リサンプルが連結して動く
+        auto r2 = importer.importFile(src64, 44100.0);
+        expect(r2.success && r2.wasResampled, "64-bit + resample succeeds");
+        auto ir2 = readBack(fmt, r2.file);
+        expect(ir2.ok && std::abs(ir2.sampleRate - 44100.0) < 0.01,
+               "64-bit resampled output is 44100 Hz");
     }
 
     // ── importFile: 欠損ファイルは success=false ──

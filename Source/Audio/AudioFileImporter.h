@@ -42,6 +42,36 @@ public:
     bool copyStrippingMetadata(const juce::File& src, const juce::File& dst,
                                juce::String& errorOut);
 
+    // ── 64bit (>32bit) WAV のサポート ──
+    // JUCE の WavAudioFormat は 8/16/24/32bit のみデコード/エンコードでき、64bit (Float64 /
+    // 64bit PCM) は読み書きできない (createReaderFor が bitsPerSample>32 で nullptr を返す)。
+    // macOS は CoreAudio フォールバックで偶然読めるが Windows には無く、メタデータ除去経路は
+    // WavAudioFormat を直接使うので macOS でも 64bit では失敗する。そこで取り込み時に
+    // OS 非依存で 32bit float の一時 WAV へ自前変換してから既存パイプラインに乗せる。
+    struct WavFormatInfo
+    {
+        bool        ok          { false };
+        int         formatTag   { 0 };       // 1=PCM, 3=IEEE float, 0xFFFE=EXTENSIBLE
+        int         channels    { 0 };
+        double      sampleRate  { 0.0 };
+        int         bits        { 0 };       // bitsPerSample
+        bool        isFloat     { false };
+        juce::int64 dataOffset  { 0 };       // data チャンクのサンプル先頭オフセット
+        juce::int64 dataBytes   { 0 };
+    };
+
+    // .wav の RIFF ヘッダを覗いて fmt / data チャンク情報を取り出す純関数 (デコードはしない)。
+    // 非 WAV・パース不能・RF64(>4GB) は ok=false。
+    static WavFormatInfo peekWavFormat(const juce::File& src);
+
+    // この WAV が JUCE で読めない 64bit (>32bit) のため変換が必要か。
+    static bool needsHighBitTranscode(const juce::File& src);
+
+    // 64bit WAV (Float64 / 64bit PCM) を 32bit float の WAV (dst) へ変換する。
+    // SR / チャンネル数は保持し、サンプル値はそのまま (クランプしない)。
+    static bool transcodeHighBitWavToFloat(const juce::File& src, const juce::File& dst,
+                                           juce::String& errorOut);
+
 private:
     bool resampleToFile(const juce::File& src, const juce::File& dst,
                         double srcSr, double dstSr, int numChannels,
