@@ -424,6 +424,21 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         }
     }
 
+    // ; (JIS では「+」キーの位置) / + : 再生バーを進む、 − : 戻る。
+    //   実際の移動は onVBlank の連続スクラブ (updatePlayheadScrub) がキー押下を毎フレーム
+    //   見て、押下時間に応じた可変速で滑らかに動かす。ここではキーを消費して既定動作
+    //   (ビープ/文字入力) を抑えるだけ。テンキー +/− も拾う。
+    {
+        const juce::juce_wchar tc = key.getTextCharacter();
+        const int kc = key.getKeyCode();
+        const bool fwd  = (tc == ';') || (tc == '+') || (kc == juce::KeyPress::numberPadAdd);
+        const bool back = (tc == '-')               || (kc == juce::KeyPress::numberPadSubtract);
+        if ((fwd || back)
+            && !key.getModifiers().isCommandDown()
+            && !key.getModifiers().isAltDown())
+            return true;
+    }
+
     // L: ループ再生 ON/OFF をトグル (LOOP ボタンと同じ動作)
     if ((key.getKeyCode() == 'l' || key.getKeyCode() == 'L')
         && !key.getModifiers().isAnyModifierKeyDown())

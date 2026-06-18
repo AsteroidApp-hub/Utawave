@@ -407,6 +407,13 @@ private:
     juce::VBlankAttachment vblankAttachment;
     void   onVBlank (double timestampSec);  // ディスプレイ垂直同期に合わせた再生バー更新
 
+    // 再生バーの連続スクラブ ( ; = 進む / − = 戻る、停止中・押している間 等速でヌルヌル)。
+    // onVBlank がキー状態を毎フレーム poll し、一定速度で動かす。
+    void   updatePlayheadScrub (double timestampSec);
+    bool   scrubActive      { false };
+    int    scrubDir         { 0 };       // -1 / 0 / +1
+    double lastScrubWallSec { 0.0 };
+
     // 録音前の Lane 0 + テイクレーン スナップショット (Undo で録音クリップを除去するため)
     struct PreRecSnapshot
     {

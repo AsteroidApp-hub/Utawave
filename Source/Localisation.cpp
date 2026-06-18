@@ -465,6 +465,7 @@ static const char* const englishTranslations =
     "\"テイクレーン (TList) 表示切替\" = \"Toggle take lanes (TList)\"\n"
     "\"テイクから Lane 0 へ採用\" = \"Promote take to Lane 0\"\n"
     "\"1 小節 進む / 戻る\" = \"Move 1 bar forward / back\"\n"
+    "\"再生バーを進む / 戻る (押しっぱなしで滑らかに移動)\" = \"Move playhead forward / back (hold to scrub)\"\n"
     "\"次 / 前のマーカーへジャンプ\" = \"Jump to next / previous marker\"\n"
     "\"グリッド Off\" = \"Grid Off\"\n"
     "\"1/1 (小節)\" = \"1/1 (bar)\"\n"

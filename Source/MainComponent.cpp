@@ -1066,9 +1066,11 @@ void MainComponent::onVBlank (double timestampSec)
 {
     if (!isPlaying)
     {
+        updatePlayheadScrub (timestampSec);  // ; / − による連続スクラブ (停止中のみ)
         playheadSmoothActive = false;  // 次回再生で再同期できるよう平滑化をリセット
         return;
     }
+    scrubActive = false; scrubDir = 0;  // 再生中はスクラブしない
 
     const double rawPos = audioEngine.getCurrentPositionSeconds();
 
@@ -1146,6 +1148,39 @@ void MainComponent::onVBlank (double timestampSec)
 
     timelineView.setPlayheadPosition(visualPlayhead);
     propagatePlayheadToPianoRolls(visualPlayhead);
+}
+
+// ; (JIS の「+」キー位置) で進む / − で戻る。停止中に押している間、ディスプレイ垂直同期ごとに
+// キー状態を poll し、一定速度で再生バーを滑らかに動かす。OS のキーリピート (固定レート・初動
+// ディレイ) に依らず、フレーム単位の連続移動なのでヌルヌル動く (加速はなし・等速)。
+void MainComponent::updatePlayheadScrub (double timestampSec)
+{
+    auto stop = [this] { scrubActive = false; scrubDir = 0; };
+
+    // アプリ非前面、またはテキスト入力中 (BPM 編集 / クリップ名インライン編集 等) は無効。
+    // isKeyCurrentlyDown はグローバルなキー状態を見るため、これらを除外しないと誤爆する。
+    if (! juce::Process::isForegroundProcess()) { stop(); return; }
+    if (auto* f = juce::Component::getCurrentlyFocusedComponent())
+        if (dynamic_cast<juce::TextEditor*> (f) != nullptr) { stop(); return; }
+
+    const bool fwd  = juce::KeyPress::isKeyCurrentlyDown (';')
+                   || juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::numberPadAdd);
+    const bool back = juce::KeyPress::isKeyCurrentlyDown ('-')
+                   || juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::numberPadSubtract);
+    const int dir = (fwd == back) ? 0 : (fwd ? +1 : -1);
+    if (dir == 0) { stop(); return; }
+
+    constexpr double scrubSpeed = 3.0;   // 秒/秒 (一定・遅すぎず早すぎず)
+
+    // 開始フレーム/方向転換は prime のみ (dt=0)。以降は提示時刻の差分で等速移動。
+    double dt;
+    if (! scrubActive || dir != scrubDir) { scrubActive = true; dt = 0.0; }
+    else                                    dt = juce::jlimit (0.0, 0.05, timestampSec - lastScrubWallSec);
+    scrubDir = dir;
+    lastScrubWallSec = timestampSec;
+
+    if (dt > 0.0)
+        seekTo (audioEngine.getCurrentPositionSeconds() + dir * scrubSpeed * dt);  // seekTo が 0 クランプ + 全同期
 }
 
 void MainComponent::addTrack()
