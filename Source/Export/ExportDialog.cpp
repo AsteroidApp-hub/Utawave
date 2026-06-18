@@ -131,9 +131,9 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
     revealAfterBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
     addAndMakeVisible(revealAfterBtn);
 
+    // 実時間レンダリングは歌い手用途では使わないため非表示（常にオフライン書き出し）。
+    // 互換のため getOptions() は常に false を返す（realtimeBtn は addAndMakeVisible しない）。
     realtimeBtn.setToggleState(false, juce::dontSendNotification);
-    realtimeBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
-    addAndMakeVisible(realtimeBtn);
 
     // 32bit float のときはディザー無効（不要なため）
     auto refreshDitherState = [this]
@@ -525,7 +525,6 @@ void ExportDialog::resized()
     ditherBtn.setBounds(r.removeFromTop(22));
     autoRenameBtn.setBounds(r.removeFromTop(22));
     revealAfterBtn.setBounds(r.removeFromTop(22));
-    realtimeBtn.setBounds(r.removeFromTop(22));
     r.removeFromTop(8);
 
     // 書き出しモード（ミックスダウン / トラック書き出し）
