@@ -58,31 +58,69 @@ namespace
     // JUCE の getStackBacktrace はシンボル解決に失敗したフレームを黙って捨てるため、
     // PDB の無い配布 exe / プラグイン DLL 内のフレーム (= 一番知りたい部分) が全て消える。
     // ここでは全フレームを module+RVA で必ず出力し、シンボル名は解決できた時だけ添える。
-    juce::String windowsBacktrace()
+    //
+    // platformData (= LPEXCEPTION_POINTERS) があれば、その ContextRecord 起点で x64 のスタックを
+    // RtlVirtualUnwind で巻き戻す。CaptureStackBackTrace はこのハンドラ自身のスタックを歩くため、
+    // x64 の例外ディスパッチ境界 (KiUserExceptionDispatcher) を越えられず、戻りアドレスがずれたり
+    // スタック上に残る無関係な古いアドレス (別関数・ICF 畳み込み) を拾って混入させていた。
+    // ContextRecord 起点なら「落ちた命令 → 本体フレーム」を正確に辿れる。
+    juce::String windowsBacktrace(void* platformData)
     {
-        void* stack[128];
-        const int frames = (int) CaptureStackBackTrace(0, 128, stack, nullptr);
-
         const HANDLE process = GetCurrentProcess();
         SymInitialize(process, nullptr, TRUE);
 
         alignas(SYMBOL_INFO) char symbolBuf[sizeof(SYMBOL_INFO) + 256] = {};
         auto* symbol = reinterpret_cast<SYMBOL_INFO*>(symbolBuf);
 
-        juce::String out;
-        for (int i = 0; i < frames; ++i)
+        auto appendFrame = [&](juce::String& out, int i, DWORD64 pc)
         {
-            out << i << ": " << moduleRelativeAddress(stack[i]);
-
+            out << i << ": " << moduleRelativeAddress(reinterpret_cast<const void*>(pc));
             symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
             symbol->MaxNameLen   = 255;
             DWORD64 displacement = 0;
-            if (SymFromAddr(process, (DWORD64) stack[i], &displacement, symbol))
+            if (SymFromAddr(process, pc, &displacement, symbol))
                 out << " (" << symbol->Name << " + 0x"
                     << juce::String::toHexString((juce::int64) displacement) << ")";
-
             out << "\n";
+        };
+
+        juce::String out;
+
+       #if defined(_M_X64) || defined(_M_AMD64)
+        auto* ep = static_cast<LPEXCEPTION_POINTERS>(platformData);
+        if (ep != nullptr && ep->ContextRecord != nullptr)
+        {
+            CONTEXT ctx = *ep->ContextRecord;   // 破壊しながら歩くのでコピー
+            for (int i = 0; i < 128 && ctx.Rip != 0; ++i)
+            {
+                appendFrame(out, i, ctx.Rip);
+
+                DWORD64 imageBase = 0;
+                auto* fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+                if (fn != nullptr)
+                {
+                    PVOID   handlerData = nullptr;
+                    DWORD64 establisher = 0;
+                    RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn,
+                                     &ctx, &handlerData, &establisher, nullptr);
+                }
+                else
+                {
+                    // リーフ関数 (unwind 情報なし): 戻りアドレスをスタックから手動で取り出す
+                    if (ctx.Rsp == 0) break;
+                    ctx.Rip  = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+                    ctx.Rsp += sizeof(DWORD64);
+                }
+            }
+            return out;
         }
+       #endif
+
+        // フォールバック (非 x64 / 文脈が無い場合): 従来どおりハンドラ起点でキャプチャ
+        void* stack[128];
+        const int frames = (int) CaptureStackBackTrace(0, 128, stack, nullptr);
+        for (int i = 0; i < frames; ++i)
+            appendFrame(out, i, (DWORD64) stack[i]);
         return out;
     }
 
@@ -154,7 +192,7 @@ namespace
        #if JUCE_WINDOWS
         log << exceptionDetails(platformData)
             << "\n--- stack backtrace ---\n"
-            << windowsBacktrace();
+            << windowsBacktrace(platformData);
        #else
         const int sig = (int) (juce::pointer_sized_int) platformData;
         log << "signal: " << sig;
