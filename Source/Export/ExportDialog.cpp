@@ -144,8 +144,12 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
     auto refreshDitherState = [this]
     {
         const bool is32 = (bitDepthBox.getSelectedId() == 32);
-        ditherBtn.setEnabled(!is32);
+        // 注意: juce::Button::setToggleState は無効状態だと no-op（内部の isEnabled() ガード）。
+        // setEnabled(false) を先に呼ぶと setToggleState が効かずチェックが残るため、
+        // 「一旦有効化 → toggle を設定 → 最終的な有効/無効を設定」の順にする。
+        ditherBtn.setEnabled(true);
         ditherBtn.setToggleState(!is32, juce::dontSendNotification);
+        ditherBtn.setEnabled(!is32);
     };
     bitDepthBox.onChange = refreshDitherState;
     refreshDitherState();
