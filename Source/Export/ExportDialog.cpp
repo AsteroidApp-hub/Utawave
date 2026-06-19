@@ -700,7 +700,8 @@ void ExportDialog::doExport()
                           : (double)sampleRateBox.getSelectedId();
     opts.startSec   = start;
     opts.endSec     = end;
-    opts.dither     = ditherBtn.getToggleState();
+    // 32bit float はディザ不要。UI 状態に関わらず必ずオフにする（保険）。
+    opts.dither     = ditherBtn.getToggleState() && opts.bitDepth != 32;
     opts.stems      = stems;
     opts.autoRename  = autoRenameBtn.getToggleState();
     opts.revealAfter = revealAfterBtn.getToggleState();
