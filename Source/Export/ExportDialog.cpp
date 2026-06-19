@@ -4,9 +4,16 @@
 #include "ExportDialog.h"
 #include "../Localisation.h"
 #include "../AppColours.h"
+#include "../UI/UtawaveLookAndFeel.h"
 
 ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
 {
+    // ツールチップを UtawaveLookAndFeel で描画する（角丸 + アクセント枠 + 余白）。
+    // アプリはグローバル既定 LnF を設定していないため、各 TooltipWindow に明示適用する。
+    // 静的インスタンスは全 TooltipWindow より長生きするのでダングリングしない。
+    static UtawaveLookAndFeel tooltipLnF;
+    tooltipWindow.setLookAndFeel(&tooltipLnF);
+
     titleLabel.setText(tr(u8"書き出し"), juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(18.0f, juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);

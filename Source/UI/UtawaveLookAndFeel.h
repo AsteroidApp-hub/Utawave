@@ -21,6 +21,11 @@ public:
         setColour(juce::PopupMenu::textColourId,             AppColours::text);
         setColour(juce::PopupMenu::highlightedBackgroundColourId, AppColours::accent);
         setColour(juce::Label::textColourId,                 AppColours::text);
+
+        // ツールチップ: 暗い UI に埋もれないよう、やや明るい背景 + アクセント枠 + 明るい文字
+        setColour(juce::TooltipWindow::backgroundColourId, juce::Colour(0xff333538));
+        setColour(juce::TooltipWindow::textColourId,       juce::Colour(0xfff2f2f2));
+        setColour(juce::TooltipWindow::outlineColourId,    AppColours::accent);
     }
 
     // DAW スタイルの垂直フェーダー
@@ -81,4 +86,51 @@ public:
     }
 
     int getSliderThumbRadius(juce::Slider&) override { return 0; }
+
+    // ── ツールチップ（角丸 + アクセント枠 + 余白 + 左寄せ複数行）──
+    // TooltipWindow は setOpaque(true) + ネイティブ影付きなので、全面を塗る
+    // (透明マージン/手描き影は黒く出る/二重影になるため使わない)。
+    juce::Rectangle<int> getTooltipBounds(const juce::String& tipText,
+                                          juce::Point<int> screenPos,
+                                          juce::Rectangle<int> parentArea) override
+    {
+        const auto tl = layoutTooltip(tipText, juce::Colours::white);
+        const int w = (int) tl.getWidth()  + kTipPadX * 2;
+        const int h = (int) tl.getHeight() + kTipPadY * 2;
+        return juce::Rectangle<int>(
+                   screenPos.x > parentArea.getCentreX() ? screenPos.x - (w + 10) : screenPos.x + 18,
+                   screenPos.y > parentArea.getCentreY() ? screenPos.y - (h + 6)  : screenPos.y + 12,
+                   w, h).constrainedWithin(parentArea);
+    }
+
+    void drawTooltip(juce::Graphics& g, const juce::String& text, int width, int height) override
+    {
+        auto bounds = juce::Rectangle<float>((float) width, (float) height);
+        const float corner = 5.0f;
+
+        g.setColour(findColour(juce::TooltipWindow::backgroundColourId));
+        g.fillRoundedRectangle(bounds, corner);
+
+        g.setColour(findColour(juce::TooltipWindow::outlineColourId).withAlpha(0.95f));
+        g.drawRoundedRectangle(bounds.reduced(0.6f), corner, 1.3f);
+
+        layoutTooltip(text, findColour(juce::TooltipWindow::textColourId))
+            .draw(g, bounds.reduced((float) kTipPadX, (float) kTipPadY));
+    }
+
+private:
+    static constexpr int kTipPadX  = 12;
+    static constexpr int kTipPadY  = 9;
+    static constexpr float kTipMaxWidth = 340.0f;
+
+    static juce::TextLayout layoutTooltip(const juce::String& text, juce::Colour colour)
+    {
+        juce::AttributedString s;
+        s.setJustification(juce::Justification::topLeft);
+        s.setLineSpacing(2.0f);
+        s.append(text, juce::Font(13.5f, juce::Font::plain), colour);
+        juce::TextLayout tl;
+        tl.createLayout(s, kTipMaxWidth);
+        return tl;
+    }
 };

@@ -21,6 +21,11 @@ MainComponent::MainComponent()
     setWantsKeyboardFocus(true);
     addKeyListener(this);
 
+    // ツールチップを UtawaveLookAndFeel で描画する（角丸 + アクセント枠 + 余白）。
+    // アプリはグローバル既定 LnF を設定していないため TooltipWindow に明示適用する。
+    static UtawaveLookAndFeel tooltipLnF;
+    tooltipWindow.setLookAndFeel(&tooltipLnF);
+
 
     // 未保存プロジェクト用の仮フォルダを作成（録音/インポートはここに溜まる）
     {
