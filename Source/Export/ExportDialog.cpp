@@ -139,12 +139,13 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
     // 互換のため getOptions() は常に false を返す（realtimeBtn は addAndMakeVisible しない）。
     realtimeBtn.setToggleState(false, juce::dontSendNotification);
 
-    // 32bit float のときはディザー無効（不要なため）
+    // 32bit float はディザ不要 → チェックを外して無効化。16/24bit に切り替えたら
+    // 自動でチェックを付け、操作可能にする（その後ユーザーが外すことも可）。
     auto refreshDitherState = [this]
     {
         const bool is32 = (bitDepthBox.getSelectedId() == 32);
         ditherBtn.setEnabled(!is32);
-        if (is32) ditherBtn.setToggleState(false, juce::dontSendNotification);
+        ditherBtn.setToggleState(!is32, juce::dontSendNotification);
     };
     bitDepthBox.onChange = refreshDitherState;
     refreshDitherState();
