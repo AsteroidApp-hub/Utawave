@@ -119,6 +119,7 @@ static const char* const englishTranslations =
     "\"ショートカット一覧\" = \"Keyboard Shortcuts\"\n"
     "\"ショートカット一覧...\" = \"Keyboard Shortcuts...\"\n"
     "\"使い方ドキュメント...\" = \"User Guide...\"\n"
+    "\"開発を支援する (寄付)...\" = \"Support Development (Donate)...\"\n"
     "\"ドキュメントファイル (help.html) が見つかりませんでした。\" = \"The documentation file (help.html) could not be found.\"\n"
     "\"Utawave について\" = \"About Utawave\"\n"
     "\"Utawave について...\" = \"About Utawave...\"\n"

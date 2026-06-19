@@ -61,6 +61,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         addItem(m, 102, tr(u8"使い方ドキュメント..."), "");
         addItem(m, 101, tr(u8"ショートカット一覧..."), tr(u8"⌘/"));
         m.addSeparator();
+        addItem(m, 103, tr(u8"開発を支援する (寄付)..."), "");
         addItem(m, 100, tr(u8"Utawave について..."), "");
     }
     return m;
@@ -83,6 +84,7 @@ void MainComponent::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/)
         case 100: showAboutDialog(); break;
         case 101: showShortcutsDialog(); break;
         case 102: showDocumentation(); break;
+        case 103: juce::URL(tr(u8"https://donate.stripe.com/8x29ATdTI6g07vo49S38404")).launchInDefaultBrowser(); break;
         default: break;
     }
 }
