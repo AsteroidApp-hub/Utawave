@@ -1,5 +1,3 @@
 # GitHub リポジトリの「Sponsor」ボタンに表示される寄付リンク。
-#   github : GitHub Sponsors のアカウント名 (要 GitHub Sponsors 登録)
-#   ko_fi  : Ko-fi のユーザー名 (アカウント開設後にコメント解除して設定)
-github: [AsteroidApp-hub]
-# ko_fi: your-kofi-username
+#   custom : 任意の URL。Stripe の寄付リンク (英語版を先頭、日本語版を 2 番目)。
+custom: ["https://donate.stripe.com/fZubJ16rg5bW9Dw9uc38405", "https://donate.stripe.com/8x29ATdTI6g07vo49S38404"]

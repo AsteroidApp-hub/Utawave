@@ -402,6 +402,7 @@ static const char* const englishTranslations =
     "\"── 免責事項 ──\\n\" = \"── Disclaimer ──\\n\"\n"
     "\"本ソフトウェアは無料で「現状のまま」提供されます。万一、使用（または使用できないこと）により損害が生じた場合でも、作者は責任を負いかねます。大切なデータはバックアップしてください。(詳細は AGPL v3 第15条・第16条)\\n\\n\" = \"This software is free and provided AS IS. The author cannot accept liability for damages arising from the use of, or inability to use, this software. Please back up important data. (See Sections 15 and 16 of the AGPL v3 for details)\\n\\n\"\n"
     "\"開発を応援する (寄付):\\n\" = \"Support development (donations):\\n\"\n"
+    "\"https://donate.stripe.com/8x29ATdTI6g07vo49S38404\" = \"https://donate.stripe.com/fZubJ16rg5bW9Dw9uc38405\"\n"
     // ── 共通ボタン / ダイアログ ──
     "\"キャンセル\" = \"Cancel\"\n"
     "\"閉じる\" = \"Close\"\n"

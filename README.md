@@ -83,10 +83,10 @@ important data. See Sections 15 and 16 of the AGPL-3.0-or-later for details.
 
 ## Support
 
-Your support helps keep development going 🙇
+Your support helps keep development going 🙇 Donations go toward code-signing certificate
+costs and ongoing development.
 
-- **GitHub Sponsors**: https://github.com/sponsors/AsteroidApp-hub
-- **Ko-fi**: (coming soon — a link will be added once the account is set up)
+- **Donate (Stripe)**: https://donate.stripe.com/fZubJ16rg5bW9Dw9uc38405
 
 ## Download
 

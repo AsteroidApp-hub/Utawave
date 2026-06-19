@@ -86,10 +86,11 @@ cmake --build build-mac --target UtawaveTests --config Debug
 
 ## 支援 / Support
 
-開発の継続を応援していただけると励みになります 🙇
+開発の継続を応援していただけると励みになります 🙇 いただいた寄付は署名証明書の費用と
+今後の開発に充てさせていただきます。
 
-- **GitHub Sponsors**: https://github.com/sponsors/AsteroidApp-hub
-- **Ko-fi**: （準備中 — アカウント開設後にリンクを追加します）
+- **寄付 (Stripe)**: https://donate.stripe.com/8x29ATdTI6g07vo49S38404
+- **Donate (English)**: https://donate.stripe.com/fZubJ16rg5bW9Dw9uc38405
 
 ## ダウンロード / Download
 

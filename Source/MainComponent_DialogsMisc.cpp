@@ -89,7 +89,7 @@ void MainComponent::showAboutDialog()
               << tr(u8"本ソフトウェアは無料で「現状のまま」提供されます。万一、使用（または使用できないこと）により損害が生じた場合でも、作者は責任を負いかねます。大切なデータはバックアップしてください。(詳細は AGPL v3 第15条・第16条)\n\n");
 
             t << tr(u8"開発を応援する (寄付):\n")
-              << "  GitHub Sponsors: https://github.com/sponsors/AsteroidApp-hub\n\n";
+              << "  " << tr(u8"https://donate.stripe.com/8x29ATdTI6g07vo49S38404") << "\n\n";
 
             t << tr(u8"── 利用しているサードパーティ ライブラリ ──\n\n");
 
