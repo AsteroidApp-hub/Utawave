@@ -318,6 +318,7 @@ static const char* const englishTranslations =
     "\"出力フォルダ未指定\" = \"No output folder specified\"\n"
     "\"MP3 ビットレート\" = \"MP3 bitrate\"\n"
     "\"TPDFディザ (16/24bit)\" = \"TPDF dither (16/24-bit)\"\n"
+    "\"16/24bit で書き出すときに加える微小なノイズです。量子化で生じるざらつき（特にフェードや小音量部の歪み）を聞こえにくい滑らかなノイズに変え、より自然な音にします。通常はオンのまま推奨。32bit float では不要なため自動でオフになります。\" = \"Adds tiny noise when exporting to 16/24-bit. It turns the roughness from quantization (distortion in fades and quiet passages especially) into smoother, less audible noise for a more natural sound. Leave it on in most cases. Not needed for 32-bit float, so it turns off automatically.\"\n"
     "\"同名ファイルがある場合は自動連番\" = \"Auto-number when a file of the same name exists\"\n"
     "\"完了後に出力フォルダを開く\" = \"Open output folder when done\"\n"
     "\"実時間レンダリング（一部プラグインの互換用、再生長と同じ時間がかかります）\" = \"Real-time render (for plugin compatibility; takes as long as playback)\"\n"

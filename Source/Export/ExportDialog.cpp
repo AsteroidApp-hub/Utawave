@@ -121,6 +121,10 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
 
     ditherBtn.setToggleState(true, juce::dontSendNotification);
     ditherBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+    ditherBtn.setTooltip(tr(u8"16/24bit で書き出すときに加える微小なノイズです。量子化で生じる"
+                            u8"ざらつき（特にフェードや小音量部の歪み）を聞こえにくい滑らかな"
+                            u8"ノイズに変え、より自然な音にします。通常はオンのまま推奨。"
+                            u8"32bit float では不要なため自動でオフになります。"));
     addAndMakeVisible(ditherBtn);
 
     autoRenameBtn.setToggleState(true, juce::dontSendNotification);

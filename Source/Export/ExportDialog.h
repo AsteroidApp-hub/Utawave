@@ -57,6 +57,10 @@ private:
 
     Context context;
 
+    // このダイアログは独立した DialogWindow として表示されるため、MainComponent 側の
+    // TooltipWindow は届かない。ダイアログ内の setTooltip を機能させるため自前で持つ。
+    juce::TooltipWindow tooltipWindow { this };
+
     juce::Label    titleLabel;
 
     juce::Label    rangeLabel;
