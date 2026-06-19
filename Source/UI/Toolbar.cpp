@@ -202,7 +202,7 @@ TransportBar::TransportBar()
     gainBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
     gainBtn.setClickingTogglesState(true);
     gainBtn.setButtonText("GAIN");
-    gainBtn.setTooltip("クリップゲインラインを表示（ブレークポイント編集可能）");
+    gainBtn.setTooltip(tr(u8"クリップゲインラインを表示（ブレークポイント編集可能）"));
     gainBtn.setWantsKeyboardFocus(false);
     gainBtn.onClick = [this] {
         if (onClipGainChanged) onClipGainChanged(gainBtn.getToggleState());
@@ -303,7 +303,7 @@ TransportBar::TransportBar()
     snapBtn.setColour(juce::TextButton::textColourOffId,  AppColours::textDim);
     snapBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
     snapBtn.setButtonText("GRID: Off");
-    snapBtn.setTooltip("グリッドスナップ（クリックで Off/Bar/Beat 切替）");
+    snapBtn.setTooltip(tr(u8"グリッドスナップ（クリックで Off/Bar/Beat 切替）"));
     snapBtn.setWantsKeyboardFocus(false);
     snapBtn.onClick = [this] {
         juce::PopupMenu m;

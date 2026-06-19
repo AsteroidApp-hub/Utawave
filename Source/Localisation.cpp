@@ -228,6 +228,8 @@ static const char* const englishTranslations =
     "\"削除\" = \"Delete\"\n"
     "\"クリック/移動ツールのみ\" = \"Click/Move tool only\"\n"
     "\"範囲選択ツールのみ\" = \"Range-select tool only\"\n"
+    "\"グリッドスナップ（クリックで Off/Bar/Beat 切替）\" = \"Grid snap (click to cycle Off/Bar/Beat)\"\n"
+    "\"クリップゲインラインを表示（ブレークポイント編集可能）\" = \"Show clip gain line (editable breakpoints)\"\n"
     "\"リンク: 両方のツールを併用（スマートツール）\" = \"Linked: smart tool (both)\"\n"
     // ── 環境設定 ──
     "\"言語 (Language)  ※再起動で反映\" = \"Language  *applies after restart\"\n"
