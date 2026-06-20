@@ -7,20 +7,24 @@
 BuiltInEQ::BuiltInEQ()
 {
     // id は言語非依存で固定 (シリアライズキー)。label は tr() で英訳される表示名。
-    addParam({ "hpfHz", u8"ローカット", "Hz",   20.0f, 400.0f,   80.0f, 0.35f });
-    addParam({ "lowHz", u8"低域 Hz",   "Hz",   60.0f, 500.0f,  200.0f, 0.5f  });
-    addParam({ "lowDb", u8"低域",       "dB",  -12.0f,  12.0f,    0.0f, 1.0f  });
-    addParam({ "midHz", u8"中域 Hz",   "Hz",  300.0f, 6000.0f, 2800.0f, 0.4f  });
-    addParam({ "midDb", u8"中域",       "dB",  -12.0f,  12.0f,    0.0f, 1.0f  });
-    addParam({ "airHz", u8"高域 Hz",   "Hz", 3000.0f, 16000.0f, 10000.0f, 0.5f });
-    addParam({ "airDb", u8"高域",       "dB",  -12.0f,  12.0f,    0.0f, 1.0f  });
+    addParam({ "hpfHz",   u8"ローカット", "Hz",   20.0f,   400.0f,    80.0f, 0.35f });
+    addParam({ "lowHz",   u8"低域 Hz",    "Hz",   60.0f,   500.0f,   200.0f, 0.5f  });
+    addParam({ "lowDb",   u8"低域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "loMidHz", u8"低中域 Hz",  "Hz",  120.0f,  1000.0f,   350.0f, 0.5f  });
+    addParam({ "loMidDb", u8"低中域",     "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "midHz",   u8"中域 Hz",    "Hz",  300.0f,  6000.0f,  2800.0f, 0.4f  });
+    addParam({ "midDb",   u8"中域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "hiMidHz", u8"高中域 Hz",  "Hz", 1500.0f, 10000.0f,  5000.0f, 0.5f  });
+    addParam({ "hiMidDb", u8"高中域",     "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "airHz",   u8"高域 Hz",    "Hz", 3000.0f, 16000.0f, 10000.0f, 0.5f  });
+    addParam({ "airDb",   u8"高域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
 
-    //          hpf   lowHz lowDb  midHz  midDb  airHz   airDb
-    addPreset(u8"フラット",      { 20.0f, 200.0f,  0.0f, 2800.0f,  0.0f, 10000.0f,  0.0f });
-    addPreset(u8"ボーカル明瞭",  { 90.0f, 200.0f, -1.0f, 3000.0f,  3.0f, 12000.0f,  2.5f });
-    addPreset(u8"低域すっきり",  { 120.0f, 180.0f, -3.0f, 2500.0f,  1.0f, 11000.0f,  1.0f });
-    addPreset(u8"温かみ",        { 80.0f, 180.0f,  2.0f, 1500.0f,  0.0f,  9000.0f, -1.5f });
-    addPreset(u8"ラジオ風",      { 220.0f, 200.0f, -6.0f, 1800.0f,  4.0f,  8000.0f, -5.0f });
+    //          hpf    lowHz lowDb  loMidHz loMidDb midHz  midDb  hiMidHz hiMidDb airHz   airDb
+    addPreset(u8"フラット",     {  20.0f, 200.0f,  0.0f, 350.0f,  0.0f, 2800.0f,  0.0f, 5000.0f,  0.0f, 10000.0f,  0.0f });
+    addPreset(u8"ボーカル明瞭", {  90.0f, 200.0f, -1.0f, 350.0f, -2.0f, 3000.0f,  2.0f, 5000.0f,  2.0f, 12000.0f,  2.5f });
+    addPreset(u8"低域すっきり", { 120.0f, 180.0f, -3.0f, 300.0f, -2.0f, 2500.0f,  1.0f, 4000.0f,  1.0f, 11000.0f,  1.0f });
+    addPreset(u8"温かみ",       {  80.0f, 180.0f,  2.0f, 400.0f,  1.0f, 1500.0f,  0.0f, 5000.0f, -1.0f,  9000.0f, -1.5f });
+    addPreset(u8"ラジオ風",     { 220.0f, 200.0f, -6.0f, 500.0f,  2.0f, 1800.0f,  4.0f, 4000.0f,  3.0f,  8000.0f, -5.0f });
 }
 
 const juce::String BuiltInEQ::getName() const { return tr(u8"内蔵EQ"); }
@@ -28,7 +32,7 @@ const juce::String BuiltInEQ::getName() const { return tr(u8"内蔵EQ"); }
 void BuiltInEQ::prepareToPlay(double sampleRate, int)
 {
     sr = sampleRate > 0.0 ? sampleRate : 48000.0;
-    hpf.reset(); low.reset(); mid.reset(); air.reset();
+    hpf.reset(); low.reset(); loMid.reset(); mid.reset(); hiMid.reset(); air.reset();
 }
 
 void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -37,17 +41,19 @@ void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
 
     // NaN/Inf がフィルタ状態に入ると以降ずっと出力を汚染するため、混入を検知したら全段リセット
     // (ScopedNoDenormals は NaN を救わない)。代表として各段の z1[0] を点検する。
-    if (! (std::isfinite(hpf.z1[0]) && std::isfinite(low.z1[0])
-        && std::isfinite(mid.z1[0]) && std::isfinite(air.z1[0])))
+    if (! (std::isfinite(hpf.z1[0]) && std::isfinite(low.z1[0]) && std::isfinite(loMid.z1[0])
+        && std::isfinite(mid.z1[0]) && std::isfinite(hiMid.z1[0]) && std::isfinite(air.z1[0])))
     {
-        hpf.reset(); low.reset(); mid.reset(); air.reset();
+        hpf.reset(); low.reset(); loMid.reset(); mid.reset(); hiMid.reset(); air.reset();
     }
 
     // 係数はブロック先頭で 1 回算出 (ノブ操作は低頻度)。
-    hpf.setHighpass (sr, getP(HpfHz), 0.707);
-    low.setLowShelf (sr, getP(LowHz), getP(LowDb), 0.9);
-    mid.setPeak     (sr, getP(MidHz), getP(MidDb), 0.9);
-    air.setHighShelf(sr, getP(AirHz), getP(AirDb), 0.9);
+    hpf.setHighpass  (sr, getP(HpfHz),   0.707);
+    low.setLowShelf  (sr, getP(LowHz),   getP(LowDb),   0.9);
+    loMid.setPeak    (sr, getP(LoMidHz), getP(LoMidDb), 0.9);
+    mid.setPeak      (sr, getP(MidHz),   getP(MidDb),   0.9);
+    hiMid.setPeak    (sr, getP(HiMidHz), getP(HiMidDb), 0.9);
+    air.setHighShelf (sr, getP(AirHz),   getP(AirDb),   0.9);
 
     const int numCh = juce::jmin(2, buffer.getNumChannels());
     const int n     = buffer.getNumSamples();
@@ -74,7 +80,9 @@ void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             float x = d[i];
             x = hpf.process(ch, x);
             x = low.process(ch, x);
+            x = loMid.process(ch, x);
             x = mid.process(ch, x);
+            x = hiMid.process(ch, x);
             x = air.process(ch, x);
             d[i] = x;
         }
@@ -99,18 +107,20 @@ void BuiltInEQ::getMagnitudeResponse(const double* freqHz, double* outDb, int co
 {
     // ライブの hpf/low/mid/air は audio thread が使うので触らない。ローカル biquad で計算する。
     const double s = sr > 0.0 ? sr : 48000.0;
-    Biquad h, l, m, a;
-    h.setHighpass (s, getP(HpfHz), 0.707);
-    l.setLowShelf (s, getP(LowHz), getP(LowDb), 0.9);
-    m.setPeak     (s, getP(MidHz), getP(MidDb), 0.9);
-    a.setHighShelf(s, getP(AirHz), getP(AirDb), 0.9);
+    Biquad h, l, lm, m, hm, a;
+    h.setHighpass  (s, getP(HpfHz),   0.707);
+    l.setLowShelf  (s, getP(LowHz),   getP(LowDb),   0.9);
+    lm.setPeak     (s, getP(LoMidHz), getP(LoMidDb), 0.9);
+    m.setPeak      (s, getP(MidHz),   getP(MidDb),   0.9);
+    hm.setPeak     (s, getP(HiMidHz), getP(HiMidDb), 0.9);
+    a.setHighShelf (s, getP(AirHz),   getP(AirDb),   0.9);
 
     const double twoPiOverSr = 2.0 * juce::MathConstants<double>::pi / s;
     for (int i = 0; i < count; ++i)
     {
         const double w = freqHz[i] * twoPiOverSr;
-        const double mag = h.magnitudeAt(w) * l.magnitudeAt(w)
-                         * m.magnitudeAt(w) * a.magnitudeAt(w);
+        const double mag = h.magnitudeAt(w) * l.magnitudeAt(w) * lm.magnitudeAt(w)
+                         * m.magnitudeAt(w) * hm.magnitudeAt(w) * a.magnitudeAt(w);
         outDb[i] = 20.0 * std::log10(juce::jmax(mag, 1.0e-6));
     }
 }

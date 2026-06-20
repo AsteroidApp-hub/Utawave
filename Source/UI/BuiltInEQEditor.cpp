@@ -13,10 +13,12 @@ namespace
     const juce::Colour kBg      { 0xff141414 };
     const juce::Colour kGraphBg { 0xff1c1c1c };
 
-    const juce::Colour kHpfCol { 0xff4aa3ff };
-    const juce::Colour kLowCol { 0xff3da85a };
-    const juce::Colour kMidCol { 0xffe06422 };  // accent
-    const juce::Colour kAirCol { 0xffc060ff };
+    const juce::Colour kHpfCol   { 0xff4aa3ff };
+    const juce::Colour kLowCol   { 0xff3da85a };
+    const juce::Colour kLoMidCol { 0xff2fb0a0 };
+    const juce::Colour kMidCol   { 0xffe06422 };  // accent
+    const juce::Colour kHiMidCol { 0xffe05a8a };
+    const juce::Colour kAirCol   { 0xffc060ff };
 }
 
 BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
@@ -25,10 +27,12 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
     setLookAndFeel(&laf);
 
     nodes = {
-        { BuiltInEQ::HpfHz, -1,               kHpfCol },
-        { BuiltInEQ::LowHz, BuiltInEQ::LowDb, kLowCol },
-        { BuiltInEQ::MidHz, BuiltInEQ::MidDb, kMidCol },
-        { BuiltInEQ::AirHz, BuiltInEQ::AirDb, kAirCol },
+        { BuiltInEQ::HpfHz,   -1,                 kHpfCol   },
+        { BuiltInEQ::LowHz,   BuiltInEQ::LowDb,   kLowCol   },
+        { BuiltInEQ::LoMidHz, BuiltInEQ::LoMidDb, kLoMidCol },
+        { BuiltInEQ::MidHz,   BuiltInEQ::MidDb,   kMidCol   },
+        { BuiltInEQ::HiMidHz, BuiltInEQ::HiMidDb, kHiMidCol },
+        { BuiltInEQ::AirHz,   BuiltInEQ::AirDb,   kAirCol   },
     };
 
     // Hann 窓
