@@ -65,6 +65,12 @@ private:
     std::vector<float> binMag;       // bin 毎の平滑化済み線形振幅 (size = kAnalyzerSize/2 + 1)
     std::vector<float> binMagPrefix; // binMag の累積和 (オクターブ平滑の範囲平均を O(1) で引く)
 
+    // EQ 特性カーブのキャッシュ (パラメータ/サイズ変化時だけ再計算。アナライザーの 30Hz
+    // アニメーションごとに 6 biquad × ピクセル数を再評価しないため)。
+    juce::Path cachedCurve, cachedCurveFill;
+    bool curveDirty { true };
+    void rebuildCurveIfNeeded();
+
     static constexpr float kFMin { 20.0f };
     static constexpr float kFMax { 20000.0f };
     static constexpr float kGMax { 18.0f };    // 縦軸 ±kGMax dB

@@ -50,7 +50,7 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
     presetBox.onChange = [this]
     {
         const int idx = presetBox.getSelectedId() - 100;
-        if (idx >= 0) { eq.applyPreset(idx); repaint(); }
+        if (idx >= 0) { eq.applyPreset(idx); curveDirty = true; repaint(); }
     };
     addAndMakeVisible(presetBox);
 
@@ -62,6 +62,7 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
     {
         eq.applyPreset(0);   // フラット (preset 0)
         presetBox.setSelectedId(100, juce::dontSendNotification);
+        curveDirty = true;
         repaint();
     };
     addAndMakeVisible(resetBtn);
@@ -151,6 +152,7 @@ void BuiltInEQEditor::resized()
     spectrumBtn.setBounds(top.removeFromLeft(104));
     presetBox.setBounds(top.removeFromRight(170));
     graph = area.reduced(kMargin).withTrimmedTop(0);
+    curveDirty = true;   // graph 座標が変わったのでカーブ再計算
 }
 
 void BuiltInEQEditor::timerCallback()
@@ -180,6 +182,32 @@ void BuiltInEQEditor::updateAnalyzer()
     binMagPrefix[0] = 0.0f;
     for (int k = 0; k <= N / 2; ++k)
         binMagPrefix[(size_t) (k + 1)] = binMagPrefix[(size_t) k] + binMag[(size_t) k];
+}
+
+void BuiltInEQEditor::rebuildCurveIfNeeded()
+{
+    if (! curveDirty || graph.isEmpty()) return;
+    curveDirty = false;
+
+    const auto gf = graph.toFloat();
+    const int w = juce::jmax(2, graph.getWidth());
+    std::vector<double> freqs((size_t) w), db((size_t) w);
+    for (int i = 0; i < w; ++i)
+        freqs[(size_t) i] = xToFreq(gf.getX() + (float) i);
+    eq.getMagnitudeResponse(freqs.data(), db.data(), w);
+
+    const float y0 = gainToY(0.0);
+    cachedCurve.clear();
+    cachedCurveFill.clear();
+    for (int i = 0; i < w; ++i)
+    {
+        const float x = gf.getX() + (float) i;
+        const float y = gainToY(db[(size_t) i]);
+        if (i == 0) { cachedCurve.startNewSubPath(x, y); cachedCurveFill.startNewSubPath(x, y0); cachedCurveFill.lineTo(x, y); }
+        else        { cachedCurve.lineTo(x, y); cachedCurveFill.lineTo(x, y); }
+    }
+    cachedCurveFill.lineTo(gf.getRight() - 1.0f, y0);
+    cachedCurveFill.closeSubPath();
 }
 
 void BuiltInEQEditor::paint(juce::Graphics& g)
@@ -280,30 +308,12 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
     }
 
     // ── EQ 周波数特性カーブ (0dB 線との間を塗り + 白ライン) ──
-    {
-        const int w = juce::jmax(2, graph.getWidth());
-        std::vector<double> freqs((size_t) w), db((size_t) w);
-        for (int i = 0; i < w; ++i)
-            freqs[(size_t) i] = xToFreq(gf.getX() + (float) i);
-        eq.getMagnitudeResponse(freqs.data(), db.data(), w);
-
-        const float y0 = gainToY(0.0);
-        juce::Path curve, curveFill;
-        for (int i = 0; i < w; ++i)
-        {
-            const float x = gf.getX() + (float) i;
-            const float y = gainToY(db[(size_t) i]);
-            if (i == 0) { curve.startNewSubPath(x, y); curveFill.startNewSubPath(x, y0); curveFill.lineTo(x, y); }
-            else        { curve.lineTo(x, y); curveFill.lineTo(x, y); }
-        }
-        curveFill.lineTo(gf.getRight() - 1.0f, y0);
-        curveFill.closeSubPath();
-
-        g.setColour(juce::Colours::white.withAlpha(0.10f));
-        g.fillPath(curveFill);
-        g.setColour(juce::Colours::white.withAlpha(0.95f));
-        g.strokePath(curve, juce::PathStrokeType(2.0f));
-    }
+    // カーブはパラメータ/サイズ変化時のみ再計算 (アナライザーの 30Hz アニメで毎回再評価しない)。
+    rebuildCurveIfNeeded();
+    g.setColour(juce::Colours::white.withAlpha(0.10f));
+    g.fillPath(cachedCurveFill);
+    g.setColour(juce::Colours::white.withAlpha(0.95f));
+    g.strokePath(cachedCurve, juce::PathStrokeType(2.0f));
 
     g.restoreState();
 
@@ -335,8 +345,11 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
         g.setFont(12.0f);
         const int tw = juce::jmax(72, g.getCurrentFont().getStringWidth(txt) + 16);
         const auto p = nodePos(nd);
-        float bx = juce::jlimit((float) graph.getX(), (float) graph.getRight() - tw, p.x - tw * 0.5f);
-        float by = juce::jlimit((float) graph.getY(), (float) graph.getBottom() - 22, p.y - 30.0f);
+        // lo<=hi を保証 (狭ウィンドウで getRight()-tw が getX() を下回っても jlimit を壊さない)
+        const float bxHi = juce::jmax((float) graph.getX(), (float) graph.getRight() - tw);
+        const float byHi = juce::jmax((float) graph.getY(), (float) graph.getBottom() - 22);
+        float bx = juce::jlimit((float) graph.getX(), bxHi, p.x - tw * 0.5f);
+        float by = juce::jlimit((float) graph.getY(), byHi, p.y - 30.0f);
         juce::Rectangle<float> box(bx, by, (float) tw, 20.0f);
         g.setColour(juce::Colour(0xee0a0a0a));
         g.fillRoundedRectangle(box, 4.0f);
@@ -368,6 +381,7 @@ void BuiltInEQEditor::mouseDrag(const juce::MouseEvent& e)
         eq.setP(nd.gainParam, juce::jlimit(gi.minV, gi.maxV, (float) yToGain(e.position.y)));
     }
     presetBox.setSelectedId(0, juce::dontSendNotification);   // 手動操作 = プリセット非選択
+    curveDirty = true;
     repaint();
 }
 
