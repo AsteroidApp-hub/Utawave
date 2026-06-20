@@ -31,6 +31,10 @@ namespace AppColours
     const juce::Colour meterRed         { 0xffcc2e2e };
     const juce::Colour meterBg         { 0xff111111 };
 
+    // 内蔵エフェクトのモダン UI 用アクセント (メーター/カーブ/スペクトラム)
+    const juce::Colour fxCyan           { 0xff37c8d4 };
+    const juce::Colour fxBlue           { 0xff2f7fb0 };
+
     const juce::Colour rulerBg          { 0xff202020 };
     const juce::Colour rulerText        { 0xff909090 };
     const juce::Colour rulerLine        { 0xff404040 };

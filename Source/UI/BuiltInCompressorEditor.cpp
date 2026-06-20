@@ -45,8 +45,8 @@ private:
     static constexpr float kDMin = -60.0f, kDMax = 0.0f;   // トランスファーカーブの軸
     static constexpr float kMetersW = 156.0f;
     static constexpr float kMinDb = -48.0f, kMaxDb = 6.0f; // レベルメーターの軸
-    const juce::Colour kCyan { 0xff37c8d4 };
-    const juce::Colour kBlue { 0xff2f7fb0 };
+    const juce::Colour kCyan { AppColours::fxCyan };
+    const juce::Colour kBlue { AppColours::fxBlue };
 
     BuiltInCompressor& comp;
     juce::TextButton autoBtn;
@@ -88,23 +88,7 @@ private:
         autoBtn.setBounds(g.getX(), juce::jmax(6, g.getY() - 27), 116, 22);
     }
 
-    // ── レベルメーター (下から上へ) / GR メーター (上から下へ) ──
-    void drawLevelBar(juce::Graphics& g, juce::Rectangle<float> r, float db, const juce::String& label)
-    {
-        g.setColour(AppColours::meterBg);
-        g.fillRoundedRectangle(r, 2.0f);
-        const float frac = juce::jlimit(0.0f, 1.0f, (db - kMinDb) / (kMaxDb - kMinDb));
-        if (frac > 0.001f)
-        {
-            auto fillR = r.withTop(r.getBottom() - r.getHeight() * frac);
-            juce::ColourGradient grad(kCyan, r.getX(), r.getBottom(), kCyan.brighter(0.4f), r.getX(), r.getY(), false);
-            g.setGradientFill(grad);
-            g.fillRoundedRectangle(fillR, 2.0f);
-        }
-        g.setColour(AppColours::textDim);
-        g.setFont(10.0f);
-        g.drawText(label, r.getX() - 4, r.getBottom() + 2, r.getWidth() + 8, 12, juce::Justification::centred);
-    }
+    // GR メーター (上から下へ・任意位置)。レベルメーターは基底の drawLevelBar を使う。
     void drawGrBar(juce::Graphics& g, juce::Rectangle<float> r, float redDb)
     {
         g.setColour(AppColours::meterBg);
@@ -144,9 +128,9 @@ private:
         const juce::Rectangle<float> inR (x0,                  m.getY(), barW, m.getHeight());
         const juce::Rectangle<float> grR (x0 + barW + gap,     m.getY(), barW, m.getHeight());
         const juce::Rectangle<float> outR(x0 + (barW + gap) * 2, m.getY(), barW, m.getHeight());
-        drawLevelBar(g, inR,  smIn,  "IN");
+        drawLevelBar(g, inR,  smIn,  kMinDb, kMaxDb, kCyan, "IN");
         drawGrBar   (g, grR,  smoothedReductionDb());
-        drawLevelBar(g, outR, smOut, "OUT");
+        drawLevelBar(g, outR, smOut, kMinDb, kMaxDb, kCyan, "OUT");
 
         // ── トランスファーカーブ域 (右) ──
         const auto c = curveArea(area);

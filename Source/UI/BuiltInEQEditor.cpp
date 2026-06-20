@@ -6,6 +6,8 @@
 #include "../AppColours.h"
 #include <cmath>
 
+static_assert(SpectrumScope::N == BuiltInEQ::kAnalyzerSize, "SpectrumScope/analyzer size mismatch");
+
 namespace
 {
     constexpr int   kTopH   = 34;

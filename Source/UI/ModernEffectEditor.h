@@ -41,6 +41,9 @@ protected:
     juce::Slider* knobForParam(int param) const;   // 指定パラメータのノブ (無ければ nullptr)
     // GR メータ (右端の縦バー) 描画。コンプ/ディエッサー共用。fullScaleDb = 上限の減衰量。
     void drawReductionMeter(juce::Graphics&, juce::Rectangle<float> area, float fullScaleDb);
+    // レベルメータ (下から上へ・シアングラデ) を rect に描く。コンプ IN/OUT・リバーブ OUT 共用。
+    void drawLevelBar(juce::Graphics&, juce::Rectangle<float> rect, float db,
+                      float minDb, float maxDb, juce::Colour col, const juce::String& label);
 
     BuiltInEffect& fx;
     juce::Rectangle<int> graph;

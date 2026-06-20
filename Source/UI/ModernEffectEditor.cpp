@@ -110,6 +110,27 @@ void ModernEffectEditor::drawReductionMeter(juce::Graphics& g, juce::Rectangle<f
                (int) kMeterW, 14, juce::Justification::centred);
 }
 
+void ModernEffectEditor::drawLevelBar(juce::Graphics& g, juce::Rectangle<float> r, float db,
+                                      float minDb, float maxDb, juce::Colour col, const juce::String& label)
+{
+    g.setColour(AppColours::meterBg);
+    g.fillRoundedRectangle(r, 2.0f);
+    const float frac = juce::jlimit(0.0f, 1.0f, (db - minDb) / juce::jmax(1.0f, maxDb - minDb));
+    if (frac > 0.001f)
+    {
+        auto fillR = r.withTop(r.getBottom() - r.getHeight() * frac);
+        juce::ColourGradient grad(col, r.getX(), r.getBottom(), col.brighter(0.4f), r.getX(), r.getY(), false);
+        g.setGradientFill(grad);
+        g.fillRoundedRectangle(fillR, 2.0f);
+    }
+    if (label.isNotEmpty())
+    {
+        g.setColour(AppColours::textDim);
+        g.setFont(10.0f);
+        g.drawText(label, r.getX() - 6, r.getBottom() + 2, r.getWidth() + 12, 12, juce::Justification::centred);
+    }
+}
+
 void ModernEffectEditor::resized()
 {
     auto area = getLocalBounds().reduced(kMargin, kMargin);

@@ -33,7 +33,8 @@ public:
     template <class Reader>
     void update(Reader&& reader)
     {
-        reader(samples.data(), N);
+        const int got = (int) reader(samples.data(), N);
+        for (int i = got; i < N; ++i) samples[(size_t) i] = 0.0f;   // 取得不足分は 0 埋め (古い値で FFT しない)
         for (int i = 0; i < N; ++i)
             samples[(size_t) i] *= window[(size_t) i];
         fft.forward(samples.data(), spec.data());

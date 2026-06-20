@@ -25,8 +25,8 @@ public:
 private:
     static constexpr float kMeterW = 28.0f, kScaleW = 26.0f, kTimeH = 14.0f;
     static constexpr float kMinDb = -60.0f, kMaxDb = 0.0f;
-    const juce::Colour kBlue { 0xff2f7fb0 };
-    const juce::Colour kCyan { 0xff37c8d4 };
+    const juce::Colour kBlue { AppColours::fxBlue };
+    const juce::Colour kCyan { AppColours::fxCyan };
 
     BuiltInReverb& rev;
     float smOut { -100.0f };
@@ -112,19 +112,7 @@ private:
 
         // ライブ出力メーター (右)
         auto m = juce::Rectangle<float>(area.getRight() - kMeterW + 4, area.getY() + 6, kMeterW - 8, juce::jmax(1.0f, area.getHeight() - 24));
-        g.setColour(AppColours::meterBg);
-        g.fillRoundedRectangle(m, 2.0f);
-        const float frac = juce::jlimit(0.0f, 1.0f, (smOut - kMinDb) / (kMaxDb - kMinDb));
-        if (frac > 0.001f)
-        {
-            auto fillR = m.withTop(m.getBottom() - m.getHeight() * frac);
-            juce::ColourGradient mg(kCyan, m.getX(), m.getBottom(), kCyan.brighter(0.4f), m.getX(), m.getY(), false);
-            g.setGradientFill(mg);
-            g.fillRoundedRectangle(fillR, 2.0f);
-        }
-        g.setColour(AppColours::textDim);
-        g.setFont(10.0f);
-        g.drawText("OUT", (int) (area.getRight() - kMeterW + 2), (int) (area.getBottom() - 16), (int) kMeterW, 14, juce::Justification::centred);
+        drawLevelBar(g, m, smOut, kMinDb, kMaxDb, kCyan, "OUT");
     }
 };
 

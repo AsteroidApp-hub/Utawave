@@ -8,6 +8,8 @@
 #include "../Audio/builtin/BuiltInDeEsser.h"
 #include <cmath>
 
+static_assert(SpectrumScope::N == BuiltInDeEsser::kAnalyzerSize, "SpectrumScope/analyzer size mismatch");
+
 // ディエッサーのモダン UI: 青塗りのスペクトラムアナライザー全域に、処理対象の高域 (周波数以上) を
 // ハイライト + 周波数マーカー。dB/周波数の目盛り、右に GR メータ。
 class BuiltInDeEsserEditor : public ModernEffectEditor
@@ -27,8 +29,8 @@ private:
     static constexpr float kFMin = 20.0f, kFMax = 20000.0f, kMeterW = 28.0f;
     static constexpr float kScaleW = 26.0f, kFreqH = 14.0f;
     static constexpr float kAnMin = -72.0f, kAnMax = 0.0f;
-    const juce::Colour kBlue { 0xff2f7fb0 };
-    const juce::Colour kCyan { 0xff37c8d4 };
+    const juce::Colour kBlue { AppColours::fxBlue };
+    const juce::Colour kCyan { AppColours::fxCyan };
 
     BuiltInDeEsser& de;
     SpectrumScope scope;

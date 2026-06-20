@@ -53,6 +53,8 @@ void BuiltInReverb::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     const int numCh = juce::jmin(2, buffer.getNumChannels());
     if (cap <= 0 || numCh <= 0) return;
 
+    float maxOut = 0.0f;   // UI メーター用の出力ピーク (ミックスループ内で算出・追加走査なし)
+
     for (int off = 0; off < n; off += cap)
     {
         const int len = juce::jmin(cap, n - off);
@@ -76,16 +78,13 @@ void BuiltInReverb::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
             float* d = buffer.getWritePointer(ch) + off;
             const float* w = wetBuf.getReadPointer(ch);
             for (int i = 0; i < len; ++i)
+            {
                 d[i] = d[i] * dryGain + w[i] * mix;
+                maxOut = juce::jmax(maxOut, std::abs(d[i]));
+            }
         }
     }
 
     // UI メーター用の出力ピーク (dBFS)。平滑化は UI 側。
-    float maxOut = 0.0f;
-    for (int ch = 0; ch < numCh; ++ch)
-    {
-        const float* d = buffer.getReadPointer(ch);
-        for (int i = 0; i < n; ++i) maxOut = juce::jmax(maxOut, std::abs(d[i]));
-    }
     meterOutputDb.store(maxOut > 1.0e-5f ? 20.0f * std::log10(maxOut) : -100.0f, std::memory_order_relaxed);
 }
