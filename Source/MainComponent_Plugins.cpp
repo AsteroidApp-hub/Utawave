@@ -7,6 +7,7 @@
 #include "MainComponent.h"
 #include "Localisation.h"
 #include "VST/PluginChain.h"
+#include "Audio/builtin/BuiltInFactory.h"  // 内蔵エフェクト (EQ/コンプ/リバーブ) の生成・メニュー注入
 #include "Edit/PluginActions.h"   // プラグインチェーン操作の Undo アクション (テスト可能・共有)
 #include "Edit/TrackActions.h"    // トラック追加/複製の Undo アクション (テスト可能・共有)
 #include "UI/PluginManagerDialog.h"
@@ -421,15 +422,21 @@ void MainComponent::handlePluginDropAcrossTracks(int srcTrack, int srcSlot,
         auto& fmgr      = pluginManager.getFormatManager();
 
         juce::String err;
-        std::unique_ptr<juce::AudioPluginInstance> instance(
-            fmgr.createPluginInstance(desc, sr, bs, err));
+        std::unique_ptr<juce::AudioPluginInstance> instance;
+        if (BuiltInFactory::isBuiltInFormat(desc.pluginFormatName))
+            // 内蔵エフェクトは formatManager に登録が無いので (fileOrIdentifier は安定 ID)
+            // ファクトリで複製する。state は下の setStateInformation でコピーされる。
+            instance = BuiltInFactory::create(desc.fileOrIdentifier);
+        else
+            instance = fmgr.createPluginInstance(desc, sr, bs, err);
 
         if (!instance)
         {
+            // 内蔵エフェクトの複製失敗時は err が空なのでフォールバック文言を出す
             juce::AlertWindow::showAsync(juce::MessageBoxOptions()
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"プラグインのコピーに失敗"))
-                .withMessage(err)
+                .withMessage(err.isNotEmpty() ? err : tr(u8"エフェクトを複製できませんでした"))
                 .withButton("OK"), nullptr);
             return;
         }
@@ -456,23 +463,34 @@ void MainComponent::addPluginToMaster(int slotIdx)
     auto& fmgr      = pluginManager.getFormatManager();
 
     juce::PopupMenu menu;
+    {
+        juce::PopupMenu builtin;
+        BuiltInFactory::appendMenu(builtin);
+        menu.addSubMenu("Utawave", builtin);
+        menu.addSeparator();
+    }
     juce::KnownPluginList::addToMenu(menu, knownList.getTypes(),
                                      juce::KnownPluginList::sortByManufacturer);
-
-    if (menu.getNumItems() == 0)
-    {
-        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::InfoIcon)
-            .withTitle(tr(u8"プラグインがありません"))
-            .withMessage(tr(u8"「ファイル」→「プラグインを管理...」でスキャンを実行してください"))
-            .withButton("OK"), nullptr);
-        return;
-    }
 
     menu.showMenuAsync(juce::PopupMenu::Options(),
         [this, slotIdx, &knownList, &fmgr](int result)
         {
             if (result <= 0) return;
+
+            // 内蔵エフェクト (予約 ID 域)
+            if (auto builtinInst = BuiltInFactory::createFromMenuId(result))
+            {
+                auto& mc = audioEngine.getMasterChain();
+                const int targetSlot = (slotIdx >= 0) ? slotIdx : mc.getNumPlugins();
+                undoManager.beginNewTransaction();
+                undoManager.perform(new PluginSlotAction(
+                    makeChainResolver(nullptr), targetSlot, std::move(builtinInst),
+                    [this] { markProjectDirty(); },
+                    [this](juce::AudioPluginInstance* p) { closePluginEditorFor(p); }));
+                openMasterPluginEditor(targetSlot);
+                return;
+            }
+
             const int typeIdx = juce::KnownPluginList::getIndexChosenByMenu(knownList.getTypes(), result);
             if (typeIdx < 0) return;
             auto desc = knownList.getTypes()[typeIdx];
@@ -559,23 +577,38 @@ void MainComponent::addPluginToTrack(int trackIdx, int slotIdx)
     auto& fmgr      = pluginManager.getFormatManager();
 
     juce::PopupMenu menu;
+    {
+        // 先頭に内蔵エフェクトのメーカー「Utawave」サブメニューを固定 (見つけやすさ優先)
+        juce::PopupMenu builtin;
+        BuiltInFactory::appendMenu(builtin);
+        menu.addSubMenu("Utawave", builtin);
+        menu.addSeparator();
+    }
     juce::KnownPluginList::addToMenu(menu, knownList.getTypes(),
                                      juce::KnownPluginList::sortByManufacturer);
-
-    if (menu.getNumItems() == 0)
-    {
-        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::InfoIcon)
-            .withTitle(tr(u8"プラグインがありません"))
-            .withMessage(tr(u8"「ファイル」→「プラグインを管理...」でスキャンを実行してください"))
-            .withButton("OK"), nullptr);
-        return;
-    }
 
     menu.showMenuAsync(juce::PopupMenu::Options(),
         [this, trackIdx, slotIdx, &knownList, &fmgr](int result)
         {
             if (result <= 0) return;
+
+            // 内蔵エフェクト (予約 ID 域)
+            if (auto builtinInst = BuiltInFactory::createFromMenuId(result))
+            {
+                auto* tr2 = trackManager.getTrack(trackIdx);
+                if (!tr2) return;
+                const int targetSlot = (slotIdx >= 0)
+                                           ? slotIdx
+                                           : tr2->getPluginChain().getNumPlugins();
+                undoManager.beginNewTransaction();
+                undoManager.perform(new PluginSlotAction(
+                    makeChainResolver(tr2), targetSlot, std::move(builtinInst),
+                    [this] { markProjectDirty(); },
+                    [this](juce::AudioPluginInstance* p) { closePluginEditorFor(p); }));
+                openPluginEditor(trackIdx, targetSlot);
+                return;
+            }
+
             const int typeIdx = juce::KnownPluginList::getIndexChosenByMenu(knownList.getTypes(), result);
             if (typeIdx < 0) return;
             auto desc = knownList.getTypes()[typeIdx];

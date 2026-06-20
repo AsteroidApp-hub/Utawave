@@ -5,6 +5,7 @@
 #include "../VST/PluginChain.h"
 #include "../VST/PluginManager.h"
 #include "../VST/PluginChain.h"
+#include "../Audio/builtin/BuiltInFactory.h"  // 内蔵エフェクトの復元 (format="Utawave")
 #include "../Tracks/MidiClip.h"
 
 namespace {
@@ -42,6 +43,34 @@ juce::Colour hexToColor(const juce::String& s)
     juce::uint32 v = (juce::uint32)t.getHexValue64();
     if (t.length() == 6) v |= 0xff000000;
     return juce::Colour(v);
+}
+
+// 内蔵エフェクト (format="Utawave") を 1 件 chain へ復元する。knownList/formatManager に
+// 依存しない (自己完結) ので PluginManager が無いヘッドレス/テスト経路でも復元できる。
+// 戻り値 true = 内蔵として処理済み (呼び出し側は VST 経路に流さない) / false = 内蔵でない。
+bool restoreBuiltInPlugin(const juce::XmlElement* pEl, PluginChain& chain)
+{
+    if (! BuiltInFactory::isBuiltInFormat(pEl->getStringAttribute("format")))
+        return false;
+
+    auto inst = BuiltInFactory::createFromIdentifierString(pEl->getStringAttribute("id"));
+    if (inst == nullptr)
+    {
+        DBG("Built-in effect not found: " << pEl->getStringAttribute("id"));
+        return true;   // 内蔵だが未知 → ここで処理済み扱い (VST 経路に誤って流さない)
+    }
+    const auto b64 = pEl->getStringAttribute("state");
+    if (b64.isNotEmpty())
+    {
+        juce::MemoryBlock mb;
+        if (mb.fromBase64Encoding(b64) && mb.getSize() > 0)
+            inst->setStateInformation(mb.getData(), (int) mb.getSize());
+    }
+    const int slotIdx = pEl->getIntAttribute("slotIndex", chain.getNumPlugins());
+    chain.insertPluginAt(slotIdx, std::move(inst));
+    if (pEl->getIntAttribute("bypassed", 0) != 0)
+        chain.setBypassed(slotIdx, true);
+    return true;
 }
 } // namespace
 
@@ -531,23 +560,31 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                 }
             }
 
-            // プラグインチェーンの復元（PluginManager がある場合のみ）
-            if (s.pluginManager != nullptr)
+            // プラグインチェーンの復元。内蔵エフェクトは自己完結なので PluginManager 不要、
+            // VST3 のみ PluginManager (knownList/formatManager) を要する。
+            if (auto* pluginsEl = trackEl->getChildByName("Plugins"))
             {
-                if (auto* pluginsEl = trackEl->getChildByName("Plugins"))
+                const bool havePM = (s.pluginManager != nullptr);
+                // KnownPluginList::getTypes() は値で返るため、一度ローカルにコピーしてから検索する。
+                // 以前は一時 Array の要素アドレスを保持 → ループ終了で dangling pointer になり VST3 ロード時にクラッシュしていた。
+                const juce::Array<juce::PluginDescription> types =
+                    havePM ? s.pluginManager->getKnownPluginListRW().getTypes()
+                           : juce::Array<juce::PluginDescription>();
+
+                for (auto* pEl : pluginsEl->getChildIterator())
                 {
-                    auto& knownList = s.pluginManager->getKnownPluginListRW();
+                    if (!pEl->hasTagName("Plugin")) continue;
+
+                    // 内蔵エフェクトは PluginManager に依らず復元する
+                    if (restoreBuiltInPlugin(pEl, tr->getPluginChain()))
+                        continue;
+
+                    if (!havePM) continue;   // VST3 は PluginManager 必須
+
                     auto& fmgr      = s.pluginManager->getFormatManager();
+                    const auto idStr = pEl->getStringAttribute("id");
 
-                    // KnownPluginList::getTypes() は値で返るため、一度ローカルにコピーしてから検索する。
-                    // 以前は一時 Array の要素アドレスを保持 → ループ終了で dangling pointer になり VST3 ロード時にクラッシュしていた。
-                    const juce::Array<juce::PluginDescription> types = knownList.getTypes();
-
-                    for (auto* pEl : pluginsEl->getChildIterator())
                     {
-                        if (!pEl->hasTagName("Plugin")) continue;
-                        const auto idStr = pEl->getStringAttribute("id");
-
                         juce::PluginDescription matchDesc;
                         bool found = false;
                         for (const auto& d : types)
@@ -645,19 +682,29 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
     }
 
     // ── マスターインサートチェーンの復元 ──
-    if (s.masterChain != nullptr && s.pluginManager != nullptr)
+    // 内蔵エフェクトは自己完結なので PluginManager 不要、VST3 のみ PluginManager を要する。
+    if (s.masterChain != nullptr)
     {
         if (auto* masterEl = xml->getChildByName("Master"))
         {
             if (auto* pluginsEl = masterEl->getChildByName("Plugins"))
             {
-                auto& knownList = s.pluginManager->getKnownPluginListRW();
-                auto& fmgr      = s.pluginManager->getFormatManager();
-                const juce::Array<juce::PluginDescription> types = knownList.getTypes();
+                const bool havePM = (s.pluginManager != nullptr);
+                const juce::Array<juce::PluginDescription> types =
+                    havePM ? s.pluginManager->getKnownPluginListRW().getTypes()
+                           : juce::Array<juce::PluginDescription>();
 
                 for (auto* pEl : pluginsEl->getChildIterator())
                 {
                     if (!pEl->hasTagName("Plugin")) continue;
+
+                    // 内蔵エフェクトは PluginManager に依らず復元する
+                    if (restoreBuiltInPlugin(pEl, *s.masterChain))
+                        continue;
+
+                    if (!havePM) continue;   // VST3 は PluginManager 必須
+
+                    auto& fmgr      = s.pluginManager->getFormatManager();
                     const auto idStr = pEl->getStringAttribute("id");
 
                     juce::PluginDescription matchDesc;

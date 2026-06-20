@@ -574,7 +574,48 @@ static const char* const englishTranslations =
     "\"起動画面に広告を表示する (OFF で通信しません。次回起動で反映)\" = \"Show ads on the startup screen (no network when off; applies on next launch)\"\n"
     // ── アップデート通知 (起動画面右上のバナー) ──
     "\"アップデートがあります\" = \"Update available\"\n"
-    "\"ダウンロードページを開く\" = \"Open the download page\"\n";
+    "\"ダウンロードページを開く\" = \"Open the download page\"\n"
+    // ── 内蔵エフェクト (EQ / コンプ / リバーブ) ──
+    "\"内蔵EQ\" = \"EQ\"\n"
+    "\"内蔵コンプ\" = \"Compressor\"\n"
+    "\"内蔵リバーブ\" = \"Reverb\"\n"
+    "\"エフェクトを複製できませんでした\" = \"Couldn't duplicate the effect\"\n"
+    "\"プリセット\" = \"Preset\"\n"
+    "\"選択...\" = \"Select...\"\n"
+    // EQ パラメータ / プリセット
+    "\"ローカット\" = \"Low Cut\"\n"
+    "\"低域 Hz\" = \"Low Hz\"\n"
+    "\"低域\" = \"Low\"\n"
+    "\"中域 Hz\" = \"Mid Hz\"\n"
+    "\"中域\" = \"Mid\"\n"
+    "\"高域 Hz\" = \"High Hz\"\n"
+    "\"高域\" = \"High\"\n"
+    "\"フラット\" = \"Flat\"\n"
+    "\"ボーカル明瞭\" = \"Vocal Clarity\"\n"
+    "\"低域すっきり\" = \"Tighten Lows\"\n"
+    "\"温かみ\" = \"Warmth\"\n"
+    "\"ラジオ風\" = \"Radio\"\n"
+    // コンプ パラメータ / プリセット
+    "\"スレッショルド\" = \"Threshold\"\n"
+    "\"レシオ\" = \"Ratio\"\n"
+    "\"アタック\" = \"Attack\"\n"
+    "\"リリース\" = \"Release\"\n"
+    "\"メイクアップ\" = \"Makeup\"\n"
+    "\"オフ\" = \"Off\"\n"
+    "\"ボーカル軽め\" = \"Vocal Light\"\n"
+    "\"ボーカルしっかり\" = \"Vocal Strong\"\n"
+    "\"ナレーション\" = \"Narration\"\n"
+    "\"リミッター風\" = \"Limiter\"\n"
+    // リバーブ パラメータ / プリセット
+    "\"ミックス\" = \"Mix\"\n"
+    "\"広さ\" = \"Size\"\n"
+    "\"ダンピング\" = \"Damping\"\n"
+    "\"ステレオ幅\" = \"Width\"\n"
+    "\"ボーカル\" = \"Vocal\"\n"
+    "\"プレート\" = \"Plate\"\n"
+    "\"ルーム\" = \"Room\"\n"
+    "\"ホール\" = \"Hall\"\n"
+    "\"薄く\" = \"Subtle\"\n";
 
 void install(Language lang)
 {

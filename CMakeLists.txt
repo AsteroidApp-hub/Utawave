@@ -54,6 +54,10 @@ target_sources(Utawave PRIVATE
     Source/Audio/AudioDeviceSettings.cpp
     Source/Audio/PitchEngine.cpp
     Source/Audio/pitchcore/PitchShiftEngine.cpp
+    Source/Audio/builtin/BuiltInEQ.cpp
+    Source/Audio/builtin/BuiltInCompressor.cpp
+    Source/Audio/builtin/BuiltInReverb.cpp
+    Source/Audio/builtin/BuiltInFactory.cpp
     Source/Tracks/AudioClip.cpp
     Source/Tracks/Track.cpp
     Source/Tracks/TrackManager.cpp
@@ -98,6 +102,7 @@ target_sources(Utawave PRIVATE
     Source/UI/TimelineView_Markers.cpp
     Source/UI/MasterPanel.cpp
     Source/UI/PianoRollEditor.cpp
+    Source/UI/BuiltInEffectEditor.cpp
     Source/UI/StatusBar.cpp
 )
 
@@ -315,9 +320,15 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/UpdateCheckerTests.cpp
         Tests/CrashReporterTests.cpp
         Tests/PitchEngineTests.cpp
+        Tests/BuiltInEffectsTests.cpp
         Source/Audio/AudioFileImporter.cpp
         Source/Audio/PitchEngine.cpp
         Source/Audio/pitchcore/PitchShiftEngine.cpp
+        Source/Audio/builtin/BuiltInEQ.cpp
+        Source/Audio/builtin/BuiltInCompressor.cpp
+        Source/Audio/builtin/BuiltInReverb.cpp
+        Source/Audio/builtin/BuiltInFactory.cpp
+        Source/UI/BuiltInEffectEditor.cpp
         Source/Project/AdService.cpp
         Source/Project/UpdateChecker.cpp
         Source/Project/CrashReporter.cpp
