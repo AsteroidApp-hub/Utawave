@@ -46,7 +46,8 @@ private:
     static constexpr float kMeterW = 26.0f;
     BuiltInCompressor& comp;
     juce::TextButton autoBtn;
-    int dragMode { -1 };   // -1=なし, 0=threshold, 1=ratio
+    int   dragMode { -1 };    // -1=なし, 0=threshold, 1=ratio
+    float dragMakeup { 0.0f }; // レシオドラッグ開始時のメイクアップ (オートゲインの自己フィードバック防止)
 
     juce::Rectangle<float> curveArea(juce::Rectangle<float> a) const { return a.reduced(8.0f).withTrimmedRight(kMeterW); }
     float xFromIn (juce::Rectangle<float> c, float db) const { return c.getX() + (db - kDMin) / (kDMax - kDMin) * c.getWidth(); }
@@ -118,20 +119,7 @@ private:
         g.setColour(juce::Colours::white);
         g.drawEllipse(bx - 6, by - 6, 12, 12, 2.0f);
 
-        // GR メータ
-        auto m = juce::Rectangle<float>(area.getRight() - kMeterW + 4, area.getY() + 6, kMeterW - 8, area.getHeight() - 24);
-        g.setColour(AppColours::meterBg);
-        g.fillRoundedRectangle(m, 2.0f);
-        const float frac = juce::jlimit(0.0f, 1.0f, smoothedReductionDb() / 24.0f);
-        if (frac > 0.001f)
-        {
-            auto fill = m.removeFromTop(m.getHeight() * frac);
-            g.setColour(frac > 0.8f ? AppColours::meterRed : frac > 0.4f ? AppColours::meterYellow : AppColours::accent);
-            g.fillRoundedRectangle(fill, 2.0f);
-        }
-        g.setColour(AppColours::textDim);
-        g.setFont(10.0f);
-        g.drawText("GR", (int) (area.getRight() - kMeterW + 2), (int) (area.getBottom() - 16), (int) kMeterW, 14, juce::Justification::centred);
+        drawReductionMeter(g, area, 24.0f);
     }
 
     void onGraphMouseDown(const juce::MouseEvent& e) override
@@ -145,6 +133,7 @@ private:
         // ノードを実際に掴んだ時だけ動かす (メータや余白のクリックでは値を変えない)
         if (juce::jmin(dA, dB) > 22.0f) { dragMode = -1; return; }
         dragMode = (dB < dA) ? 1 : 0;
+        dragMakeup = comp.currentMakeupDb();   // ドラッグ中は固定 (オートゲインの自己フィードバック防止)
         onGraphMouseDrag(e);
     }
 
@@ -159,7 +148,8 @@ private:
             const float thr = comp.getP(BuiltInCompressor::ThresholdDb);
             const float over = juce::jmax(1.0f, -thr);
             const float yOut = outFromY(c, e.position.y);
-            const float slope = juce::jlimit(0.0f, 0.95f, (comp.currentMakeupDb() - yOut) / over);
+            // メイクアップはドラッグ開始時の値で固定 (オートゲイン ON だと ratio→makeup→ratio の暴走になる)
+            const float slope = juce::jlimit(0.0f, 0.95f, (dragMakeup - yOut) / over);
             const float ratio = 1.0f / (1.0f - slope);
             const auto& pi = comp.getParamInfo(BuiltInCompressor::Ratio);
             comp.setP(BuiltInCompressor::Ratio, juce::jlimit(pi.minV, pi.maxV, ratio));

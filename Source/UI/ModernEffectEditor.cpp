@@ -84,7 +84,31 @@ ModernEffectEditor::ModernEffectEditor(BuiltInEffect& f, std::vector<int> knobPa
     startTimerHz(30);
 }
 
-ModernEffectEditor::~ModernEffectEditor() { setLookAndFeel(nullptr); }
+ModernEffectEditor::~ModernEffectEditor()
+{
+    stopTimer();   // 破棄中に timerCallback が onTick 等の仮想を呼ばないよう先に止める
+    setLookAndFeel(nullptr);
+}
+
+void ModernEffectEditor::drawReductionMeter(juce::Graphics& g, juce::Rectangle<float> area, float fullScaleDb)
+{
+    constexpr float kMeterW = 26.0f;
+    auto m = juce::Rectangle<float>(area.getRight() - kMeterW + 4, area.getY() + 6,
+                                    kMeterW - 8, juce::jmax(1.0f, area.getHeight() - 24));
+    g.setColour(AppColours::meterBg);
+    g.fillRoundedRectangle(m, 2.0f);
+    const float frac = juce::jlimit(0.0f, 1.0f, smReductionDb / juce::jmax(1.0f, fullScaleDb));
+    if (frac > 0.001f)
+    {
+        auto fill = m.removeFromTop(m.getHeight() * frac);
+        g.setColour(frac > 0.8f ? AppColours::meterRed : frac > 0.4f ? AppColours::meterYellow : AppColours::accent);
+        g.fillRoundedRectangle(fill, 2.0f);
+    }
+    g.setColour(AppColours::textDim);
+    g.setFont(10.0f);
+    g.drawText("GR", (int) (area.getRight() - kMeterW + 2), (int) (area.getBottom() - 16),
+               (int) kMeterW, 14, juce::Justification::centred);
+}
 
 void ModernEffectEditor::resized()
 {

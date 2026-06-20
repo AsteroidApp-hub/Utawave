@@ -15,12 +15,12 @@ BuiltInCompressor::BuiltInCompressor()
     addParam({ "makeupDb",    u8"メイクアップ",   "dB",   0.0f,  24.0f,   0.0f, 1.0f  });
     addParam({ "autoGain",    u8"オートゲイン",   "",     0.0f,   1.0f,   0.0f, 1.0f  });
 
-    //          thr     ratio atk    rel    makeup
-    addPreset(u8"オフ",          { 0.0f,   1.0f, 10.0f, 120.0f, 0.0f });
-    addPreset(u8"ボーカル軽め",  { -18.0f, 2.5f, 15.0f, 150.0f, 3.0f });
-    addPreset(u8"ボーカルしっかり", { -24.0f, 4.0f,  5.0f, 100.0f, 6.0f });
-    addPreset(u8"ナレーション",  { -20.0f, 3.0f, 10.0f, 200.0f, 4.0f });
-    addPreset(u8"リミッター風",  { -6.0f, 12.0f,  1.0f,  80.0f, 0.0f });
+    //          thr     ratio atk    rel    makeup autoGain
+    addPreset(u8"オフ",          { 0.0f,   1.0f, 10.0f, 120.0f, 0.0f, 0.0f });
+    addPreset(u8"ボーカル軽め",  { -18.0f, 2.5f, 15.0f, 150.0f, 3.0f, 0.0f });
+    addPreset(u8"ボーカルしっかり", { -24.0f, 4.0f,  5.0f, 100.0f, 6.0f, 0.0f });
+    addPreset(u8"ナレーション",  { -20.0f, 3.0f, 10.0f, 200.0f, 4.0f, 0.0f });
+    addPreset(u8"リミッター風",  { -6.0f, 12.0f,  1.0f,  80.0f, 0.0f, 0.0f });
 }
 
 const juce::String BuiltInCompressor::getName() const { return tr(u8"内蔵コンプ"); }

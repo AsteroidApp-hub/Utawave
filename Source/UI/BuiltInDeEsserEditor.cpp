@@ -67,20 +67,7 @@ private:
         g.setFont(11.0f);
         g.drawText(tr(u8"サ行"), (int) fx2 + 8, (int) b.getY() + 6, 60, 16, juce::Justification::left);
 
-        // GR メータ
-        auto m = juce::Rectangle<float>(area.getRight() - kMeterW + 4, area.getY() + 6, kMeterW - 8, area.getHeight() - 24);
-        g.setColour(AppColours::meterBg);
-        g.fillRoundedRectangle(m, 2.0f);
-        const float frac = juce::jlimit(0.0f, 1.0f, smoothedReductionDb() / 18.0f);
-        if (frac > 0.001f)
-        {
-            auto fill = m.removeFromTop(m.getHeight() * frac);
-            g.setColour(frac > 0.8f ? AppColours::meterRed : frac > 0.4f ? AppColours::meterYellow : AppColours::accent);
-            g.fillRoundedRectangle(fill, 2.0f);
-        }
-        g.setColour(AppColours::textDim);
-        g.setFont(10.0f);
-        g.drawText("GR", (int) (area.getRight() - kMeterW + 2), (int) (area.getBottom() - 16), (int) kMeterW, 14, juce::Justification::centred);
+        drawReductionMeter(g, area, 18.0f);
     }
 
     bool dragging { false };

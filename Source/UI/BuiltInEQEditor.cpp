@@ -61,6 +61,7 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
 
 BuiltInEQEditor::~BuiltInEQEditor()
 {
+    stopTimer();   // 破棄中に timerCallback が走らないよう先に止める
     eq.setAnalyzerActive(false);
     setLookAndFeel(nullptr);
 }

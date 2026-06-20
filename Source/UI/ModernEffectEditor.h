@@ -39,6 +39,8 @@ protected:
     void  clearPresetSelection() { presetBox.setSelectedId(0, juce::dontSendNotification); }
     float smoothedReductionDb() const noexcept { return smReductionDb; }
     juce::Slider* knobForParam(int param) const;   // 指定パラメータのノブ (無ければ nullptr)
+    // GR メータ (右端の縦バー) 描画。コンプ/ディエッサー共用。fullScaleDb = 上限の減衰量。
+    void drawReductionMeter(juce::Graphics&, juce::Rectangle<float> area, float fullScaleDb);
 
     BuiltInEffect& fx;
     juce::Rectangle<int> graph;

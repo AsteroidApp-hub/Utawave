@@ -44,8 +44,11 @@ void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
 
     // NaN/Inf がフィルタ状態に入ると以降ずっと出力を汚染するため、混入を検知したら全段リセット
     // (ScopedNoDenormals は NaN を救わない)。代表として各段の z1[0] を点検する。
-    if (! (std::isfinite(hpf.z1[0]) && std::isfinite(low.z1[0]) && std::isfinite(loMid.z1[0])
-        && std::isfinite(mid.z1[0]) && std::isfinite(hiMid.z1[0]) && std::isfinite(air.z1[0])))
+    auto stageFinite = [] (const Biquad& b) {
+        return std::isfinite(b.z1[0]) && std::isfinite(b.z1[1]) && std::isfinite(b.z2[0]) && std::isfinite(b.z2[1]);
+    };
+    if (! (stageFinite(hpf) && stageFinite(low) && stageFinite(loMid)
+        && stageFinite(mid) && stageFinite(hiMid) && stageFinite(air)))
     {
         hpf.reset(); low.reset(); loMid.reset(); mid.reset(); hiMid.reset(); air.reset();
     }
@@ -119,9 +122,12 @@ void BuiltInEQ::getMagnitudeResponse(const double* freqHz, double* outDb, int co
     a.setHighShelf (s, getP(AirHz),   getP(AirDb),   0.9);
 
     const double twoPiOverSr = 2.0 * juce::MathConstants<double>::pi / s;
+    const double nyq = s * 0.5;
     for (int i = 0; i < count; ++i)
     {
-        const double w = freqHz[i] * twoPiOverSr;
+        // ナイキストを超える周波数 (低 SR で表示軸が nyquist を超える場合) は折返しの偽カーブに
+        // なるため、ナイキスト直下にクランプして評価する。
+        const double w = juce::jmin(freqHz[i], nyq * 0.999) * twoPiOverSr;
         const double mag = h.magnitudeAt(w) * l.magnitudeAt(w) * lm.magnitudeAt(w)
                          * m.magnitudeAt(w) * hm.magnitudeAt(w) * a.magnitudeAt(w);
         outDb[i] = 20.0 * std::log10(juce::jmax(mag, 1.0e-6));
