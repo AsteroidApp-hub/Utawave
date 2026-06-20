@@ -21,8 +21,11 @@ public:
           comp(c)
     {
         autoBtn.setButtonText(tr(u8"オートゲイン"));
-        autoBtn.setColour(juce::ToggleButton::textColourId, AppColours::text);
-        autoBtn.setColour(juce::ToggleButton::tickColourId, AppColours::accent);
+        autoBtn.setClickingTogglesState(true);
+        autoBtn.setColour(juce::TextButton::buttonColourId,   AppColours::buttonBg);
+        autoBtn.setColour(juce::TextButton::buttonOnColourId, AppColours::accent);
+        autoBtn.setColour(juce::TextButton::textColourOffId,  AppColours::text);
+        autoBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
         autoBtn.setToggleState(comp.getP(BuiltInCompressor::AutoGain) > 0.5f, juce::dontSendNotification);
         autoBtn.onClick = [this]
         {
@@ -33,13 +36,16 @@ public:
         };
         addAndMakeVisible(autoBtn);
         updateAutoState();
+        // 基底 ctor の resized() は派生 vtable 確定前に走り layoutOverlay が効かないため、
+        // ここで再レイアウトしてオーバーレイ (オートゲイン トグル) を配置する。
+        resized();
     }
 
 private:
     static constexpr float kDMin = -60.0f, kDMax = 0.0f;
     static constexpr float kMeterW = 26.0f;
     BuiltInCompressor& comp;
-    juce::ToggleButton autoBtn;
+    juce::TextButton autoBtn;
     int dragMode { 0 };   // 0=threshold, 1=ratio
 
     juce::Rectangle<float> curveArea(juce::Rectangle<float> a) const { return a.reduced(8.0f).withTrimmedRight(kMeterW); }
