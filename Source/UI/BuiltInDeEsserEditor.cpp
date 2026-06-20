@@ -83,9 +83,18 @@ private:
         g.drawText("GR", (int) (area.getRight() - kMeterW + 2), (int) (area.getBottom() - 16), (int) kMeterW, 14, juce::Justification::centred);
     }
 
-    void onGraphMouseDown(const juce::MouseEvent& e) override { onGraphMouseDrag(e); }
+    bool dragging { false };
+
+    void onGraphMouseDown(const juce::MouseEvent& e) override
+    {
+        // 帯域エリア内 (GR メータ・余白を除く) のクリックだけ周波数操作にする
+        dragging = bandArea(graph.toFloat()).contains(e.position);
+        if (dragging) onGraphMouseDrag(e);
+    }
+    void onGraphMouseUp(const juce::MouseEvent&) override { dragging = false; }
     void onGraphMouseDrag(const juce::MouseEvent& e) override
     {
+        if (! dragging) return;
         const auto b = bandArea(graph.toFloat());
         const auto& pi = de.getParamInfo(BuiltInDeEsser::FreqHz);
         de.setP(BuiltInDeEsser::FreqHz, juce::jlimit(pi.minV, pi.maxV, (float) xToFreq(b, (float) e.position.x)));

@@ -46,7 +46,7 @@ private:
     static constexpr float kMeterW = 26.0f;
     BuiltInCompressor& comp;
     juce::TextButton autoBtn;
-    int dragMode { 0 };   // 0=threshold, 1=ratio
+    int dragMode { -1 };   // -1=なし, 0=threshold, 1=ratio
 
     juce::Rectangle<float> curveArea(juce::Rectangle<float> a) const { return a.reduced(8.0f).withTrimmedRight(kMeterW); }
     float xFromIn (juce::Rectangle<float> c, float db) const { return c.getX() + (db - kDMin) / (kDMax - kDMin) * c.getWidth(); }
@@ -73,7 +73,8 @@ private:
 
     void layoutOverlay(juce::Rectangle<int> g) override
     {
-        autoBtn.setBounds(g.getX() + 8, g.getY() + 6, 120, 22);
+        // グラフ外 (上部バーの左) に配置する
+        autoBtn.setBounds(g.getX(), juce::jmax(6, g.getY() - 27), 116, 22);
     }
 
     void paintGraph(juce::Graphics& g, juce::Rectangle<float> area) override
@@ -139,12 +140,19 @@ private:
         const float thr = comp.getP(BuiltInCompressor::ThresholdDb);
         const juce::Point<float> a(xFromIn(c, thr),  yFromOut(c, outAt(thr)));
         const juce::Point<float> b(xFromIn(c, 0.0f), yFromOut(c, outAt(0.0f)));
-        dragMode = (e.position.getDistanceFrom(b) < e.position.getDistanceFrom(a)) ? 1 : 0;
+        const float dA = e.position.getDistanceFrom(a);
+        const float dB = e.position.getDistanceFrom(b);
+        // ノードを実際に掴んだ時だけ動かす (メータや余白のクリックでは値を変えない)
+        if (juce::jmin(dA, dB) > 22.0f) { dragMode = -1; return; }
+        dragMode = (dB < dA) ? 1 : 0;
         onGraphMouseDrag(e);
     }
 
+    void onGraphMouseUp(const juce::MouseEvent&) override { dragMode = -1; }
+
     void onGraphMouseDrag(const juce::MouseEvent& e) override
     {
+        if (dragMode < 0) return;
         const auto c = curveArea(graph.toFloat());
         if (dragMode == 1)   // レシオ: input 0dB の出力位置から傾きを逆算
         {
