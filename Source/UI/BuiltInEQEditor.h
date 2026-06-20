@@ -58,7 +58,8 @@ private:
     std::array<float, BuiltInEQ::kAnalyzerSize>     samples {};
     std::array<float, BuiltInEQ::kAnalyzerSize>     window {};
     std::array<float, BuiltInEQ::kAnalyzerSize + 2> spec {};
-    std::vector<float> binDb;        // bin 毎の平滑化済み dB (size = kAnalyzerSize/2 + 1)
+    std::vector<float> binMag;       // bin 毎の平滑化済み線形振幅 (size = kAnalyzerSize/2 + 1)
+    std::vector<float> binMagPrefix; // binMag の累積和 (オクターブ平滑の範囲平均を O(1) で引く)
 
     static constexpr float kFMin { 20.0f };
     static constexpr float kFMax { 20000.0f };
