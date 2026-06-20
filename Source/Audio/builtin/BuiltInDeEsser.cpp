@@ -2,6 +2,7 @@
 // Copyright (C) 2025-2026 Utawave
 
 #include "BuiltInDeEsser.h"
+#include "GainDynamics.h"
 #include "../../Localisation.h"
 #include <cmath>
 
@@ -43,22 +44,22 @@ void BuiltInDeEsser::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     const float atkCoef = (float) std::exp(-1.0 / (sr * kAttackS));
     const float relCoef = (float) std::exp(-1.0 / (sr * kReleaseS));
     const float slope    = 1.0f - 1.0f / ratio;
-    const float halfKnee = kKneeDb * 0.5f;
 
     const int numCh = juce::jmin(2, buffer.getNumChannels());
     const int n     = buffer.getNumSamples();
     float* L = buffer.getWritePointer(0);
     float* R = numCh > 1 ? buffer.getWritePointer(1) : nullptr;
 
-    if (! std::isfinite(gainDb) || ! std::isfinite(lpState[0]) || ! std::isfinite(lpState[1]))
-    { gainDb = 0.0f; lpState[0] = lpState[1] = 0.0f; }
+    if (! std::isfinite(gainDb)) { gainDb = 0.0f; lpState[0] = lpState[1] = 0.0f; }
 
     float maxReductionDb = 0.0f;
 
     for (int i = 0; i < n; ++i)
     {
-        const float xL = L[i];
-        const float xR = R ? R[i] : xL;
+        // 入力をブロック内でサニタイズ: NaN/Inf が lpState (生入力で更新) に入ると当該ブロックの
+        // 残りが NaN 出力になるため、ここで 0 に潰してフィルタ状態と出力を汚染させない。
+        float xL = L[i]; if (! std::isfinite(xL)) xL = 0.0f;
+        float xR = R ? R[i] : xL; if (! std::isfinite(xR)) xR = 0.0f;
 
         // 1 次相補分割: lp を更新し hp = x - lp。検出にも減衰にも同じ hp を使う。
         lpState[0] += alpha * (xL - lpState[0]);
@@ -67,16 +68,10 @@ void BuiltInDeEsser::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
         if (R) { lpState[1] += alpha * (xR - lpState[1]); hbR = xR - lpState[1]; }
         else     hbR = hbL;
 
-        float side = juce::jmax(std::abs(hbL), std::abs(hbR));
-        if (! std::isfinite(side)) side = 0.0f;
-
+        const float side  = juce::jmax(std::abs(hbL), std::abs(hbR));
         const float lvlDb = 20.0f * std::log10(juce::jmax(side, 1.0e-6f));
         const float over  = lvlDb - threshold;
-
-        float grDb;
-        if (over <= -halfKnee)      grDb = 0.0f;
-        else if (over >= halfKnee)  grDb = slope * over;
-        else { const float x = over + halfKnee; grDb = slope * (x * x) / (2.0f * kKneeDb); }
+        const float grDb  = builtin::softKneeReductionDb(over, slope, kKneeDb);
 
         const float desiredGainDb = -grDb;
         const float coef = (desiredGainDb < gainDb) ? atkCoef : relCoef;

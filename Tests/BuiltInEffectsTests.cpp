@@ -212,6 +212,7 @@ private:
             BuiltInDeEsser a;
             a.setP(BuiltInDeEsser::FreqHz, 7200.0f);
             a.setP(BuiltInDeEsser::ThresholdDb, -25.0f);
+            a.setP(BuiltInDeEsser::Ratio, 7.0f);   // 全パラメータを非既定にして往復を網羅
             juce::MemoryBlock mb;
             a.getStateInformation(mb);
             BuiltInDeEsser b;
@@ -313,6 +314,27 @@ private:
                 ++count;
             }
             expect(count >= 3, "menu lists all built-in effects");
+        }
+
+        beginTest("Factory entries have unique uid and identifier");
+        {
+            // identifier / uid が衝突すると createFromIdentifierString が別エフェクトを誤って復元する
+            juce::StringArray ids;
+            juce::Array<juce::int32> uids;
+            juce::PopupMenu m;
+            BuiltInFactory::appendMenu(m);
+            for (juce::PopupMenu::MenuItemIterator it(m); it.next();)
+            {
+                auto fx = BuiltInFactory::createFromMenuId(it.getItem().itemID);
+                auto* eff = dynamic_cast<BuiltInEffect*>(fx.get());
+                expect(eff != nullptr, "menu id creates a built-in effect");
+                if (eff == nullptr) continue;
+                const auto id = eff->getIdentifier();
+                expect(! ids.contains(id), "identifier must be unique across built-in effects");
+                ids.add(id);
+                expect(! uids.contains(eff->getUid()), "uid must be unique across built-in effects");
+                uids.add(eff->getUid());
+            }
         }
 
         beginTest("Factory identifier-string round-trips");

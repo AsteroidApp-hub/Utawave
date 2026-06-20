@@ -2,6 +2,7 @@
 // Copyright (C) 2025-2026 Utawave
 
 #include "BuiltInCompressor.h"
+#include "GainDynamics.h"
 #include "../../Localisation.h"
 #include <cmath>
 
@@ -44,7 +45,6 @@ void BuiltInCompressor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float atkCoef = (float) std::exp(-1.0 / (sr * juce::jmax(0.0001, atkMs * 0.001)));
     const float relCoef = (float) std::exp(-1.0 / (sr * juce::jmax(0.0001, relMs * 0.001)));
     const float slope   = 1.0f - 1.0f / ratio;       // 圧縮の傾き
-    const float halfKnee = kKneeDb * 0.5f;
 
     const int numCh = juce::jmin(2, buffer.getNumChannels());
     const int n     = buffer.getNumSamples();
@@ -66,18 +66,7 @@ void BuiltInCompressor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 
         const float lvlDb = 20.0f * std::log10(juce::jmax(side, 1.0e-6f));
         const float over  = lvlDb - threshold;
-
-        // ソフトニー: ニー幅内は 2 次補間、超えたら直線
-        float grDb;
-        if (over <= -halfKnee)
-            grDb = 0.0f;
-        else if (over >= halfKnee)
-            grDb = slope * over;
-        else
-        {
-            const float x = over + halfKnee;        // 0..knee
-            grDb = slope * (x * x) / (2.0f * kKneeDb);
-        }
+        const float grDb  = builtin::softKneeReductionDb(over, slope, kKneeDb);
 
         const float desiredGainDb = -grDb;
         // より深い減衰へはアタック、戻りはリリースの時定数で平滑化
