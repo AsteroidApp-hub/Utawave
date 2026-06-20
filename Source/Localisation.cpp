@@ -580,6 +580,7 @@ static const char* const englishTranslations =
     "\"内蔵コンプ\" = \"Compressor\"\n"
     "\"内蔵ディエッサー\" = \"De-esser\"\n"
     "\"内蔵リバーブ\" = \"Reverb\"\n"
+    "\"サ行\" = \"Sibilance\"\n"
     "\"エフェクトを複製できませんでした\" = \"Couldn't duplicate the effect\"\n"
     // ディエッサー パラメータ / プリセット
     "\"周波数\" = \"Frequency\"\n"

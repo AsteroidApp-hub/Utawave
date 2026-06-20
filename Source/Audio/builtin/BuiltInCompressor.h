@@ -25,6 +25,8 @@ public:
     void releaseResources() override {}
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override;
 
+    juce::AudioProcessorEditor* createEditor() override;   // BuiltInCompressorEditor.cpp で定義
+
     bool  hasReductionMeter() const override { return true; }
     float getReductionDb()    const override { return meterReductionDb.load(std::memory_order_relaxed); }
 

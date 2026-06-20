@@ -23,6 +23,8 @@ public:
     void releaseResources() override {}
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override;
 
+    juce::AudioProcessorEditor* createEditor() override;   // BuiltInReverbEditor.cpp で定義
+
     // ウェットのテールが残るため、停止後もしばらく鳴らせるよう申告する
     double getTailLengthSeconds() const override { return 4.0; }
 
