@@ -54,9 +54,44 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
     };
     addAndMakeVisible(presetBox);
 
+    // RESET (全バンドをフラットへ)
+    resetBtn.setButtonText(tr(u8"リセット"));
+    resetBtn.setColour(juce::TextButton::buttonColourId,  AppColours::buttonBg);
+    resetBtn.setColour(juce::TextButton::textColourOffId, AppColours::text);
+    resetBtn.onClick = [this]
+    {
+        eq.applyPreset(0);   // フラット (preset 0)
+        presetBox.setSelectedId(100, juce::dontSendNotification);
+        repaint();
+    };
+    addAndMakeVisible(resetBtn);
+
+    // SPECTRUM 表示 ON/OFF
+    spectrumBtn.setButtonText(tr(u8"スペクトラム"));
+    spectrumBtn.setClickingTogglesState(true);
+    spectrumBtn.setToggleState(true, juce::dontSendNotification);
+    spectrumBtn.setColour(juce::TextButton::buttonColourId,   AppColours::buttonBg);
+    spectrumBtn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff2f9e44));
+    spectrumBtn.setColour(juce::TextButton::textColourOffId,  AppColours::text);
+    spectrumBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
+    spectrumBtn.onClick = [this]
+    {
+        spectrumOn = spectrumBtn.getToggleState();
+        eq.setAnalyzerActive(spectrumOn);
+        repaint();
+    };
+    addAndMakeVisible(spectrumBtn);
+
     eq.setAnalyzerActive(true);
-    setSize(620, 380);
+    setSize(720, 420);
     startTimerHz(30);
+}
+
+juce::String BuiltInEQEditor::formatFreq(double hz)
+{
+    if (hz >= 10000.0) return juce::String(hz / 1000.0, 0) + " kHz";
+    if (hz >= 1000.0)  return juce::String(hz / 1000.0, 2) + " kHz";
+    return juce::String((int) std::round(hz)) + " Hz";
 }
 
 BuiltInEQEditor::~BuiltInEQEditor()
@@ -110,14 +145,17 @@ int BuiltInEQEditor::hitTestNode(juce::Point<float> p) const
 void BuiltInEQEditor::resized()
 {
     auto area = getLocalBounds();
-    auto top = area.removeFromTop(kTopH);
-    presetBox.setBounds(top.removeFromRight(180).reduced(kMargin, 5));
+    auto top = area.removeFromTop(kTopH).reduced(kMargin, 5);
+    resetBtn.setBounds(top.removeFromLeft(60));
+    top.removeFromLeft(6);
+    spectrumBtn.setBounds(top.removeFromLeft(104));
+    presetBox.setBounds(top.removeFromRight(170));
     graph = area.reduced(kMargin).withTrimmedTop(0);
 }
 
 void BuiltInEQEditor::timerCallback()
 {
-    updateAnalyzer();
+    if (spectrumOn) updateAnalyzer();
     repaint(graph);
 }
 
@@ -160,19 +198,16 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
     g.saveState();
     g.reduceClipRegion(graph);
 
-    static const double freqLines[] = { 30, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
-    g.setFont(11.0f);
+    static const double freqLines[] = { 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
+    g.setFont(10.0f);
     for (double f : freqLines)
     {
         const float x = freqToX(f);
-        g.setColour(AppColours::rulerLine.withAlpha(0.35f));
+        g.setColour(AppColours::rulerLine.withAlpha(0.30f));
         g.drawVerticalLine((int) x, gf.getY(), gf.getBottom());
-        if (f == 100 || f == 1000 || f == 10000)
-        {
-            g.setColour(AppColours::textDim);
-            const juce::String lbl = f >= 1000 ? (juce::String((int) (f / 1000)) + "k") : juce::String((int) f);
-            g.drawText(lbl, (int) x - 16, graph.getBottom() - 15, 32, 14, juce::Justification::centred);
-        }
+        g.setColour(AppColours::textDim);
+        const juce::String lbl = f >= 1000 ? (juce::String((int) (f / 1000)) + "k") : juce::String((int) f);
+        g.drawText(lbl, (int) x - 16, graph.getBottom() - 14, 32, 13, juce::Justification::centred);
     }
     for (int db = -12; db <= 12; db += 6)
     {
@@ -187,9 +222,10 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
         }
     }
 
-    // ── アナライザー (背面) ──
+    // ── アナライザー (背面・緑グラデーション) ──
     // 低域は対数軸で bin が粗く階段状になるので、1/6 オクターブの範囲平均 (累積和で O(1)) と
     // bin 間のフラクショナル補間でなめらかな線にする。塗り + 上辺ラインでリッチに見せる。
+    if (spectrumOn)
     {
         const int    w       = graph.getWidth();
         const float  span    = kAnMaxDb - kAnMinDb;
@@ -234,13 +270,16 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
         fill.lineTo(gf.getRight(), gf.getBottom());
         fill.closeSubPath();
 
-        g.setColour(AppColours::accent.withAlpha(0.16f));
+        const juce::Colour green { 0xff8fdf6a };
+        juce::ColourGradient grad(green.withAlpha(0.34f), gf.getX(), gf.getY(),
+                                  green.withAlpha(0.02f), gf.getX(), gf.getBottom(), false);
+        g.setGradientFill(grad);
         g.fillPath(fill);
-        g.setColour(AppColours::accent.withAlpha(0.55f));
+        g.setColour(green.withAlpha(0.75f));
         g.strokePath(top, juce::PathStrokeType(1.2f));
     }
 
-    // ── EQ 周波数特性カーブ ──
+    // ── EQ 周波数特性カーブ (0dB 線との間を塗り + 白ライン) ──
     {
         const int w = juce::jmax(2, graph.getWidth());
         std::vector<double> freqs((size_t) w), db((size_t) w);
@@ -248,30 +287,63 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
             freqs[(size_t) i] = xToFreq(gf.getX() + (float) i);
         eq.getMagnitudeResponse(freqs.data(), db.data(), w);
 
-        juce::Path curve;
+        const float y0 = gainToY(0.0);
+        juce::Path curve, curveFill;
         for (int i = 0; i < w; ++i)
         {
             const float x = gf.getX() + (float) i;
             const float y = gainToY(db[(size_t) i]);
-            if (i == 0) curve.startNewSubPath(x, y);
-            else        curve.lineTo(x, y);
+            if (i == 0) { curve.startNewSubPath(x, y); curveFill.startNewSubPath(x, y0); curveFill.lineTo(x, y); }
+            else        { curve.lineTo(x, y); curveFill.lineTo(x, y); }
         }
-        g.setColour(juce::Colours::white.withAlpha(0.92f));
+        curveFill.lineTo(gf.getRight() - 1.0f, y0);
+        curveFill.closeSubPath();
+
+        g.setColour(juce::Colours::white.withAlpha(0.10f));
+        g.fillPath(curveFill);
+        g.setColour(juce::Colours::white.withAlpha(0.95f));
         g.strokePath(curve, juce::PathStrokeType(2.0f));
     }
 
     g.restoreState();
 
-    // ── バンドノード ──
+    // ── バンドノード (番号付き・バンド色) ──
+    g.setFont(juce::Font(11.0f, juce::Font::bold));
     for (int i = 0; i < (int) nodes.size(); ++i)
     {
         const auto p = nodePos(nodes[(size_t) i]);
         const bool hot = (i == dragNode || i == hoverNode);
-        const float r = hot ? 8.0f : 6.0f;
-        g.setColour(nodes[(size_t) i].colour.withAlpha(hot ? 1.0f : 0.85f));
+        const float r = hot ? 10.0f : 8.0f;
+        g.setColour(nodes[(size_t) i].colour.withAlpha(hot ? 1.0f : 0.9f));
         g.fillEllipse(p.x - r, p.y - r, r * 2, r * 2);
-        g.setColour(juce::Colours::white.withAlpha(hot ? 0.95f : 0.6f));
+        g.setColour(juce::Colours::white.withAlpha(hot ? 1.0f : 0.7f));
         g.drawEllipse(p.x - r, p.y - r, r * 2, r * 2, 1.5f);
+        g.setColour(juce::Colours::white);
+        g.drawText(juce::String(i + 1), juce::Rectangle<float>(p.x - r, p.y - r, r * 2, r * 2),
+                   juce::Justification::centred);
+    }
+
+    // ── ドラッグ/ホバー中のノードの数値表示 ──
+    const int show = dragNode >= 0 ? dragNode : hoverNode;
+    if (show >= 0 && show < (int) nodes.size())
+    {
+        const auto& nd = nodes[(size_t) show];
+        juce::String txt = formatFreq(eq.getP(nd.freqParam));
+        if (nd.gainParam >= 0)
+            txt += "   " + juce::String(eq.getP(nd.gainParam), 1) + " dB";
+
+        g.setFont(12.0f);
+        const int tw = juce::jmax(72, g.getCurrentFont().getStringWidth(txt) + 16);
+        const auto p = nodePos(nd);
+        float bx = juce::jlimit((float) graph.getX(), (float) graph.getRight() - tw, p.x - tw * 0.5f);
+        float by = juce::jlimit((float) graph.getY(), (float) graph.getBottom() - 22, p.y - 30.0f);
+        juce::Rectangle<float> box(bx, by, (float) tw, 20.0f);
+        g.setColour(juce::Colour(0xee0a0a0a));
+        g.fillRoundedRectangle(box, 4.0f);
+        g.setColour(nd.colour);
+        g.drawRoundedRectangle(box, 4.0f, 1.0f);
+        g.setColour(juce::Colours::white);
+        g.drawText(txt, box, juce::Justification::centred);
     }
 }
 

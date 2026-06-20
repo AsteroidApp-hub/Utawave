@@ -43,11 +43,15 @@ private:
     struct Node { int freqParam; int gainParam; juce::Colour colour; };  // gainParam<0 = ゲイン無し(HPF)
     juce::Point<float> nodePos(const Node&) const;
     int  hitTestNode(juce::Point<float> p) const;   // -1 = なし
+    static juce::String formatFreq(double hz);
 
     BuiltInEQ& eq;
     UtawaveLookAndFeel laf;
 
     juce::ComboBox presetBox;
+    juce::TextButton resetBtn;       // 全バンドをフラットへ
+    juce::TextButton spectrumBtn;    // アナライザー表示 ON/OFF (トグル)
+    bool spectrumOn { true };
     juce::Rectangle<int> graph;     // アナライザー/カーブ描画域
     std::vector<Node> nodes;
     int dragNode { -1 };

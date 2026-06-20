@@ -577,6 +577,7 @@ static const char* const englishTranslations =
     "\"ダウンロードページを開く\" = \"Open the download page\"\n"
     // ── 内蔵エフェクト (EQ / コンプ / リバーブ) ──
     "\"内蔵EQ\" = \"EQ\"\n"
+    "\"スペクトラム\" = \"Spectrum\"\n"
     "\"内蔵コンプ\" = \"Compressor\"\n"
     "\"内蔵ディエッサー\" = \"De-esser\"\n"
     "\"内蔵リバーブ\" = \"Reverb\"\n"
