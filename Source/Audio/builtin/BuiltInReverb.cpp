@@ -79,4 +79,13 @@ void BuiltInReverb::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
                 d[i] = d[i] * dryGain + w[i] * mix;
         }
     }
+
+    // UI メーター用の出力ピーク (dBFS)。平滑化は UI 側。
+    float maxOut = 0.0f;
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        const float* d = buffer.getReadPointer(ch);
+        for (int i = 0; i < n; ++i) maxOut = juce::jmax(maxOut, std::abs(d[i]));
+    }
+    meterOutputDb.store(maxOut > 1.0e-5f ? 20.0f * std::log10(maxOut) : -100.0f, std::memory_order_relaxed);
 }

@@ -3,86 +3,128 @@
 
 #include "ModernEffectEditor.h"
 #include "../AppColours.h"
+#include "../Localisation.h"
 #include "../Audio/builtin/BuiltInReverb.h"
 #include <cmath>
 
-// リバーブのモダン UI: 残響テールの「ディケイ形状」を可視化する。
-// 横=時間、縦=広がり (中心から上下対称)。Size で長さ、Damping で高域の早い減衰、
-// Width で縦の広がり、Mix で全体の濃さが変わる。
+// リバーブのモダン UI: 残響の**ディケイ (時間 vs レベル) カーブ**をリッチに描く。
+// メインの減衰 + ダンピングで早く減衰する高域の 2 本、時間/dB 目盛り、推定残響時間。
+// 右に**ライブ出力メーター** (実際にテールが鳴っているのが分かる)。
 class BuiltInReverbEditor : public ModernEffectEditor
 {
 public:
     explicit BuiltInReverbEditor(BuiltInReverb& r)
         : ModernEffectEditor(r, { BuiltInReverb::MixPct, BuiltInReverb::Size,
-                                  BuiltInReverb::Damping, BuiltInReverb::Width }),
-          rev(r) {}
+                                  BuiltInReverb::Damping, BuiltInReverb::Width }, 220),
+          rev(r)
+    {
+        setSize(juce::jmax(560, getWidth()), getHeight());
+        resized();
+    }
 
 private:
+    static constexpr float kMeterW = 28.0f, kScaleW = 26.0f, kTimeH = 14.0f;
+    static constexpr float kMinDb = -60.0f, kMaxDb = 0.0f;
+    const juce::Colour kBlue { 0xff2f7fb0 };
+    const juce::Colour kCyan { 0xff37c8d4 };
+
     BuiltInReverb& rev;
+    float smOut { -100.0f };
+
+    float rt60() const { return juce::jmap(juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::Size)), 0.0f, 1.0f, 0.25f, 5.0f); }
+    float maxTime() const { return juce::jlimit(0.5f, 6.0f, rt60() * 1.2f); }
+
+    juce::Rectangle<float> plotArea(juce::Rectangle<float> a) const
+    {
+        return a.reduced(8.0f).withTrimmedLeft((int) kScaleW).withTrimmedRight((int) kMeterW + 4).withTrimmedBottom((int) kTimeH);
+    }
+
+    static float smoothMeter(float prev, float target) { return target > prev ? target : prev + (target - prev) * 0.2f; }
+    void onTick() override { smOut = smoothMeter(smOut, rev.getOutputDb()); }
 
     void paintGraph(juce::Graphics& g, juce::Rectangle<float> area) override
     {
-        const auto a = area.reduced(10.0f);
-        const float mix   = juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::MixPct) * 0.01f);
-        const float size  = juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::Size));
-        const float damp  = juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::Damping));
-        const float width = juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::Width));
+        const auto p = plotArea(area);
+        const float mix  = juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::MixPct) * 0.01f);
+        const float damp = juce::jlimit(0.0f, 1.0f, rev.getP(BuiltInReverb::Damping));
+        const float rt   = rt60();
+        const float tMax = maxTime();
+        const float wetTopDb = 20.0f * std::log10(juce::jmax(mix, 0.001f));   // 濃いほどテールが高い
 
-        const float cy = a.getCentreY();
-        const float k  = juce::jmap(size, 0.0f, 1.0f, 7.5f, 1.6f);          // 大きいほど長い尾
-        const float k2 = k * (1.0f + damp * 2.5f);                          // 高域はもっと早く減衰
-        const float ampMain = (0.30f + 0.70f * mix);
-        const float halfMax = a.getHeight() * 0.5f * (0.30f + 0.70f * width);
+        auto timeToX = [&](float t) { return p.getX() + (t / tMax) * p.getWidth(); };
+        auto dbToY   = [&](float db) { return p.getBottom() - (juce::jlimit(kMinDb, kMaxDb, db) - kMinDb) / (kMaxDb - kMinDb) * p.getHeight(); };
 
-        auto envShape = [&](float decay, float amp) -> juce::Path
+        // dB 目盛り
+        g.setFont(9.5f);
+        for (int db = 0; db >= -60; db -= 12)
         {
-            juce::Path top, full;
-            const int W = (int) a.getWidth();
+            const float y = dbToY((float) db);
+            g.setColour(AppColours::rulerLine.withAlpha(0.20f));
+            g.drawHorizontalLine((int) y, p.getX(), p.getRight());
+            g.setColour(AppColours::textDim);
+            g.drawText(juce::String(db), (int) area.getX() + 2, (int) y - 6, (int) kScaleW - 2, 12, juce::Justification::right);
+        }
+        // 時間目盛り (tMax に応じた間隔)
+        const float step = tMax <= 1.0f ? 0.2f : tMax <= 3.0f ? 0.5f : 1.0f;
+        for (float t = 0.0f; t <= tMax + 1.0e-3f; t += step)
+        {
+            const float x = timeToX(t);
+            g.setColour(AppColours::rulerLine.withAlpha(0.20f));
+            g.drawVerticalLine((int) x, p.getY(), p.getBottom());
+            g.setColour(AppColours::textDim);
+            g.drawText(juce::String(t, t < 1.0f ? 1 : (step < 1.0f ? 1 : 0)) + "s",
+                       (int) x - 16, (int) p.getBottom() + 1, 32, 13, juce::Justification::centred);
+        }
+
+        // ディケイカーブ: level(t) = wetTop - 60*(t/RT60)。メイン + ダンピングで早く減衰する高域。
+        auto decayPath = [&](float rt60s, bool fillToBottom)
+        {
+            juce::Path path;
+            const int W = (int) p.getWidth();
+            if (fillToBottom) path.startNewSubPath(p.getX(), p.getBottom());
             for (int px = 0; px <= W; ++px)
             {
-                const float t = (float) px / juce::jmax(1, W);
-                const float h = std::exp(-t * decay) * amp * halfMax;
-                const float x = a.getX() + (float) px;
-                if (px == 0) top.startNewSubPath(x, cy - h); else top.lineTo(x, cy - h);
+                const float t  = (float) px / juce::jmax(1, W) * tMax;
+                const float db = wetTopDb - 60.0f * (t / juce::jmax(0.05f, rt60s));
+                const float x = p.getX() + (float) px, y = dbToY(db);
+                if (! fillToBottom && px == 0) path.startNewSubPath(x, y);
+                else                           path.lineTo(x, y);
             }
-            full = top;
-            for (int px = W; px >= 0; --px)
-            {
-                const float t = (float) px / juce::jmax(1, W);
-                const float h = std::exp(-t * decay) * amp * halfMax;
-                full.lineTo(a.getX() + (float) px, cy + h);
-            }
-            full.closeSubPath();
-            return full;
+            if (fillToBottom) { path.lineTo(p.getRight(), p.getBottom()); path.closeSubPath(); }
+            return path;
         };
 
-        // 中心線
-        g.setColour(AppColours::rulerLine.withAlpha(0.35f));
-        g.drawHorizontalLine((int) cy, a.getX(), a.getRight());
+        juce::ColourGradient grad(kBlue.withAlpha(0.55f), p.getX(), p.getY(), kBlue.withAlpha(0.08f), p.getX(), p.getBottom(), false);
+        g.setGradientFill(grad);
+        g.fillPath(decayPath(rt, true));
 
-        // メインのテール (広がり)
-        g.setColour(AppColours::accent.withAlpha(0.22f));
-        g.fillPath(envShape(k, ampMain));
-        // 高域 (ダンピングで早く減衰する内側)
-        g.setColour(AppColours::accent.withAlpha(0.40f));
-        g.fillPath(envShape(k2, ampMain * 0.9f));
+        const float rtHi = rt * (1.0f - damp * 0.7f);   // 高域はダンピングで早く減衰
+        g.setColour(juce::Colours::white.withAlpha(0.30f));
+        g.strokePath(decayPath(rtHi, false), juce::PathStrokeType(1.2f));   // 高域 (薄)
+        g.setColour(kCyan);
+        g.strokePath(decayPath(rt, false), juce::PathStrokeType(2.0f));     // メイン
 
-        // 立ち上がりインパルス
-        g.setColour(juce::Colours::white.withAlpha(0.85f));
-        g.drawLine(a.getX(), cy - halfMax * ampMain, a.getX(), cy + halfMax * ampMain, 2.0f);
+        // 推定残響時間の表示
+        g.setColour(AppColours::textDim);
+        g.setFont(11.0f);
+        g.drawText(tr(u8"残響") + " " + juce::String(rt, 1) + "s",
+                   (int) p.getRight() - 84, (int) p.getY() + 4, 80, 14, juce::Justification::right);
 
-        // 輪郭ライン
-        juce::Path outline;
-        const int W = (int) a.getWidth();
-        for (int px = 0; px <= W; ++px)
+        // ライブ出力メーター (右)
+        auto m = juce::Rectangle<float>(area.getRight() - kMeterW + 4, area.getY() + 6, kMeterW - 8, juce::jmax(1.0f, area.getHeight() - 24));
+        g.setColour(AppColours::meterBg);
+        g.fillRoundedRectangle(m, 2.0f);
+        const float frac = juce::jlimit(0.0f, 1.0f, (smOut - kMinDb) / (kMaxDb - kMinDb));
+        if (frac > 0.001f)
         {
-            const float t = (float) px / juce::jmax(1, W);
-            const float h = std::exp(-t * k) * ampMain * halfMax;
-            const float x = a.getX() + (float) px;
-            if (px == 0) outline.startNewSubPath(x, cy - h); else outline.lineTo(x, cy - h);
+            auto fillR = m.withTop(m.getBottom() - m.getHeight() * frac);
+            juce::ColourGradient mg(kCyan, m.getX(), m.getBottom(), kCyan.brighter(0.4f), m.getX(), m.getY(), false);
+            g.setGradientFill(mg);
+            g.fillRoundedRectangle(fillR, 2.0f);
         }
-        g.setColour(AppColours::accent.withAlpha(0.7f));
-        g.strokePath(outline, juce::PathStrokeType(1.2f));
+        g.setColour(AppColours::textDim);
+        g.setFont(10.0f);
+        g.drawText("OUT", (int) (area.getRight() - kMeterW + 2), (int) (area.getBottom() - 16), (int) kMeterW, 14, juce::Justification::centred);
     }
 };
 

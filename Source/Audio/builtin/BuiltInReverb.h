@@ -3,6 +3,7 @@
 
 #pragma once
 #include "BuiltInEffect.h"
+#include <atomic>
 
 /**
     内蔵リバーブ。アルゴリズミック (FFT 非使用) なのでゼロレイテンシー (テールのみ)。
@@ -28,7 +29,10 @@ public:
     // ウェットのテールが残るため、停止後もしばらく鳴らせるよう申告する
     double getTailLengthSeconds() const override { return 4.0; }
 
+    float getOutputDb() const { return meterOutputDb.load(std::memory_order_relaxed); }
+
 private:
     juce::Reverb reverb;
     juce::AudioBuffer<float> wetBuf;
+    std::atomic<float> meterOutputDb { -100.0f };
 };
