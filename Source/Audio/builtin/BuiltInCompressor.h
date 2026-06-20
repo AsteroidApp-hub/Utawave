@@ -33,10 +33,15 @@ public:
 
     bool  hasReductionMeter() const override { return true; }
     float getReductionDb()    const override { return meterReductionDb.load(std::memory_order_relaxed); }
+    // UI メーター用の入出力ピーク (dBFS, ブロック毎の生値。平滑化は UI 側)
+    float getInputDb()  const { return meterInputDb.load(std::memory_order_relaxed); }
+    float getOutputDb() const { return meterOutputDb.load(std::memory_order_relaxed); }
 
 private:
     double sr { 48000.0 };
     float  gainDb { 0.0f };               // 現在の平滑化済みゲイン (dB, 通常 <= 0)
     std::atomic<float> meterReductionDb { 0.0f };  // UI 表示用 (正値 = 減衰量)
+    std::atomic<float> meterInputDb  { -100.0f };
+    std::atomic<float> meterOutputDb { -100.0f };
     static constexpr float kKneeDb { 6.0f };
 };

@@ -8,7 +8,7 @@
 
 BuiltInDeEsser::BuiltInDeEsser()
 {
-    addParam({ "freqHz",      u8"周波数",       "Hz", 3000.0f, 12000.0f, 6500.0f, 0.5f });
+    addParam({ "freqHz",      u8"周波数",       "Hz", 1500.0f, 16000.0f, 6500.0f, 0.5f });
     addParam({ "thresholdDb", u8"スレッショルド", "dB",  -48.0f,    0.0f,  -28.0f, 1.0f });
     addParam({ "ratio",       u8"レシオ",        ":1",    1.0f,   10.0f,    4.0f, 0.4f });
 
@@ -21,6 +21,20 @@ BuiltInDeEsser::BuiltInDeEsser()
 }
 
 const juce::String BuiltInDeEsser::getName() const { return tr(u8"内蔵ディエッサー"); }
+
+int BuiltInDeEsser::readAnalyzerSamples(float* dest, int maxN) const
+{
+    const int count = juce::jmin(maxN, kAnalyzerSize);
+    const int pos = analyzerWritePos.load(std::memory_order_relaxed);
+    const int start = pos - count;
+    for (int i = 0; i < count; ++i)
+    {
+        int idx = (start + i) % kAnalyzerSize;
+        if (idx < 0) idx += kAnalyzerSize;
+        dest[i] = analyzerRing[(size_t) idx];
+    }
+    return count;
+}
 
 void BuiltInDeEsser::prepareToPlay(double sampleRate, int)
 {
@@ -49,6 +63,19 @@ void BuiltInDeEsser::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     const int n     = buffer.getNumSamples();
     float* L = buffer.getWritePointer(0);
     float* R = numCh > 1 ? buffer.getWritePointer(1) : nullptr;
+
+    // アナライザー (UI 表示中のみ): 入力 (処理前) のモノ和をリングへ
+    if (analyzerActive.load(std::memory_order_relaxed) && numCh > 0)
+    {
+        int pos = analyzerWritePos.load(std::memory_order_relaxed);
+        const float* rr = R ? R : L;
+        for (int i = 0; i < n; ++i)
+        {
+            analyzerRing[(size_t) pos] = 0.5f * (L[i] + rr[i]);
+            pos = (pos + 1) & (kAnalyzerSize - 1);
+        }
+        analyzerWritePos.store(pos, std::memory_order_relaxed);
+    }
 
     if (! std::isfinite(gainDb)) { gainDb = 0.0f; lpState[0] = lpState[1] = 0.0f; }
 

@@ -2,94 +2,120 @@
 // Copyright (C) 2025-2026 Utawave
 
 #include "ModernEffectEditor.h"
+#include "SpectrumScope.h"
 #include "../AppColours.h"
 #include "../Localisation.h"
 #include "../Audio/builtin/BuiltInDeEsser.h"
 #include <cmath>
 
-// ディエッサーのモダン UI: 対数周波数の帯に「処理対象の高域 (周波数以上)」をハイライトし、
-// 周波数マーカーを横ドラッグで動かす。右に GR メータ。
+// ディエッサーのモダン UI: 青塗りのスペクトラムアナライザー全域に、処理対象の高域 (周波数以上) を
+// ハイライト + 周波数マーカー。dB/周波数の目盛り、右に GR メータ。
 class BuiltInDeEsserEditor : public ModernEffectEditor
 {
 public:
     explicit BuiltInDeEsserEditor(BuiltInDeEsser& d)
-        : ModernEffectEditor(d, { BuiltInDeEsser::FreqHz, BuiltInDeEsser::ThresholdDb, BuiltInDeEsser::Ratio }),
-          de(d) {}
+        : ModernEffectEditor(d, { BuiltInDeEsser::FreqHz, BuiltInDeEsser::ThresholdDb, BuiltInDeEsser::Ratio }, 230),
+          de(d)
+    {
+        de.setAnalyzerActive(true);
+        setSize(juce::jmax(600, getWidth()), getHeight());
+        resized();
+    }
+    ~BuiltInDeEsserEditor() override { de.setAnalyzerActive(false); }
 
 private:
-    static constexpr float kMeterW = 26.0f;
+    static constexpr float kFMin = 20.0f, kFMax = 20000.0f, kMeterW = 28.0f;
+    static constexpr float kScaleW = 26.0f, kFreqH = 14.0f;
+    static constexpr float kAnMin = -72.0f, kAnMax = 0.0f;
+    const juce::Colour kBlue { 0xff2f7fb0 };
+    const juce::Colour kCyan { 0xff37c8d4 };
+
     BuiltInDeEsser& de;
+    SpectrumScope scope;
+    bool dragging { false };
 
-    // 表示軸は FreqHz パラメータの範囲に一致させる (帯域全体がそのままマーカー可動域になり死域が出ない)
-    double fMin() const { return de.getParamInfo(BuiltInDeEsser::FreqHz).minV; }
-    double fMax() const { return de.getParamInfo(BuiltInDeEsser::FreqHz).maxV; }
-
-    juce::Rectangle<float> bandArea(juce::Rectangle<float> a) const { return a.reduced(8.0f).withTrimmedRight(kMeterW); }
-    float freqToX(juce::Rectangle<float> b, double hz) const
+    // スペクトラム描画域 (目盛り/メータを除いた内側)
+    juce::Rectangle<float> plotArea(juce::Rectangle<float> a) const
     {
-        hz = juce::jlimit(fMin(), fMax(), hz);
-        return b.getX() + (float) (std::log(hz / fMin()) / std::log(fMax() / fMin())) * b.getWidth();
+        return a.reduced(8.0f).withTrimmedLeft((int) kScaleW).withTrimmedRight((int) kMeterW + 4).withTrimmedBottom((int) kFreqH);
     }
-    double xToFreq(juce::Rectangle<float> b, float x) const
+    float freqToX(juce::Rectangle<float> p, double hz) const
     {
-        const double t = juce::jlimit(0.0, 1.0, (double) (x - b.getX()) / juce::jmax(1.0f, b.getWidth()));
-        return fMin() * std::pow(fMax() / fMin(), t);
+        hz = juce::jlimit((double) kFMin, (double) kFMax, hz);
+        return p.getX() + (float) (std::log(hz / kFMin) / std::log((double) kFMax / kFMin)) * p.getWidth();
+    }
+    double xToFreq(juce::Rectangle<float> p, float x) const
+    {
+        const double t = juce::jlimit(0.0, 1.0, (double) (x - p.getX()) / juce::jmax(1.0f, p.getWidth()));
+        return kFMin * std::pow((double) kFMax / kFMin, t);
+    }
+
+    void onTick() override
+    {
+        scope.update([this](float* dst, int n) { return de.readAnalyzerSamples(dst, n); });
     }
 
     void paintGraph(juce::Graphics& g, juce::Rectangle<float> area) override
     {
-        const auto b = bandArea(area);
-        const float fx2 = freqToX(b, de.getP(BuiltInDeEsser::FreqHz));
+        const auto p = plotArea(area);
+        const double sr = de.getSampleRateForUi();
+
+        // dB 目盛り
+        g.setFont(9.5f);
+        for (int db = 0; db >= -72; db -= 12)
+        {
+            const float t = (float) (db - kAnMin) / (kAnMax - kAnMin);
+            const float y = p.getBottom() - t * p.getHeight();
+            g.setColour(AppColours::rulerLine.withAlpha(0.20f));
+            g.drawHorizontalLine((int) y, p.getX(), p.getRight());
+            g.setColour(AppColours::textDim);
+            g.drawText(juce::String(db), (int) area.getX() + 2, (int) y - 6, (int) kScaleW - 2, 12, juce::Justification::right);
+        }
+        // 周波数目盛り
+        static const double fl[] = { 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
+        for (double f : fl)
+        {
+            const float x = freqToX(p, f);
+            g.setColour(AppColours::rulerLine.withAlpha(0.20f));
+            g.drawVerticalLine((int) x, p.getY(), p.getBottom());
+            g.setColour(AppColours::textDim);
+            g.drawText(f >= 1000 ? (juce::String((int) (f / 1000)) + "k") : juce::String((int) f),
+                       (int) x - 16, (int) p.getBottom() + 1, 32, 13, juce::Justification::centred);
+        }
+
+        // スペクトラム (青塗り)
+        scope.draw(g, p, sr, kFMin, kFMax, kAnMin, kAnMax, kBlue, kCyan.withAlpha(0.8f));
 
         // 処理対象の高域 (周波数以上) をハイライト
-        g.setColour(AppColours::accent.withAlpha(0.16f));
-        g.fillRect(juce::Rectangle<float>(fx2, b.getY(), b.getRight() - fx2, b.getHeight()));
-
-        // 周波数グリッド + ラベル (表示軸 = FreqHz 範囲内のものだけ描く)
-        static const double lines[] = { 2000, 3000, 4000, 5000, 6000, 8000, 10000, 12000, 16000 };
-        g.setFont(11.0f);
-        for (double f : lines)
-        {
-            if (f < fMin() || f > fMax()) continue;
-            const float x = freqToX(b, f);
-            g.setColour(AppColours::rulerLine.withAlpha(0.3f));
-            g.drawVerticalLine((int) x, b.getY(), b.getBottom());
-            if (f == 5000 || f == 10000)
-            {
-                g.setColour(AppColours::textDim);
-                g.drawText(juce::String((int) (f / 1000)) + "k",
-                           (int) x - 16, (int) b.getBottom() - 15, 32, 14, juce::Justification::centred);
-            }
-        }
+        const float fx2 = freqToX(p, de.getP(BuiltInDeEsser::FreqHz));
+        g.setColour(AppColours::accent.withAlpha(0.14f));
+        g.fillRect(juce::Rectangle<float>(fx2, p.getY(), p.getRight() - fx2, p.getHeight()));
 
         // 周波数マーカー
         g.setColour(AppColours::accent);
-        g.drawLine(fx2, b.getY(), fx2, b.getBottom(), 2.0f);
-        g.fillEllipse(fx2 - 6, b.getY() + 8, 12, 12);
+        g.drawLine(fx2, p.getY(), fx2, p.getBottom(), 2.0f);
+        g.fillEllipse(fx2 - 6, p.getY() + 6, 12, 12);
         g.setColour(juce::Colours::white.withAlpha(0.9f));
-        g.drawEllipse(fx2 - 6, b.getY() + 8, 12, 12, 1.5f);
+        g.drawEllipse(fx2 - 6, p.getY() + 6, 12, 12, 1.5f);
         g.setColour(AppColours::textDim);
         g.setFont(11.0f);
-        g.drawText(tr(u8"サ行"), (int) fx2 + 8, (int) b.getY() + 6, 60, 16, juce::Justification::left);
+        g.drawText(tr(u8"サ行"), (int) fx2 + 8, (int) p.getY() + 4, 60, 16, juce::Justification::left);
 
         drawReductionMeter(g, area, 18.0f);
     }
 
-    bool dragging { false };
-
     void onGraphMouseDown(const juce::MouseEvent& e) override
     {
-        // 帯域エリア内 (GR メータ・余白を除く) のクリックだけ周波数操作にする
-        dragging = bandArea(graph.toFloat()).contains(e.position);
+        dragging = plotArea(graph.toFloat()).contains(e.position);
         if (dragging) onGraphMouseDrag(e);
     }
     void onGraphMouseUp(const juce::MouseEvent&) override { dragging = false; }
     void onGraphMouseDrag(const juce::MouseEvent& e) override
     {
         if (! dragging) return;
-        const auto b = bandArea(graph.toFloat());
+        const auto p = plotArea(graph.toFloat());
         const auto& pi = de.getParamInfo(BuiltInDeEsser::FreqHz);
-        de.setP(BuiltInDeEsser::FreqHz, juce::jlimit(pi.minV, pi.maxV, (float) xToFreq(b, (float) e.position.x)));
+        de.setP(BuiltInDeEsser::FreqHz, juce::jlimit(pi.minV, pi.maxV, (float) xToFreq(p, e.position.x)));
         clearPresetSelection();
         repaint(graph);
     }

@@ -35,13 +35,6 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
         { BuiltInEQ::AirHz,   BuiltInEQ::AirDb,   -1,                kAirCol   },
     };
 
-    // Hann 窓
-    for (int i = 0; i < BuiltInEQ::kAnalyzerSize; ++i)
-        window[(size_t) i] = 0.5f - 0.5f * std::cos(2.0f * juce::MathConstants<float>::pi
-                                                    * (float) i / (float) (BuiltInEQ::kAnalyzerSize - 1));
-    binMag.assign((size_t) (BuiltInEQ::kAnalyzerSize / 2 + 1), 0.0f);
-    binMagPrefix.assign((size_t) (BuiltInEQ::kAnalyzerSize / 2 + 2), 0.0f);
-
     // プリセット
     const auto& presets = eq.getPresets();
     for (int i = 0; i < (int) presets.size(); ++i)
@@ -157,31 +150,8 @@ void BuiltInEQEditor::resized()
 
 void BuiltInEQEditor::timerCallback()
 {
-    if (spectrumOn) updateAnalyzer();
+    if (spectrumOn) scope.update([this](float* d, int n) { return eq.readAnalyzerSamples(d, n); });
     repaint(graph);
-}
-
-void BuiltInEQEditor::updateAnalyzer()
-{
-    const int N = BuiltInEQ::kAnalyzerSize;
-    eq.readAnalyzerSamples(samples.data(), N);
-    for (int i = 0; i < N; ++i)
-        samples[(size_t) i] *= window[(size_t) i];
-    fft.forward(samples.data(), spec.data());
-
-    const float scale = 4.0f / (float) N;   // 0 dBFS 正弦 ≈ 振幅 1 になる正規化
-    for (int k = 0; k <= N / 2; ++k)
-    {
-        const float re = spec[(size_t) (2 * k)];
-        const float im = spec[(size_t) (2 * k + 1)];
-        const float mag = std::sqrt(re * re + im * im) * scale;   // 線形振幅
-        float& s = binMag[(size_t) k];
-        s = mag > s ? mag : s * 0.82f + mag * 0.18f;   // 立ち上がり即・立ち下がりゆっくり (線形で平滑)
-    }
-    // オクターブ平滑の範囲平均を O(1) で引くための累積和
-    binMagPrefix[0] = 0.0f;
-    for (int k = 0; k <= N / 2; ++k)
-        binMagPrefix[(size_t) (k + 1)] = binMagPrefix[(size_t) k] + binMag[(size_t) k];
 }
 
 void BuiltInEQEditor::rebuildCurveIfNeeded()
@@ -220,7 +190,6 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
     g.fillRoundedRectangle(gf, 4.0f);
 
     const double sr = eq.getSampleRateForUi();
-    const int N = BuiltInEQ::kAnalyzerSize;
 
     // ── グリッド ──
     g.saveState();
@@ -250,61 +219,11 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
         }
     }
 
-    // ── アナライザー (背面・緑グラデーション) ──
-    // 低域は対数軸で bin が粗く階段状になるので、1/6 オクターブの範囲平均 (累積和で O(1)) と
-    // bin 間のフラクショナル補間でなめらかな線にする。塗り + 上辺ラインでリッチに見せる。
+    // ── アナライザー (背面・緑) ── 共通ヘルパで対数軸の滑らかな塗り + 上辺ライン
     if (spectrumOn)
     {
-        const int    w       = graph.getWidth();
-        const float  span    = kAnMaxDb - kAnMinDb;
-        const double binPerHz = N / juce::jmax(1.0, sr);
-        const double octHalf = std::pow(2.0, 1.0 / 12.0);   // 1/6 オクターブ (両側 1/12)
-
-        std::vector<float> ys((size_t) (w + 1));
-        for (int px = 0; px <= w; ++px)
-        {
-            const double f    = xToFreq(gf.getX() + (float) px);
-            const double fbin = f * binPerHz;
-
-            int lo = (int) std::floor(fbin / octHalf);
-            int hi = (int) std::ceil (fbin * octHalf);
-            lo = juce::jlimit(0, N / 2, lo);
-            hi = juce::jlimit(0, N / 2, hi);
-
-            float mag;
-            if (hi > lo)   // 帯域に複数 bin → 範囲平均
-                mag = (binMagPrefix[(size_t) (hi + 1)] - binMagPrefix[(size_t) lo]) / (float) (hi - lo + 1);
-            else           // 低域: 隣接 bin をフラクショナル補間
-            {
-                const int b0 = juce::jlimit(0, N / 2, (int) std::floor(fbin));
-                const int b1 = juce::jmin(N / 2, b0 + 1);
-                const float fr = (float) (fbin - b0);
-                mag = binMag[(size_t) b0] * (1.0f - fr) + binMag[(size_t) b1] * fr;
-            }
-
-            const float db = juce::jlimit(kAnMinDb, kAnMaxDb, 20.0f * std::log10(mag + 1.0e-9f));
-            ys[(size_t) px] = gf.getBottom() - ((db - kAnMinDb) / span) * gf.getHeight();
-        }
-
-        juce::Path fill, top;
-        fill.startNewSubPath(gf.getX(), gf.getBottom());
-        top.startNewSubPath(gf.getX(), ys[0]);
-        for (int px = 0; px <= w; ++px)
-        {
-            const float x = gf.getX() + (float) px;
-            fill.lineTo(x, ys[(size_t) px]);
-            top.lineTo(x, ys[(size_t) px]);
-        }
-        fill.lineTo(gf.getRight(), gf.getBottom());
-        fill.closeSubPath();
-
         const juce::Colour green { 0xff8fdf6a };
-        juce::ColourGradient grad(green.withAlpha(0.34f), gf.getX(), gf.getY(),
-                                  green.withAlpha(0.02f), gf.getX(), gf.getBottom(), false);
-        g.setGradientFill(grad);
-        g.fillPath(fill);
-        g.setColour(green.withAlpha(0.75f));
-        g.strokePath(top, juce::PathStrokeType(1.2f));
+        scope.draw(g, gf, sr, kFMin, kFMax, kAnMinDb, kAnMaxDb, green, green.withAlpha(0.75f));
     }
 
     // ── EQ 周波数特性カーブ (0dB 線との間を塗り + 白ライン) ──

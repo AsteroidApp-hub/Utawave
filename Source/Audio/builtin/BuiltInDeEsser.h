@@ -3,6 +3,7 @@
 
 #pragma once
 #include "BuiltInEffect.h"
+#include <array>
 #include <atomic>
 
 /**
@@ -30,8 +31,18 @@ public:
     bool  hasReductionMeter() const override { return true; }
     float getReductionDb()    const override { return meterReductionDb.load(std::memory_order_relaxed); }
 
+    // ─── アナライザー (UI のスペクトラム表示用) ───
+    static constexpr int kAnalyzerSize = 2048;   // 2 の冪
+    double getSampleRateForUi() const noexcept { return sr; }
+    void   setAnalyzerActive(bool on) noexcept { analyzerActive.store(on, std::memory_order_relaxed); }
+    int    readAnalyzerSamples(float* dest, int maxN) const;
+
 private:
     double sr { 48000.0 };
+
+    std::array<float, kAnalyzerSize> analyzerRing {};
+    std::atomic<int>  analyzerWritePos { 0 };
+    std::atomic<bool> analyzerActive   { false };
     // 1 次の相補分割: hp = x - lp (lp は一極ローパス)。LP+HP=x を厳密に満たすので
     // out = x - (1-g)*hp = lp + g*hp となり、無サ行(g=1)で完全素通り・サ行時は位相ズレ無く減衰する。
     float  lpState[2] { 0.0f, 0.0f };

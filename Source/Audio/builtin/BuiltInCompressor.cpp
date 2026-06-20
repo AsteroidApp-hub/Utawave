@@ -69,6 +69,7 @@ void BuiltInCompressor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     if (! std::isfinite(gainDb)) gainDb = 0.0f;
 
     float maxReductionDb = 0.0f;
+    float maxIn = 0.0f, maxOut = 0.0f;
 
     for (int i = 0; i < n; ++i)
     {
@@ -76,6 +77,7 @@ void BuiltInCompressor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         const float r = R ? R[i] : l;
         float side = juce::jmax(std::abs(l), std::abs(r));
         if (! std::isfinite(side)) side = 0.0f;   // NaN/Inf 入力でエンベロープを壊さない
+        if (side > maxIn) maxIn = side;
 
         const float lvlDb = 20.0f * std::log10(juce::jmax(side, 1.0e-6f));
         const float over  = lvlDb - threshold;
@@ -90,8 +92,14 @@ void BuiltInCompressor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         L[i] = l * g;
         if (R) R[i] = r * g;
 
+        const float outAbs = juce::jmax(std::abs(L[i]), R ? std::abs(R[i]) : 0.0f);
+        if (outAbs > maxOut) maxOut = outAbs;
         if (-gainDb > maxReductionDb) maxReductionDb = -gainDb;
     }
+
+    auto toDb = [] (float lin) { return lin > 1.0e-5f ? 20.0f * std::log10(lin) : -100.0f; };
+    meterInputDb.store (toDb(maxIn),  std::memory_order_relaxed);
+    meterOutputDb.store(toDb(maxOut), std::memory_order_relaxed);
 
     // メータは**生のブロック内最大減衰量**だけを公開する。バリスティクス (立ち上がり即・
     // 立ち下がりゆっくり) はブロック長非依存にするため UI 側 (30Hz timer) で 1 回だけ掛ける

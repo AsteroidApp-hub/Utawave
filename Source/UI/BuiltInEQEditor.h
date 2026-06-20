@@ -6,8 +6,8 @@
 #include <array>
 #include <vector>
 #include "UtawaveLookAndFeel.h"
+#include "SpectrumScope.h"
 #include "../Audio/builtin/BuiltInEQ.h"
-#include "../Audio/pitchcore/RealFFT.h"
 
 /**
     内蔵 EQ の専用エディタ (モダン UI)。
@@ -33,7 +33,6 @@ public:
 
 private:
     void timerCallback() override;
-    void updateAnalyzer();
 
     // 座標変換 (graph 矩形基準)
     float freqToX(double hz) const;
@@ -59,13 +58,7 @@ private:
     int dragNode { -1 };
     int hoverNode { -1 };
 
-    // アナライザー
-    pitchcore::RealFFT fft { BuiltInEQ::kAnalyzerSize };
-    std::array<float, BuiltInEQ::kAnalyzerSize>     samples {};
-    std::array<float, BuiltInEQ::kAnalyzerSize>     window {};
-    std::array<float, BuiltInEQ::kAnalyzerSize + 2> spec {};
-    std::vector<float> binMag;       // bin 毎の平滑化済み線形振幅 (size = kAnalyzerSize/2 + 1)
-    std::vector<float> binMagPrefix; // binMag の累積和 (オクターブ平滑の範囲平均を O(1) で引く)
+    SpectrumScope scope;   // アナライザー (共通ヘルパ)
 
     // EQ 特性カーブのキャッシュ (パラメータ/サイズ変化時だけ再計算。アナライザーの 30Hz
     // アニメーションごとに 6 biquad × ピクセル数を再評価しないため)。
