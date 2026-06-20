@@ -104,6 +104,14 @@ void ModernEffectEditor::resized()
     }
 
     graph = area.withTrimmedBottom(6);
+    layoutOverlay(graph);
+}
+
+juce::Slider* ModernEffectEditor::knobForParam(int param) const
+{
+    for (int i = 0; i < (int) knobParamIdx.size(); ++i)
+        if (knobParamIdx[(size_t) i] == param) return knobs[i];
+    return nullptr;
 }
 
 void ModernEffectEditor::paint(juce::Graphics& g)

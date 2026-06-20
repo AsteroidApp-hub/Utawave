@@ -13,9 +13,13 @@
 class BuiltInCompressor : public BuiltInEffect
 {
 public:
-    enum Param { ThresholdDb = 0, Ratio, AttackMs, ReleaseMs, MakeupDb, NumParams };
+    enum Param { ThresholdDb = 0, Ratio, AttackMs, ReleaseMs, MakeupDb, AutoGain, NumParams };
 
     BuiltInCompressor();
+
+    // 実効メイクアップゲイン (dB)。オートゲイン ON ならしきい値/レシオから自動算出 (静的ゲイン=
+    // レイテンシー無し)、OFF なら Makeup ノブの値。DSP と UI のカーブで共用する単一の真実源。
+    float currentMakeupDb() const;
 
     const juce::String getName() const override;
     juce::String getIdentifier() const override { return "utawave.comp"; }

@@ -612,6 +612,7 @@ static const char* const englishTranslations =
     "\"アタック\" = \"Attack\"\n"
     "\"リリース\" = \"Release\"\n"
     "\"メイクアップ\" = \"Makeup\"\n"
+    "\"オートゲイン\" = \"Auto Gain\"\n"
     "\"オフ\" = \"Off\"\n"
     "\"ボーカル軽め\" = \"Vocal Light\"\n"
     "\"ボーカルしっかり\" = \"Vocal Strong\"\n"

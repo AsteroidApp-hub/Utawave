@@ -13,6 +13,7 @@ BuiltInCompressor::BuiltInCompressor()
     addParam({ "attackMs",    u8"アタック",       "ms",   0.1f, 100.0f,  10.0f, 0.35f });
     addParam({ "releaseMs",   u8"リリース",       "ms",  10.0f, 1000.0f, 120.0f, 0.35f });
     addParam({ "makeupDb",    u8"メイクアップ",   "dB",   0.0f,  24.0f,   0.0f, 1.0f  });
+    addParam({ "autoGain",    u8"オートゲイン",   "",     0.0f,   1.0f,   0.0f, 1.0f  });
 
     //          thr     ratio atk    rel    makeup
     addPreset(u8"オフ",          { 0.0f,   1.0f, 10.0f, 120.0f, 0.0f });
@@ -23,6 +24,18 @@ BuiltInCompressor::BuiltInCompressor()
 }
 
 const juce::String BuiltInCompressor::getName() const { return tr(u8"内蔵コンプ"); }
+
+float BuiltInCompressor::currentMakeupDb() const
+{
+    if (getP(AutoGain) > 0.5f)
+    {
+        // しきい値/レシオから半量補正の自動メイクアップ (0dBFS 基準の減衰量の半分)。静的ゲイン=遅延無し。
+        const float over  = juce::jmax(0.0f, -getP(ThresholdDb));
+        const float slope = 1.0f - 1.0f / juce::jmax(1.0f, getP(Ratio));
+        return juce::jlimit(0.0f, 24.0f, over * slope * 0.5f);
+    }
+    return getP(MakeupDb);
+}
 
 void BuiltInCompressor::prepareToPlay(double sampleRate, int)
 {
@@ -39,7 +52,7 @@ void BuiltInCompressor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float ratio     = juce::jmax(1.0f, getP(Ratio));
     const float atkMs     = getP(AttackMs);
     const float relMs     = getP(ReleaseMs);
-    const float makeup    = getP(MakeupDb);
+    const float makeup    = currentMakeupDb();
 
     // 1 サンプル平滑化係数 (時定数 t秒 → exp(-1/(sr*t)))
     const float atkCoef = (float) std::exp(-1.0 / (sr * juce::jmax(0.0001, atkMs * 0.001)));

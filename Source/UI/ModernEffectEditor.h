@@ -33,9 +33,12 @@ protected:
     virtual void onGraphMouseDown(const juce::MouseEvent&) {}
     virtual void onGraphMouseDrag(const juce::MouseEvent&) {}
     virtual void onGraphMouseUp(const juce::MouseEvent&) {}
+    // 派生がグラフ上にオーバーレイ部品 (トグル等) を置くためのフック (resized 末尾で呼ばれる)
+    virtual void layoutOverlay(juce::Rectangle<int> /*graphArea*/) {}
 
     void  clearPresetSelection() { presetBox.setSelectedId(0, juce::dontSendNotification); }
     float smoothedReductionDb() const noexcept { return smReductionDb; }
+    juce::Slider* knobForParam(int param) const;   // 指定パラメータのノブ (無ければ nullptr)
 
     BuiltInEffect& fx;
     juce::Rectangle<int> graph;
