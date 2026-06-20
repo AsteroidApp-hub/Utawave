@@ -7,16 +7,19 @@
 BuiltInEQ::BuiltInEQ()
 {
     // id は言語非依存で固定 (シリアライズキー)。label は tr() で英訳される表示名。
-    addParam({ "hpfHz",   u8"ローカット", "Hz",   20.0f,   400.0f,    80.0f, 0.35f });
-    addParam({ "lowHz",   u8"低域 Hz",    "Hz",   60.0f,   500.0f,   200.0f, 0.5f  });
+    // 周波数レンジはピーク/シェルフとも**全域 (20Hz〜20kHz)** にして、各ポイントが他のバンドを
+    // 横断して自由に動かせるようにする (HPF だけは低域カット用途なので 20〜2000Hz)。
+    // 既定値は周波数順に置くので初期の並びは自然なまま。
+    addParam({ "hpfHz",   u8"ローカット", "Hz",   20.0f,  2000.0f,    80.0f, 0.35f });
+    addParam({ "lowHz",   u8"低域 Hz",    "Hz",   20.0f, 20000.0f,   200.0f, 0.5f  });
     addParam({ "lowDb",   u8"低域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
-    addParam({ "loMidHz", u8"低中域 Hz",  "Hz",  120.0f,  1000.0f,   350.0f, 0.5f  });
+    addParam({ "loMidHz", u8"低中域 Hz",  "Hz",   20.0f, 20000.0f,   350.0f, 0.5f  });
     addParam({ "loMidDb", u8"低中域",     "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
-    addParam({ "midHz",   u8"中域 Hz",    "Hz",  300.0f,  6000.0f,  2800.0f, 0.4f  });
+    addParam({ "midHz",   u8"中域 Hz",    "Hz",   20.0f, 20000.0f,  2800.0f, 0.4f  });
     addParam({ "midDb",   u8"中域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
-    addParam({ "hiMidHz", u8"高中域 Hz",  "Hz", 1500.0f, 10000.0f,  5000.0f, 0.5f  });
+    addParam({ "hiMidHz", u8"高中域 Hz",  "Hz",   20.0f, 20000.0f,  5000.0f, 0.5f  });
     addParam({ "hiMidDb", u8"高中域",     "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
-    addParam({ "airHz",   u8"高域 Hz",    "Hz", 3000.0f, 16000.0f, 10000.0f, 0.5f  });
+    addParam({ "airHz",   u8"高域 Hz",    "Hz",   20.0f, 20000.0f, 10000.0f, 0.5f  });
     addParam({ "airDb",   u8"高域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
 
     //          hpf    lowHz lowDb  loMidHz loMidDb midHz  midDb  hiMidHz hiMidDb airHz   airDb
