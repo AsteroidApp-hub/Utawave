@@ -56,6 +56,7 @@ target_sources(Utawave PRIVATE
     Source/Audio/pitchcore/PitchShiftEngine.cpp
     Source/Audio/builtin/BuiltInEQ.cpp
     Source/Audio/builtin/BuiltInCompressor.cpp
+    Source/Audio/builtin/BuiltInDeEsser.cpp
     Source/Audio/builtin/BuiltInReverb.cpp
     Source/Audio/builtin/BuiltInFactory.cpp
     Source/Tracks/AudioClip.cpp
@@ -326,6 +327,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/Audio/pitchcore/PitchShiftEngine.cpp
         Source/Audio/builtin/BuiltInEQ.cpp
         Source/Audio/builtin/BuiltInCompressor.cpp
+        Source/Audio/builtin/BuiltInDeEsser.cpp
         Source/Audio/builtin/BuiltInReverb.cpp
         Source/Audio/builtin/BuiltInFactory.cpp
         Source/UI/BuiltInEffectEditor.cpp

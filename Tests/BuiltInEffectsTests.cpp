@@ -14,6 +14,7 @@
 #include <cmath>
 #include "../Source/Audio/builtin/BuiltInEQ.h"
 #include "../Source/Audio/builtin/BuiltInCompressor.h"
+#include "../Source/Audio/builtin/BuiltInDeEsser.h"
 #include "../Source/Audio/builtin/BuiltInReverb.h"
 #include "../Source/Audio/builtin/BuiltInFactory.h"
 
@@ -59,6 +60,7 @@ public:
     {
         testEQ();
         testCompressor();
+        testDeEsser();
         testReverb();
         testFactory();
     }
@@ -169,6 +171,56 @@ private:
         }
     }
 
+    void testDeEsser()
+    {
+        beginTest("De-esser passes non-sibilant (low) signal");
+        {
+            BuiltInDeEsser d;
+            d.prepareToPlay(kSr, 4096);
+            d.setP(BuiltInDeEsser::FreqHz, 6500.0f);
+            d.setP(BuiltInDeEsser::ThresholdDb, -28.0f);
+            d.setP(BuiltInDeEsser::Ratio, 4.0f);
+
+            // 低域 (サ行帯域外) の信号は HPF でほぼ落ちるので検出されず素通り
+            auto low = makeSine(220.0, 0.5, 8000);
+            const double inRms = rmsTail(low, 2000);
+            d.processBlock(low, emptyMidi);
+            const double outRms = rmsTail(low, 2000);
+            expect(std::abs(outRms - inRms) < inRms * 0.05, "low signal should pass through a de-esser");
+            expect(d.getReductionDb() < 0.5f, "no reduction on non-sibilant signal");
+        }
+
+        beginTest("De-esser reduces loud sibilant (high) signal");
+        {
+            BuiltInDeEsser d;
+            d.prepareToPlay(kSr, 4096);
+            d.setP(BuiltInDeEsser::FreqHz, 5000.0f);
+            d.setP(BuiltInDeEsser::ThresholdDb, -30.0f);
+            d.setP(BuiltInDeEsser::Ratio, 6.0f);
+
+            // サ行帯域の強い信号 (8kHz) は検出され、高域成分が引かれて出力が小さくなる
+            auto hi = makeSine(8000.0, 0.7, 12000);
+            const double inRms = rmsTail(hi, 3000);
+            d.processBlock(hi, emptyMidi);
+            const double outRms = rmsTail(hi, 3000);
+            expect(outRms < inRms * 0.8, "sibilant band should be reduced");
+            expect(d.getReductionDb() > 2.0f, "reduction meter should show de-essing");
+        }
+
+        beginTest("De-esser state round-trips");
+        {
+            BuiltInDeEsser a;
+            a.setP(BuiltInDeEsser::FreqHz, 7200.0f);
+            a.setP(BuiltInDeEsser::ThresholdDb, -25.0f);
+            juce::MemoryBlock mb;
+            a.getStateInformation(mb);
+            BuiltInDeEsser b;
+            b.setStateInformation(mb.getData(), (int) mb.getSize());
+            for (int i = 0; i < a.getParamCount(); ++i)
+                expect(std::abs(a.getP(i) - b.getP(i)) < 1.0e-3f, "param should round-trip");
+        }
+    }
+
     void testReverb()
     {
         beginTest("Reverb mix=0 is exact passthrough");
@@ -222,10 +274,11 @@ private:
     {
         beginTest("Factory creates by identifier");
         {
-            expect(BuiltInFactory::create("utawave.eq")     != nullptr, "eq id creates");
-            expect(BuiltInFactory::create("utawave.comp")   != nullptr, "comp id creates");
-            expect(BuiltInFactory::create("utawave.reverb") != nullptr, "reverb id creates");
-            expect(BuiltInFactory::create("nope")           == nullptr, "unknown id is null");
+            expect(BuiltInFactory::create("utawave.eq")      != nullptr, "eq id creates");
+            expect(BuiltInFactory::create("utawave.comp")    != nullptr, "comp id creates");
+            expect(BuiltInFactory::create("utawave.deesser") != nullptr, "deesser id creates");
+            expect(BuiltInFactory::create("utawave.reverb")  != nullptr, "reverb id creates");
+            expect(BuiltInFactory::create("nope")            == nullptr, "unknown id is null");
         }
 
         beginTest("Factory format predicate");

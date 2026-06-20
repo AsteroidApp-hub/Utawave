@@ -4,6 +4,7 @@
 #include "BuiltInFactory.h"
 #include "BuiltInEQ.h"
 #include "BuiltInCompressor.h"
+#include "BuiltInDeEsser.h"
 #include "BuiltInReverb.h"
 #include "../../Localisation.h"
 
@@ -22,9 +23,10 @@ namespace
     // 並び順 = メニューの並び順。エフェクトを増やすときはここに 1 行足す。
     const Entry kEntries[] =
     {
-        { "utawave.eq",     u8"内蔵EQ",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInEQ()); } },
-        { "utawave.comp",   u8"内蔵コンプ", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInCompressor()); } },
-        { "utawave.reverb", u8"内蔵リバーブ", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
+        { "utawave.eq",      u8"内蔵EQ",         [] { return std::unique_ptr<BuiltInEffect>(new BuiltInEQ()); } },
+        { "utawave.comp",    u8"内蔵コンプ",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInCompressor()); } },
+        { "utawave.deesser", u8"内蔵ディエッサー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDeEsser()); } },
+        { "utawave.reverb",  u8"内蔵リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
     };
     constexpr int kNumEntries = (int) (sizeof(kEntries) / sizeof(kEntries[0]));
 }

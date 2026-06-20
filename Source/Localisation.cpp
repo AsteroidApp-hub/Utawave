@@ -578,8 +578,14 @@ static const char* const englishTranslations =
     // ── 内蔵エフェクト (EQ / コンプ / リバーブ) ──
     "\"内蔵EQ\" = \"EQ\"\n"
     "\"内蔵コンプ\" = \"Compressor\"\n"
+    "\"内蔵ディエッサー\" = \"De-esser\"\n"
     "\"内蔵リバーブ\" = \"Reverb\"\n"
     "\"エフェクトを複製できませんでした\" = \"Couldn't duplicate the effect\"\n"
+    // ディエッサー パラメータ / プリセット
+    "\"周波数\" = \"Frequency\"\n"
+    "\"しっかり\" = \"Strong\"\n"
+    "\"サ行 高め\" = \"High Sibilance\"\n"
+    "\"サ行 低め\" = \"Low Sibilance\"\n"
     "\"プリセット\" = \"Preset\"\n"
     "\"選択...\" = \"Select...\"\n"
     // EQ パラメータ / プリセット
