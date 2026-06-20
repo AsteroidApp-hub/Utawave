@@ -27,12 +27,12 @@ BuiltInEQEditor::BuiltInEQEditor(BuiltInEQ& e)
     setLookAndFeel(&laf);
 
     nodes = {
-        { BuiltInEQ::HpfHz,   -1,                 kHpfCol   },
-        { BuiltInEQ::LowHz,   BuiltInEQ::LowDb,   kLowCol   },
-        { BuiltInEQ::LoMidHz, BuiltInEQ::LoMidDb, kLoMidCol },
-        { BuiltInEQ::MidHz,   BuiltInEQ::MidDb,   kMidCol   },
-        { BuiltInEQ::HiMidHz, BuiltInEQ::HiMidDb, kHiMidCol },
-        { BuiltInEQ::AirHz,   BuiltInEQ::AirDb,   kAirCol   },
+        { BuiltInEQ::HpfHz,   -1,                 -1,                kHpfCol   },
+        { BuiltInEQ::LowHz,   BuiltInEQ::LowDb,   BuiltInEQ::LowQ,   kLowCol   },
+        { BuiltInEQ::LoMidHz, BuiltInEQ::LoMidDb, BuiltInEQ::LoMidQ, kLoMidCol },
+        { BuiltInEQ::MidHz,   BuiltInEQ::MidDb,   BuiltInEQ::MidQ,   kMidCol   },
+        { BuiltInEQ::HiMidHz, BuiltInEQ::HiMidDb, BuiltInEQ::HiMidQ, kHiMidCol },
+        { BuiltInEQ::AirHz,   BuiltInEQ::AirDb,   -1,                kAirCol   },
     };
 
     // Hann 窓
@@ -341,6 +341,8 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
         juce::String txt = formatFreq(eq.getP(nd.freqParam));
         if (nd.gainParam >= 0)
             txt += "   " + juce::String(eq.getP(nd.gainParam), 1) + " dB";
+        if (nd.qParam >= 0)
+            txt += "   Q " + juce::String(eq.getP(nd.qParam), 2);
 
         g.setFont(12.0f);
         const int tw = juce::jmax(72, g.getCurrentFont().getStringWidth(txt) + 16);
@@ -399,6 +401,24 @@ void BuiltInEQEditor::mouseMove(const juce::MouseEvent& e)
         setMouseCursor(h >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
         repaint(graph);
     }
+}
+
+// ノード上でホイール → そのバンドの Q を調整 (ピークのみ。乗算で対数的な操作感)
+void BuiltInEQEditor::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    const int h = hitTestNode(e.position);
+    if (h < 0) return;
+    const auto& nd = nodes[(size_t) h];
+    if (nd.qParam < 0) return;   // HPF / シェルフは Q なし
+
+    const auto& qi = eq.getParamInfo(nd.qParam);
+    const float q = eq.getP(nd.qParam) * std::exp(wheel.deltaY * 1.6f);
+    eq.setP(nd.qParam, juce::jlimit(qi.minV, qi.maxV, q));
+
+    hoverNode = h;                 // 数値表示を出す
+    curveDirty = true;
+    presetBox.setSelectedId(0, juce::dontSendNotification);
+    repaint();
 }
 
 // 内蔵 EQ の専用エディタを返す (UI 依存をこの TU に閉じ込める)

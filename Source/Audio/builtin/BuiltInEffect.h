@@ -43,7 +43,7 @@ public:
         std::vector<float> values;    // params と同順 (足りない分は据え置き)
     };
 
-    static constexpr int kMaxParams = 16;
+    static constexpr int kMaxParams = 24;
 
     // ─── 派生が実装する識別情報 ───
     virtual juce::String getIdentifier() const = 0;  // "utawave.eq" 等 (言語非依存・固定)

@@ -9,25 +9,29 @@ BuiltInEQ::BuiltInEQ()
     // id は言語非依存で固定 (シリアライズキー)。label は tr() で英訳される表示名。
     // 周波数レンジはピーク/シェルフとも**全域 (20Hz〜20kHz)** にして、各ポイントが他のバンドを
     // 横断して自由に動かせるようにする (HPF だけは低域カット用途なので 20〜2000Hz)。
-    // 既定値は周波数順に置くので初期の並びは自然なまま。
+    // 低/低中/中/高中は**ピーク (ベル)** で Q を持つ。両端 (HPF/高シェルフ) は Q 無し。
     addParam({ "hpfHz",   u8"ローカット", "Hz",   20.0f,  2000.0f,    80.0f, 0.35f });
     addParam({ "lowHz",   u8"低域 Hz",    "Hz",   20.0f, 20000.0f,   200.0f, 0.5f  });
     addParam({ "lowDb",   u8"低域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "lowQ",    u8"低域 Q",     "",     0.3f,     8.0f,     0.7f, 0.4f  });
     addParam({ "loMidHz", u8"低中域 Hz",  "Hz",   20.0f, 20000.0f,   350.0f, 0.5f  });
     addParam({ "loMidDb", u8"低中域",     "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "loMidQ",  u8"低中域 Q",   "",     0.3f,     8.0f,     1.0f, 0.4f  });
     addParam({ "midHz",   u8"中域 Hz",    "Hz",   20.0f, 20000.0f,  2800.0f, 0.4f  });
     addParam({ "midDb",   u8"中域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "midQ",    u8"中域 Q",     "",     0.3f,     8.0f,     1.0f, 0.4f  });
     addParam({ "hiMidHz", u8"高中域 Hz",  "Hz",   20.0f, 20000.0f,  5000.0f, 0.5f  });
     addParam({ "hiMidDb", u8"高中域",     "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
+    addParam({ "hiMidQ",  u8"高中域 Q",   "",     0.3f,     8.0f,     1.0f, 0.4f  });
     addParam({ "airHz",   u8"高域 Hz",    "Hz",   20.0f, 20000.0f, 10000.0f, 0.5f  });
     addParam({ "airDb",   u8"高域",       "dB",  -12.0f,    12.0f,     0.0f, 1.0f  });
 
-    //          hpf    lowHz lowDb  loMidHz loMidDb midHz  midDb  hiMidHz hiMidDb airHz   airDb
-    addPreset(u8"フラット",     {  20.0f, 200.0f,  0.0f, 350.0f,  0.0f, 2800.0f,  0.0f, 5000.0f,  0.0f, 10000.0f,  0.0f });
-    addPreset(u8"ボーカル明瞭", {  90.0f, 200.0f, -1.0f, 350.0f, -2.0f, 3000.0f,  2.0f, 5000.0f,  2.0f, 12000.0f,  2.5f });
-    addPreset(u8"低域すっきり", { 120.0f, 180.0f, -3.0f, 300.0f, -2.0f, 2500.0f,  1.0f, 4000.0f,  1.0f, 11000.0f,  1.0f });
-    addPreset(u8"温かみ",       {  80.0f, 180.0f,  2.0f, 400.0f,  1.0f, 1500.0f,  0.0f, 5000.0f, -1.0f,  9000.0f, -1.5f });
-    addPreset(u8"ラジオ風",     { 220.0f, 200.0f, -6.0f, 500.0f,  2.0f, 1800.0f,  4.0f, 4000.0f,  3.0f,  8000.0f, -5.0f });
+    //          hpf    low(Hz,dB,Q)        loMid(Hz,dB,Q)       mid(Hz,dB,Q)          hiMid(Hz,dB,Q)        air(Hz,dB)
+    addPreset(u8"フラット",     {  20.0f, 200.0f,  0.0f,0.7f, 350.0f,  0.0f,1.0f, 2800.0f,  0.0f,1.0f, 5000.0f,  0.0f,1.0f, 10000.0f,  0.0f });
+    addPreset(u8"ボーカル明瞭", {  90.0f, 200.0f, -1.0f,0.7f, 350.0f, -2.0f,1.2f, 3000.0f,  2.0f,1.0f, 5000.0f,  2.0f,1.0f, 12000.0f,  2.5f });
+    addPreset(u8"低域すっきり", { 120.0f, 180.0f, -3.0f,0.8f, 300.0f, -2.0f,1.2f, 2500.0f,  1.0f,1.0f, 4000.0f,  1.0f,1.0f, 11000.0f,  1.0f });
+    addPreset(u8"温かみ",       {  80.0f, 180.0f,  2.0f,0.7f, 400.0f,  1.0f,1.0f, 1500.0f,  0.0f,1.0f, 5000.0f, -1.0f,1.0f,  9000.0f, -1.5f });
+    addPreset(u8"ラジオ風",     { 220.0f, 200.0f, -6.0f,0.7f, 500.0f,  2.0f,1.5f, 1800.0f,  4.0f,1.5f, 4000.0f,  3.0f,1.5f,  8000.0f, -5.0f });
 }
 
 const juce::String BuiltInEQ::getName() const { return tr(u8"内蔵EQ"); }
@@ -53,12 +57,12 @@ void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
         hpf.reset(); low.reset(); loMid.reset(); mid.reset(); hiMid.reset(); air.reset();
     }
 
-    // 係数はブロック先頭で 1 回算出 (ノブ操作は低頻度)。
+    // 係数はブロック先頭で 1 回算出 (ノブ操作は低頻度)。低/低中/中/高中はピーク (Q 可変)。
     hpf.setHighpass  (sr, getP(HpfHz),   0.707);
-    low.setLowShelf  (sr, getP(LowHz),   getP(LowDb),   0.9);
-    loMid.setPeak    (sr, getP(LoMidHz), getP(LoMidDb), 0.9);
-    mid.setPeak      (sr, getP(MidHz),   getP(MidDb),   0.9);
-    hiMid.setPeak    (sr, getP(HiMidHz), getP(HiMidDb), 0.9);
+    low.setPeak      (sr, getP(LowHz),   getP(LowDb),   getP(LowQ));
+    loMid.setPeak    (sr, getP(LoMidHz), getP(LoMidDb), getP(LoMidQ));
+    mid.setPeak      (sr, getP(MidHz),   getP(MidDb),   getP(MidQ));
+    hiMid.setPeak    (sr, getP(HiMidHz), getP(HiMidDb), getP(HiMidQ));
     air.setHighShelf (sr, getP(AirHz),   getP(AirDb),   0.9);
 
     const int numCh = juce::jmin(2, buffer.getNumChannels());
@@ -115,10 +119,10 @@ void BuiltInEQ::getMagnitudeResponse(const double* freqHz, double* outDb, int co
     const double s = sr > 0.0 ? sr : 48000.0;
     Biquad h, l, lm, m, hm, a;
     h.setHighpass  (s, getP(HpfHz),   0.707);
-    l.setLowShelf  (s, getP(LowHz),   getP(LowDb),   0.9);
-    lm.setPeak     (s, getP(LoMidHz), getP(LoMidDb), 0.9);
-    m.setPeak      (s, getP(MidHz),   getP(MidDb),   0.9);
-    hm.setPeak     (s, getP(HiMidHz), getP(HiMidDb), 0.9);
+    l.setPeak      (s, getP(LowHz),   getP(LowDb),   getP(LowQ));
+    lm.setPeak     (s, getP(LoMidHz), getP(LoMidDb), getP(LoMidQ));
+    m.setPeak      (s, getP(MidHz),   getP(MidDb),   getP(MidQ));
+    hm.setPeak     (s, getP(HiMidHz), getP(HiMidDb), getP(HiMidQ));
     a.setHighShelf (s, getP(AirHz),   getP(AirDb),   0.9);
 
     const double twoPiOverSr = 2.0 * juce::MathConstants<double>::pi / s;

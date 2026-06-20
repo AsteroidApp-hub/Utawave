@@ -29,6 +29,7 @@ public:
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
     void timerCallback() override;
@@ -40,7 +41,8 @@ private:
     float gainToY(double db) const;
     double yToGain(float y) const;
 
-    struct Node { int freqParam; int gainParam; juce::Colour colour; };  // gainParam<0 = ゲイン無し(HPF)
+    // gainParam<0 = ゲイン無し(HPF) / qParam<0 = Q 無し(HPF/シェルフ)
+    struct Node { int freqParam; int gainParam; int qParam; juce::Colour colour; };
     juce::Point<float> nodePos(const Node&) const;
     int  hitTestNode(juce::Point<float> p) const;   // -1 = なし
     static juce::String formatFreq(double hz);

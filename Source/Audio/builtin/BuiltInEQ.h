@@ -16,10 +16,14 @@
 class BuiltInEQ : public BuiltInEffect
 {
 public:
-    // 周波数順に並べる。新バンド (LoMid/HiMid) は末尾でなく論理位置に置くが、保存は id 文字列
-    // ベースなので enum 値が変わっても旧プロジェクトは読める (無い id は既定値)。
-    enum Param { HpfHz = 0, LowHz, LowDb, LoMidHz, LoMidDb,
-                 MidHz, MidDb, HiMidHz, HiMidDb, AirHz, AirDb, NumParams };
+    // 周波数順に並べる。低/低中/中/高中はピーク (ベル) で **Q を持つ**。両端 (HPF/高シェルフ) は
+    // Q を持たない。保存は id 文字列ベースなので enum 値が変わっても旧プロジェクトは読める。
+    enum Param { HpfHz = 0,
+                 LowHz, LowDb, LowQ,
+                 LoMidHz, LoMidDb, LoMidQ,
+                 MidHz, MidDb, MidQ,
+                 HiMidHz, HiMidDb, HiMidQ,
+                 AirHz, AirDb, NumParams };
 
     BuiltInEQ();
 
