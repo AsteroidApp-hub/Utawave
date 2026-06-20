@@ -17,19 +17,23 @@ public:
           de(d) {}
 
 private:
-    static constexpr float kFMin = 20.0f, kFMax = 20000.0f, kMeterW = 26.0f;
+    static constexpr float kMeterW = 26.0f;
     BuiltInDeEsser& de;
+
+    // 表示軸は FreqHz パラメータの範囲に一致させる (帯域全体がそのままマーカー可動域になり死域が出ない)
+    double fMin() const { return de.getParamInfo(BuiltInDeEsser::FreqHz).minV; }
+    double fMax() const { return de.getParamInfo(BuiltInDeEsser::FreqHz).maxV; }
 
     juce::Rectangle<float> bandArea(juce::Rectangle<float> a) const { return a.reduced(8.0f).withTrimmedRight(kMeterW); }
     float freqToX(juce::Rectangle<float> b, double hz) const
     {
-        hz = juce::jlimit((double) kFMin, (double) kFMax, hz);
-        return b.getX() + (float) (std::log(hz / kFMin) / std::log((double) kFMax / kFMin)) * b.getWidth();
+        hz = juce::jlimit(fMin(), fMax(), hz);
+        return b.getX() + (float) (std::log(hz / fMin()) / std::log(fMax() / fMin())) * b.getWidth();
     }
     double xToFreq(juce::Rectangle<float> b, float x) const
     {
         const double t = juce::jlimit(0.0, 1.0, (double) (x - b.getX()) / juce::jmax(1.0f, b.getWidth()));
-        return kFMin * std::pow((double) kFMax / kFMin, t);
+        return fMin() * std::pow(fMax() / fMin(), t);
     }
 
     void paintGraph(juce::Graphics& g, juce::Rectangle<float> area) override
@@ -41,18 +45,19 @@ private:
         g.setColour(AppColours::accent.withAlpha(0.16f));
         g.fillRect(juce::Rectangle<float>(fx2, b.getY(), b.getRight() - fx2, b.getHeight()));
 
-        // 周波数グリッド + ラベル
-        static const double lines[] = { 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
+        // 周波数グリッド + ラベル (表示軸 = FreqHz 範囲内のものだけ描く)
+        static const double lines[] = { 2000, 3000, 4000, 5000, 6000, 8000, 10000, 12000, 16000 };
         g.setFont(11.0f);
         for (double f : lines)
         {
+            if (f < fMin() || f > fMax()) continue;
             const float x = freqToX(b, f);
             g.setColour(AppColours::rulerLine.withAlpha(0.3f));
             g.drawVerticalLine((int) x, b.getY(), b.getBottom());
-            if (f == 100 || f == 1000 || f == 10000)
+            if (f == 5000 || f == 10000)
             {
                 g.setColour(AppColours::textDim);
-                g.drawText(f >= 1000 ? (juce::String((int) (f / 1000)) + "k") : juce::String((int) f),
+                g.drawText(juce::String((int) (f / 1000)) + "k",
                            (int) x - 16, (int) b.getBottom() - 15, 32, 14, juce::Justification::centred);
             }
         }
