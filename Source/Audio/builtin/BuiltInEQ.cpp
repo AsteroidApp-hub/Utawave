@@ -52,6 +52,20 @@ void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
     const int numCh = juce::jmin(2, buffer.getNumChannels());
     const int n     = buffer.getNumSamples();
 
+    // アナライザー (UI 表示中のみ): 入力 (pre-EQ) のモノ和をリングへ。フィルタ前に読む。
+    if (analyzerActive.load(std::memory_order_relaxed) && numCh > 0)
+    {
+        int pos = analyzerWritePos.load(std::memory_order_relaxed);
+        const float* l = buffer.getReadPointer(0);
+        const float* r = numCh > 1 ? buffer.getReadPointer(1) : l;
+        for (int i = 0; i < n; ++i)
+        {
+            analyzerRing[(size_t) pos] = 0.5f * (l[i] + r[i]);
+            pos = (pos + 1) & (kAnalyzerSize - 1);
+        }
+        analyzerWritePos.store(pos, std::memory_order_relaxed);
+    }
+
     for (int ch = 0; ch < numCh; ++ch)
     {
         float* d = buffer.getWritePointer(ch);
@@ -64,5 +78,39 @@ void BuiltInEQ::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&
             x = air.process(ch, x);
             d[i] = x;
         }
+    }
+}
+
+int BuiltInEQ::readAnalyzerSamples(float* dest, int maxN) const
+{
+    const int count = juce::jmin(maxN, kAnalyzerSize);
+    const int pos = analyzerWritePos.load(std::memory_order_relaxed);
+    const int start = pos - count;
+    for (int i = 0; i < count; ++i)
+    {
+        int idx = (start + i) % kAnalyzerSize;
+        if (idx < 0) idx += kAnalyzerSize;
+        dest[i] = analyzerRing[(size_t) idx];
+    }
+    return count;
+}
+
+void BuiltInEQ::getMagnitudeResponse(const double* freqHz, double* outDb, int count) const
+{
+    // ライブの hpf/low/mid/air は audio thread が使うので触らない。ローカル biquad で計算する。
+    const double s = sr > 0.0 ? sr : 48000.0;
+    Biquad h, l, m, a;
+    h.setHighpass (s, getP(HpfHz), 0.707);
+    l.setLowShelf (s, getP(LowHz), getP(LowDb), 0.9);
+    m.setPeak     (s, getP(MidHz), getP(MidDb), 0.9);
+    a.setHighShelf(s, getP(AirHz), getP(AirDb), 0.9);
+
+    const double twoPiOverSr = 2.0 * juce::MathConstants<double>::pi / s;
+    for (int i = 0; i < count; ++i)
+    {
+        const double w = freqHz[i] * twoPiOverSr;
+        const double mag = h.magnitudeAt(w) * l.magnitudeAt(w)
+                         * m.magnitudeAt(w) * a.magnitudeAt(w);
+        outDb[i] = 20.0 * std::log10(juce::jmax(mag, 1.0e-6));
     }
 }

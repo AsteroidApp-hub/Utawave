@@ -104,6 +104,7 @@ target_sources(Utawave PRIVATE
     Source/UI/MasterPanel.cpp
     Source/UI/PianoRollEditor.cpp
     Source/UI/BuiltInEffectEditor.cpp
+    Source/UI/BuiltInEQEditor.cpp
     Source/UI/StatusBar.cpp
 )
 
@@ -331,6 +332,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/Audio/builtin/BuiltInReverb.cpp
         Source/Audio/builtin/BuiltInFactory.cpp
         Source/UI/BuiltInEffectEditor.cpp
+        Source/UI/BuiltInEQEditor.cpp
         Source/Project/AdService.cpp
         Source/Project/UpdateChecker.cpp
         Source/Project/CrashReporter.cpp

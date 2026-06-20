@@ -17,6 +17,19 @@ struct Biquad
 
     void reset() noexcept { z1[0] = z1[1] = z2[0] = z2[1] = 0.0f; }
 
+    // 正規化角周波数 w (= 2π f/sr) における振幅応答 |H(e^jw)|。UI の周波数特性カーブ描画用。
+    double magnitudeAt(double w) const noexcept
+    {
+        const double cw = std::cos(w),       sw = std::sin(w);
+        const double c2 = std::cos(2.0 * w), s2 = std::sin(2.0 * w);
+        const double numRe = b0 + b1 * cw + b2 * c2;
+        const double numIm = -(b1 * sw + b2 * s2);
+        const double denRe = 1.0 + a1 * cw + a2 * c2;
+        const double denIm = -(a1 * sw + a2 * s2);
+        const double den = std::sqrt(denRe * denRe + denIm * denIm);
+        return den > 1.0e-12 ? std::sqrt(numRe * numRe + numIm * numIm) / den : 0.0;
+    }
+
     inline float process(int ch, float x) noexcept
     {
         const float y = (float) (b0 * x) + z1[ch];
