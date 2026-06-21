@@ -171,7 +171,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: utawave-unsigned
-          path: artifact/Utawave.exe
+          # exe + lame.dll をまとめて署名入力にする (DLL の署名は任意だが手元に揃えておく)
+          path: |
+            artifact/Utawave.exe
+            artifact/lame.dll
 
       # PDB を保管 (クラッシュレポートの「Utawave.exe + 0x<RVA>」を関数/行へ解決するのに必要)。
       # 配布 zip には入れず、別 artifact として上げる。リリースごとに DL して手元へ永久保管すること
