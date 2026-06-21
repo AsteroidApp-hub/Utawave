@@ -36,6 +36,12 @@ TransportBar::TransportBar()
     playBtn  .setButtonText("");
     recBtn   .setButtonText("");
 
+    // アイコンのみのボタンは機能が分かりにくいのでツールチップで補足
+    rewindBtn.setTooltip(tr(u8"先頭に戻る"));
+    stopBtn  .setTooltip(tr(u8"停止 (S)"));
+    playBtn  .setTooltip(tr(u8"再生 / 停止 (Space)"));
+    recBtn   .setTooltip(tr(u8"録音開始 / 停止 (R)"));
+
     static struct TransportIconLF : public juce::LookAndFeel_V4 {
         void drawButtonText(juce::Graphics& g, juce::TextButton& b,
                             bool, bool) override
@@ -166,7 +172,9 @@ TransportBar::TransportBar()
         opts.launchAsync();
     };
     metronomeBtn.setButtonText("CLICK");
+    metronomeBtn.setTooltip(tr(u8"メトロノームのオン/オフ（右クリックで音色・音量を設定）"));
     audioSettingsBtn.setButtonText("AUDIO");
+    audioSettingsBtn.setTooltip(tr(u8"オーディオ機器の設定（入力・出力デバイスを選ぶ）"));
 
     rewindBtn.onClick        = [this] { if (onRewind)        onRewind(); };
     stopBtn.onClick          = [this] { if (onStop)          onStop(); };
@@ -406,6 +414,7 @@ TransportBar::TransportBar()
     };
 
     styleLabel(bpmLabel,      "120.0 BPM",   11.5f);
+    bpmLabel.setTooltip(tr(u8"テンポ。ダブルクリックで数値を入力 / TAP ボタンで実測"));
     bpmLabel.setEditable(false, true, false);
     bpmLabel.setColour(juce::Label::backgroundWhenEditingColourId, juce::Colours::black.withAlpha(0.7f));
     bpmLabel.setColour(juce::Label::textWhenEditingColourId,        juce::Colours::white);
