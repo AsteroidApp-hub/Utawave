@@ -2,9 +2,7 @@
 ;  Utawave Windows インストーラ (Inno Setup 6)
 ; ----------------------------------------------------------------------------
 ;  - ユーザー単位インストール (管理者権限・UAC 不要 / %LocalAppData%\Programs\Utawave)
-;  - Utawave.exe と lame.dll を必ず同じフォルダへ配置する
-;    (zip 配布だと利用者が exe だけ移動して lame.dll を見失う事故があるため、
-;     インストーラでショートカット起動に統一して根本回避する)
+;  - Utawave.exe (LAME は静的リンク済みなので単一 exe) とドキュメントを配置する
 ;  - デスクトップ / スタートメニューにショートカット
 ;  - .uta (プロジェクトファイル) を Utawave に関連付け (任意・既定 ON)
 ;  - アンインストーラ
@@ -20,7 +18,7 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
-; exe / lame.dll の置き場所 (.iss からの相対 or 絶対)。既定は CI が staged する repo\artifact。
+; Utawave.exe の置き場所 (.iss からの相対 or 絶対)。既定は CI が staged する repo\artifact。
 #ifndef SrcDir
   #define SrcDir "..\artifact"
 #endif
@@ -71,8 +69,6 @@ Name: "utaassoc"; Description: ".uta ファイルを Utawave で開く (関連�
 
 [Files]
 Source: "{#SrcDir}\{#AppExe}";              DestDir: "{app}"; Flags: ignoreversion
-; MP3 エンコーダ LAME の動的リンク DLL。exe と必ずセットで配置 (無いと起動不可)
-Source: "{#SrcDir}\lame.dll";               DestDir: "{app}"; Flags: ignoreversion
 ; アプリ内「使い方ドキュメント」が exe 隣の help.html を開く
 Source: "{#DocDir}\help.html";              DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DocDir}\MANUAL.html";            DestDir: "{app}"; Flags: ignoreversion

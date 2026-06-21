@@ -61,13 +61,6 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
-          # 内側から署名する: 同梱した動的ライブラリ (liblame.dylib 等) を先に署名し、
-          # 最後に .app バンドルを署名して封をする (公証は全 dylib が hardened runtime 署名済みを要求)。
-          find "${{ steps.app.outputs.path }}/Contents/Frameworks" -name '*.dylib' -print0 2>/dev/null \
-            | while IFS= read -r -d '' dylib; do
-                codesign --force --timestamp --options runtime \
-                  --sign "$MACOS_SIGN_IDENTITY" "$dylib"
-              done
           codesign --force --timestamp --options runtime \
             --entitlements .github/macos/Utawave.entitlements \
             --sign "$MACOS_SIGN_IDENTITY" "${{ steps.app.outputs.path }}"
@@ -161,20 +154,13 @@ jobs:
           $exe = Get-ChildItem -Path build -Recurse -Filter Utawave.exe | Select-Object -First 1
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Copy-Item $exe.FullName artifact/Utawave.exe
-          # 動的リンクした LAME の DLL も署名入力に含める (利用者がローカルで exe と共に署名・同梱)
-          $dll = Get-ChildItem -Path build -Recurse -Filter lame.dll | Select-Object -First 1
-          if ($null -eq $dll) { Write-Host "::error::lame.dll が見つかりません (LAME の SHARED ビルドを確認)"; exit 1 }
-          Copy-Item $dll.FullName artifact/lame.dll
 
       - name: Upload unsigned exe (signing input)
         id: upload
         uses: actions/upload-artifact@v4
         with:
           name: utawave-unsigned
-          # exe + lame.dll をまとめて署名入力にする (DLL の署名は任意だが手元に揃えておく)
-          path: |
-            artifact/Utawave.exe
-            artifact/lame.dll
+          path: artifact/Utawave.exe
 
       # PDB を保管 (クラッシュレポートの「Utawave.exe + 0x<RVA>」を関数/行へ解決するのに必要)。
       # 配布 zip には入れず、別 artifact として上げる。リリースごとに DL して手元へ永久保管すること
@@ -188,9 +174,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path symbols | Out-Null
           Copy-Item $pdb.FullName symbols/
           Copy-Item artifact/Utawave.exe symbols/   # exe + PDB をペアで (RVA 解決用)
-          # LAME を DLL 化したので lame.pdb も保管 (クラッシュログの "lame.dll + 0x<RVA>" 解決用)
-          $lpdb = Get-ChildItem -Path build -Recurse -Filter lame.pdb | Select-Object -First 1
-          if ($lpdb) { Copy-Item $lpdb.FullName symbols/; Copy-Item artifact/lame.dll symbols/ }
 
       - name: Upload PDB (symbols, not distributed)
         uses: actions/upload-artifact@v4
@@ -210,10 +193,6 @@ jobs:
           $src = if (Test-Path signed/Utawave.exe) { 'signed/Utawave.exe' } else { 'artifact/Utawave.exe' }
           New-Item -ItemType Directory -Force -Path Utawave-Windows | Out-Null
           Copy-Item $src Utawave-Windows/Utawave.exe
-          # 動的リンクした LAME の DLL を同梱 (これが無いと起動時に DLL not found で落ちる)。
-          # 署名済み (signed/lame.dll) があればそれを、無ければ未署名 DLL を使う。
-          $dll = if (Test-Path signed/lame.dll) { 'signed/lame.dll' } else { 'artifact/lame.dll' }
-          Copy-Item $dll Utawave-Windows/lame.dll
           # 利用者がそのまま読めるよう、同梱ドキュメントはテキスト/HTML で入れる
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
@@ -229,9 +208,9 @@ jobs:
           path: Utawave-${{ inputs.version }}-Windows-x64.zip
 
       # ── インストーラ (Inno Setup) ──
-      # zip だと利用者が exe だけ移動して lame.dll を見失う事故があるため、
-      # ショートカット起動に統一するインストーラ形式も配布する (デスクトップ/スタートアイコン + .uta 関連付け)。
-      # CI では未署名 (artifact/ の exe・dll) でコンパイルする。署名運用は Docs/WINDOWS_SIGNING_SETUP.md。
+      # デスクトップ/スタートのショートカット + .uta 関連付け + アンインストーラを提供する
+      # インストーラ形式も配布する (非技術者向けの UX 向上)。zip 版も併存。
+      # CI では未署名 (artifact/ の exe) でコンパイルする。署名運用は Docs/WINDOWS_SIGNING_SETUP.md。
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -242,7 +221,7 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { Write-Host "::error::ISCC.exe が見つかりません (Inno Setup のインストールを確認)"; exit 1 }
           New-Item -ItemType Directory -Force -Path installer_out | Out-Null
-          # SrcDir 既定は ..\artifact (= repo\artifact、Utawave.exe + lame.dll が staged 済み)
+          # SrcDir 既定は ..\artifact (= repo\artifact、Utawave.exe が staged 済み)
           & $iscc "/DAppVersion=${{ inputs.version }}" "/Oinstaller_out" installer\Utawave.iss
           $setup = Get-ChildItem -Path installer_out -Filter *.exe | Select-Object -First 1
           if ($null -eq $setup) { Write-Host "::error::Setup.exe が生成されませんでした"; exit 1 }

@@ -18,11 +18,9 @@ LAME is licensed under the GNU Lesser General Public License v2.0 or later.
 Copyright (c) The LAME project (http://lame.sourceforge.net/).
 See Source/ThirdParty/lame/COPYING for full terms.
 
-LAME is used as a SEPARATE, DYNAMICALLY-LINKED shared library, shipped alongside
-this application (macOS: Utawave.app/Contents/Frameworks/liblame.dylib;
-Windows: lame.dll next to Utawave.exe). As permitted by the LGPL, you may obtain
-the LAME source from the project above, build your own compatible liblame, and
-replace the bundled library to relink it with this application.
+LAME is statically linked into Utawave. Utawave's complete corresponding source
+code is available under the GNU AGPL v3 (see the project repository), which lets
+you rebuild and relink the application with a modified LAME, satisfying the LGPL.
 
 
 r8brain-free-src — resampler
