@@ -525,8 +525,8 @@ static const char* const englishTranslations =
     "\"-18 LUFS (動画 / Web)\" = \"-18 LUFS (video / web)\"\n"
     "\"-23 LUFS (EBU R128 放送)\" = \"-23 LUFS (EBU R128 broadcast)\"\n"
     // ── カウントイン / プリロール ──
-    "\"カウントイン (Pre-Roll と排他)\" = \"Count-in (exclusive with Pre-Roll)\"\n"
-    "\"プリロール (Count-In と排他)\" = \"Pre-roll (exclusive with Count-In)\"\n"
+    "\"録音ボタンを押すと、指定した小節数ぶん手前から再生してから録音に入ります（歌い出しのタイミング合わせに）。プリロールとは同時に使えません\" = \"When you press Record, playback starts the set number of bars earlier before recording begins (helps you nail your entry). Cannot be used together with Pre-roll.\"\n"
+    "\"録音ボタンを押すと、指定した秒数ぶん手前から再生してから録音に入ります（歌い出しの準備に）。カウントインとは同時に使えません\" = \"When you press Record, playback starts the set number of seconds earlier before recording begins (time to get ready). Cannot be used together with Count-in.\"\n"
     "\"Nothing (入力ペア無し)\" = \"Nothing (no input pair)\"\n"
     // ── その他の単独 UI 文言 ──
     "\"プロジェクト\" = \"Project\"\n"

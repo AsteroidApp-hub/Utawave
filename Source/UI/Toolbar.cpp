@@ -351,7 +351,7 @@ TransportBar::TransportBar()
     countInBtn.setColour(juce::TextButton::textColourOffId,  AppColours::textDim);
     countInBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
     countInBtn.setButtonText("C-IN: Off");
-    countInBtn.setTooltip(tr(u8"カウントイン (Pre-Roll と排他)"));
+    countInBtn.setTooltip(tr(u8"録音ボタンを押すと、指定した小節数ぶん手前から再生してから録音に入ります（歌い出しのタイミング合わせに）。プリロールとは同時に使えません"));
     countInBtn.setWantsKeyboardFocus(false);
     countInBtn.onClick = [this] {
         juce::PopupMenu m;
@@ -375,7 +375,7 @@ TransportBar::TransportBar()
     preRollBtn.setColour(juce::TextButton::textColourOffId,  AppColours::textDim);
     preRollBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
     preRollBtn.setButtonText("PRE: Off");
-    preRollBtn.setTooltip(tr(u8"プリロール (Count-In と排他)"));
+    preRollBtn.setTooltip(tr(u8"録音ボタンを押すと、指定した秒数ぶん手前から再生してから録音に入ります（歌い出しの準備に）。カウントインとは同時に使えません"));
     preRollBtn.setWantsKeyboardFocus(false);
     preRollBtn.onClick = [this] {
         juce::PopupMenu m;
