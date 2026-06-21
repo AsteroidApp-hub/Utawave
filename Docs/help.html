@@ -195,6 +195,7 @@
       <li><a href="#fx">エフェクト（FX）</a></li>
       <li><a href="#midi">MIDI を読み込む・打ち込む</a></li>
       <li><a href="#export">書き出す（WAV / MP3）</a></li>
+      <li><a href="#gestures">右クリック・便利な操作</a></li>
       <li><a href="#shortcuts">ショートカット早見表</a></li>
       <li><a href="#trouble">困ったときは</a></li>
     </ol>
@@ -369,8 +370,46 @@
     <div class="tip"><b>音割れ防止：</b>書き出し時、音が大きすぎる場合は自動で少し下げて割れを防ぎます（設定でオフにできます）。</div>
   </section>
 
+  <section id="gestures">
+    <h2><span class="num">13</span>右クリック・便利な操作</h2>
+    <p class="lead">Utawave には、ボタンに出ていない<b>右クリックメニュー</b>や<b>ダブルクリック</b>でできる操作がたくさんあります。知っておくと作業がぐっと楽になるものをまとめました。</p>
+
+    <h3>右クリックでできること</h3>
+    <table>
+      <tr><th>どこを右クリック？</th><th>できること</th></tr>
+      <tr><td>波形（オーディオクリップ）</td><td>キーを変更 ／ テンポを検出 ／ ラウドネス（音量）を調整 ／ 無音をカット ／ クロスフェードを描く</td></tr>
+      <tr><td>テイクレーンの波形</td><td>「このテイクを使う」でそのテイクをメイン（Lane 0）に採用</td></tr>
+      <tr><td>トラックヘッダ（トラック名のあたり）</td><td>トラックカラーの変更 ／ トラックを複製 ／ トラックを削除 ／ ラウドネスを調整</td></tr>
+      <tr><td>波形ボタン（MIDI トラック）</td><td>内蔵シンセのオン／オフ切り替え</td></tr>
+      <tr><td><kbd>CLICK</kbd> ボタン</td><td>メトロノームの音量・音色・アクセントを設定</td></tr>
+      <tr><td>「TRACKS」「MASTER」の見出し</td><td>エフェクト用スロット（INS）の表示／非表示をまとめて切り替え</td></tr>
+    </table>
+    <div class="note"><b>削除は元に戻せます：</b>トラックやクリップを消しても <kbd>Ctrl+Z</kbd>（Mac は <kbd>⌘Z</kbd>）で元に戻せます。安心して試してください。</div>
+
+    <h3>ダブルクリックでできること</h3>
+    <table>
+      <tr><th>どこをダブルクリック？</th><th>できること</th></tr>
+      <tr><td>音量・Pan・Rev スライダー</td><td>初期値に戻す（音量は 0dB、Pan は中央、Rev は 0）</td></tr>
+      <tr><td>マスターの音量フェーダー</td><td>0dB に戻す</td></tr>
+      <tr><td>ツールバーの BPM 表示</td><td>テンポを数値で直接入力</td></tr>
+      <tr><td>トラック一覧の下の空いた所</td><td>モノラルトラックを追加</td></tr>
+      <tr><td>タイムラインの空き（MIDI トラック）</td><td>打ち込み用の MIDI クリップを作成 ／ さらにダブルクリックでピアノロールを開く</td></tr>
+    </table>
+
+    <h3>覚えると便利なキー操作</h3>
+    <table>
+      <tr><th>操作</th><th>はたらき</th></tr>
+      <tr><td><kbd>Alt</kbd>＋クリック（波形上）</td><td>その位置で波形を分割（カット）</td></tr>
+      <tr><td><kbd>Ctrl</kbd>＋クリック（FX チップ）</td><td>そのエフェクトを一時的にオフ（バイパス）</td></tr>
+      <tr><td><kbd>Alt</kbd>＋ドラッグ（FX チップ）</td><td>エフェクトをコピーして他のトラックへ</td></tr>
+      <tr><td><kbd>Shift</kbd>＋クリック（トラックヘッダ）</td><td>複数のトラックをまとめて選択</td></tr>
+      <tr><td><kbd>Shift+↑</kbd></td><td>選んだテイクをメインに採用</td></tr>
+    </table>
+    <div class="note">Mac では <kbd>Ctrl</kbd>→<kbd>⌘</kbd>、<kbd>Alt</kbd>→<kbd>Option</kbd> に読み替えてください。</div>
+  </section>
+
   <section id="shortcuts">
-    <h2><span class="num">13</span>ショートカット早見表</h2>
+    <h2><span class="num">14</span>ショートカット早見表</h2>
     <p>主なものだけ抜粋しています。全一覧は「ヘルプ」→「ショートカット一覧...」（<kbd>Ctrl+/</kbd> / Mac は <kbd>⌘/</kbd>）から確認できます。</p>
     <table class="keys">
       <tr><th style="width:46%">はたらき</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
@@ -393,7 +432,7 @@
   </section>
 
   <section id="trouble">
-    <h2><span class="num">14</span>困ったときは</h2>
+    <h2><span class="num">15</span>困ったときは</h2>
     <h3>「音声ファイルが見つかりません」と表示される</h3>
     <p>プロジェクトが参照している音源が移動／削除された可能性があります。元のファイルをプロジェクト内の <code>Audio</code> フォルダに戻すと自動的に復活します。</p>
     <h3>前回の作業が消えた／アプリが終了した</h3>
