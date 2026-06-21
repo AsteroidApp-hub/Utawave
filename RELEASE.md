@@ -76,13 +76,22 @@ zip のファイル名にはバージョン + アーキテクチャを含めま�
    **Windows は CI では未署名のまま完了する**（Certum はローカル署名運用のため。下記 2.5 で署名する）。
 4. 完了後、ワークフローの成果物 (Artifacts) から以下をダウンロード:
    - `Utawave-<version>-macOS-arm64`（**署名 + 公証済み** / Secrets 未登録の fork 等では ad-hoc）
-   - `Utawave-<version>-Windows-x64`（**未署名** exe を zip 化。ASIO 対応）
+   - `Utawave-<version>-Windows-x64`（**未署名** exe + `lame.dll` を zip 化。ASIO 対応・上級者/ポータブル用途）
+   - `Utawave-<version>-Windows-Setup`（**未署名インストーラ** `Utawave-<version>-Setup.exe`。デスクトップ/スタートの
+     ショートカット + `.uta` 関連付け。**配布の主役はこちら**。利用者が exe だけ移動して `lame.dll` を
+     見失う事故を防げる）
    - `utawave-unsigned`（署名対象の `Utawave.exe` + `lame.dll`）/ `Utawave-<version>-Windows-x64-pdb`（`Utawave.pdb` + `lame.pdb`・手元保管）
 
 ## 2.5. Windows exe をローカルで署名する (Certum)
 
-Windows 機で **SimplySign Desktop にログイン → `utawave-unsigned` の `Utawave.exe` を signtool で署名
-→ `Utawave-<version>-Windows-x64.zip` の中の exe を署名済みで差し替えて zip を作り直す**。
+Windows 機で **SimplySign Desktop にログイン**して署名する。**SmartScreen の評価対象はインストーラ
+exe (`Utawave-<version>-Setup.exe`)** なので、**インストーラの署名を最優先**する:
+
+- **インストーラ配布 (主役)**: `utawave-unsigned` の `Utawave.exe`（+任意で `lame.dll`）を署名 → `installer\Utawave.iss`
+  を署名済みファイルで再コンパイル (`ISCC /DAppVersion=<ver> /DSrcDir=signed installer\Utawave.iss`) →
+  生成された `Utawave-<ver>-Setup.exe` を signtool で署名して配布。
+- **zip 配布 (任意・併存)**: `Utawave-<version>-Windows-x64.zip` の中の `Utawave.exe` を署名済みで差し替えて zip を作り直す。
+
 具体的なコマンドとチェックリストは `Docs/WINDOWS_SIGNING_SETUP.md` を参照。
 証明書取得前の段階では未署名のまま配布してよい（初回 SmartScreen で「詳細情報 → 実行」が必要）。
 

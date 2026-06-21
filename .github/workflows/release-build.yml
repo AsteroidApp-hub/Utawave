@@ -218,6 +218,8 @@ jobs:
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
           Copy-Item LICENSE Utawave-Windows/LICENSE.txt
+          # アプリ内「使い方ドキュメント」が exe 隣の help.html を開くため zip にも同梱する
+          Copy-Item Docs/help.html Utawave-Windows/help.html
           Compress-Archive -Path Utawave-Windows -DestinationPath "Utawave-${{ inputs.version }}-Windows-x64.zip" -Force
 
       - name: Upload Windows zip
@@ -225,3 +227,29 @@ jobs:
         with:
           name: Utawave-${{ inputs.version }}-Windows-x64
           path: Utawave-${{ inputs.version }}-Windows-x64.zip
+
+      # ── インストーラ (Inno Setup) ──
+      # zip だと利用者が exe だけ移動して lame.dll を見失う事故があるため、
+      # ショートカット起動に統一するインストーラ形式も配布する (デスクトップ/スタートアイコン + .uta 関連付け)。
+      # CI では未署名 (artifact/ の exe・dll) でコンパイルする。署名運用は Docs/WINDOWS_SIGNING_SETUP.md。
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { Write-Host "::error::ISCC.exe が見つかりません (Inno Setup のインストールを確認)"; exit 1 }
+          New-Item -ItemType Directory -Force -Path installer_out | Out-Null
+          # SrcDir 既定は ..\artifact (= repo\artifact、Utawave.exe + lame.dll が staged 済み)
+          & $iscc "/DAppVersion=${{ inputs.version }}" "/Oinstaller_out" installer\Utawave.iss
+          $setup = Get-ChildItem -Path installer_out -Filter *.exe | Select-Object -First 1
+          if ($null -eq $setup) { Write-Host "::error::Setup.exe が生成されませんでした"; exit 1 }
+          Write-Host "built installer: $($setup.Name) ($([math]::Round($setup.Length/1MB,1)) MB)"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Utawave-${{ inputs.version }}-Windows-Setup
+          path: installer_out/*.exe

@@ -74,13 +74,17 @@ Windows 機 (リリースを作る PC) に以下を入れる:
    入力して実行する。
 2. 完了後、Windows 関連の成果物をダウンロードする:
    - **`utawave-unsigned`** … 署名対象の `Utawave.exe` + `lame.dll` (MP3 エンコーダの動的リンク DLL)
-   - **`Utawave-<version>-Windows-x64`** … 同梱ドキュメント + `lame.dll` 入りの zip (中の exe は未署名)
+   - **`Utawave-<version>-Windows-Setup`** … **未署名インストーラ** `Utawave-<version>-Setup.exe` (配布の主役)
+   - **`Utawave-<version>-Windows-x64`** … 同梱ドキュメント + `lame.dll` 入りの zip (中の exe は未署名・ポータブル用途)
    - **`Utawave-<version>-Windows-x64-pdb`** … クラッシュ解決用 PDB (`Utawave.pdb` + `lame.pdb`・配布しない・手元に永久保管)
 
 > **`lame.dll` について**: MP3 エンコーダ LAME を LGPL 準拠で動的リンクしているため、`Utawave.exe` は
-> 同じフォルダの `lame.dll` を必要とする (無いと起動時に DLL not found で落ちる)。zip には CI が
-> 自動同梱する。**SmartScreen の評価対象は exe 単体**なので `lame.dll` の署名は必須ではないが、
-> AV 誤検知を減らしたければ exe と同じ手順で `lame.dll` も署名してよい (任意)。
+> 同じフォルダの `lame.dll` を必要とする (無いと起動時に DLL not found で落ちる)。インストーラ / zip とも
+> CI が自動同梱する。`lame.dll` の署名は必須ではないが、AV 誤検知を減らしたければ exe と同じ手順で署名してよい (任意)。
+
+> **何を署名するか (優先順位)**: SmartScreen の評価は**起動される exe 単位**。利用者がまず実行するのは
+> **インストーラ (`Utawave-<version>-Setup.exe`)** なので、**インストーラの署名を最優先**する。インストーラ内の
+> `Utawave.exe` / `lame.dll` の署名は任意 (AV 誤検知低減目的)。zip 配布も残す場合は zip 内 `Utawave.exe` も署名する。
 
 ### 4. exe をローカルで署名する
 
@@ -113,10 +117,34 @@ jsign --storetype CRYPTOCERTUM \
 > **タイムスタンプは必須**。`/tr`(signtool) / `--tsaurl`(jsign) を必ず付ける。これが無いと証明書失効後に
 > 署名が無効になる。
 
-### 5. 署名済み exe を zip にし直す
+### 5. インストーラを署名する (配布の主役)
 
-SmartScreen の評価対象は **exe 単体**なので、**署名した exe を zip に入れて配布**する。
-CI が作った zip の中の exe を、署名済み exe で差し替える:
+利用者がまず実行するのは **インストーラ (`Utawave-<version>-Setup.exe`)** なので、ここを署名するのが
+最重要。CI が作る Setup.exe は未署名なので、**署名済みファイルでインストーラを作り直し → インストーラ自身を署名**する:
+
+```pwsh
+# 1. 署名済み exe / (任意で) lame.dll を 1 フォルダにまとめる
+New-Item -ItemType Directory -Force -Path signed | Out-Null
+Copy-Item .\Utawave.exe signed\Utawave.exe -Force
+Copy-Item .\lame.dll    signed\lame.dll    -Force   # 署名していなければ未署名のままでも可
+
+# 2. 署名済みファイルでインストーラを再コンパイル (リポジトリ直下から)
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+  /DAppVersion=0.3.0 /DSrcDir=signed /Oinstaller_out installer\Utawave.iss
+
+# 3. 生成された Setup.exe を署名する (exe と同じ手順)
+signtool sign /sha1 <thumbprint> /fd SHA256 /tr http://time.certum.pl /td SHA256 `
+  /d "Utawave Setup" installer_out\Utawave-0.3.0-Setup.exe
+signtool verify /pa /v installer_out\Utawave-0.3.0-Setup.exe
+```
+
+> `installer\Utawave.iss` の `SrcDir` は exe/dll の場所。CI 既定は `..\artifact` (未署名)、ローカル署名時は
+> 上記のように `signed` を渡す。Inno Setup が手元に無ければ https://jrsoftware.org/isdl.php から導入する
+> (CI と同じ Inno Setup 6)。
+
+### 5.1 (任意) zip 版も署名して作り直す
+
+ポータブル zip も併せて配布する場合は、CI が作った zip の中の exe を、署名済み exe で差し替える:
 
 ```pwsh
 # 1. CI の Utawave-<ver>-Windows-x64.zip を展開
@@ -158,11 +186,12 @@ PDB は配布せず手元に永久保管する (その版の RVA → 関数/行 
 - [ ] Certum Open Source 証明書 (SimplySign クラウド) を購入し本人確認が完了した
 - [ ] SimplySign モバイルアプリをアクティベートした (TOTP)
 - [ ] リリース PC に SimplySign Desktop + signtool (または jsign) を用意した
-- [ ] CI を手動発火し `utawave-unsigned` (Utawave.exe) と zip / PDB を取得した
+- [ ] CI を手動発火し `utawave-unsigned` (Utawave.exe + lame.dll) と Setup / zip / PDB を取得した
 - [ ] signtool/jsign で exe を署名し `signtool verify /pa` が通った (タイムスタンプ付き)
-- [ ] 署名済み exe で zip の中身を差し替えた
-- [ ] 署名済み exe の発行元が署名者名で表示されることを Windows で確認
-      (exe を右クリック → プロパティ → デジタル署名)
+- [ ] 署名済みファイルでインストーラを再コンパイル (`ISCC /DSrcDir=signed`) し、**Setup.exe を署名**した
+- [ ] (zip も配布するなら) 署名済み exe で zip の中身を差し替えた
+- [ ] 署名済み Setup.exe / exe の発行元が署名者名で表示されることを Windows で確認
+      (右クリック → プロパティ → デジタル署名)
 
 ---
 
