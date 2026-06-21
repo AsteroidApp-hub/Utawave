@@ -15,16 +15,33 @@
 #include "MIDI/MidiImporter.h"
 #include "MIDI/MidiImportDialog.h"
 
+void MainComponent::applyTooltipVisibility()
+{
+    // ツールチップ用 LnF は TooltipWindow より長生きする必要があるため関数ローカル static。
+    static UtawaveLookAndFeel tooltipLnF;
+    if (appPrefs.showTooltips)
+    {
+        if (tooltipWindow == nullptr)
+        {
+            tooltipWindow = std::make_unique<juce::TooltipWindow>(this);
+            tooltipWindow->setLookAndFeel(&tooltipLnF);
+        }
+    }
+    else
+    {
+        tooltipWindow.reset();   // 破棄するとアプリ全体でツールチップが出なくなる
+    }
+}
+
 MainComponent::MainComponent()
 {
     setSize(1280, 800);
     setWantsKeyboardFocus(true);
     addKeyListener(this);
 
-    // ツールチップを UtawaveLookAndFeel で描画する（角丸 + アクセント枠 + 余白）。
-    // アプリはグローバル既定 LnF を設定していないため TooltipWindow に明示適用する。
-    static UtawaveLookAndFeel tooltipLnF;
-    tooltipWindow.setLookAndFeel(&tooltipLnF);
+    // ツールチップ表示の生成 (appPrefs.showTooltips が ON のときのみ)。
+    // 描画は UtawaveLookAndFeel（角丸 + アクセント枠 + 余白）を applyTooltipVisibility で適用する。
+    applyTooltipVisibility();
 
 
     // 未保存プロジェクト用の仮フォルダを作成（録音/インポートはここに溜まる）

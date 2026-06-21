@@ -80,6 +80,7 @@ static const char* const englishTranslations =
     "\"ループ再生のオン/オフ\" = \"Loop on/off\"\n"
     "\"テイク（録り直し）レーンの表示 / 非表示。録り直すと前のテイクはここに残ります\" = \"Show / hide take (re-record) lanes. Previous takes are kept here when you re-record.\"\n"
     "\"このトラックに録音する入力（マイク）を選びます\" = \"Choose the input (microphone) to record onto this track\"\n"
+    "\"ボタンの上にマウスを乗せたとき説明 (ツールチップ) を表示する\" = \"Show explanations (tooltips) when hovering over buttons\"\n"
     "\"先頭に戻る\" = \"Return to start\"\n"
     "\"停止 (S)\" = \"Stop (S)\"\n"
     "\"再生 / 停止 (Space)\" = \"Play / Stop (Space)\"\n"

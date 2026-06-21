@@ -186,6 +186,8 @@ private:
     void propagatePlayheadToPianoRolls(double playheadSecs);
     // 開いている全ピアノロールへ自動ページング設定 (appPrefs.midiPagingEnabled) を反映
     void applyMidiPagingToOpenEditors();
+    // appPrefs.showTooltips に応じて TooltipWindow を生成 / 破棄する (OFF で説明を出さない)
+    void applyTooltipVisibility();
     void commitRetrospective();
     // ── オーディオインポート ──
     // 変換本体 (ファイル I/O のみ・UI/trackManager に触れない)。バックグラウンドスレッドから
@@ -370,8 +372,9 @@ private:
     MasterPanel      masterPanel;
     StatusBar        statusBar;
     // ホバー時のツールチップ表示 (INS トグル等のアイコンボタンの説明)。
-    // これを 1 つ置くだけでアプリ全体の setTooltip が機能する。
-    juce::TooltipWindow tooltipWindow { this };
+    // これを 1 つ置くだけでアプリ全体の setTooltip が機能する。appPrefs.showTooltips が
+    // OFF のときは生成しない (= 説明を出さない)。applyTooltipVisibility() で生成/破棄を切替。
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
 
     bool        isPlaying         { false };
     bool        isRecording       { false };

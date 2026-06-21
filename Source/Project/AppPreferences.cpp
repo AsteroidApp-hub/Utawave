@@ -32,6 +32,7 @@ AppPreferences AppPreferences::load()
         p.recLatencyManualMs = juce::jlimit(-500.0, 500.0,
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
+        p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
     }
     return p;
 }
@@ -45,6 +46,7 @@ bool AppPreferences::save() const
     xml.setAttribute("recLatencyAutoComp", recLatencyAutoComp);
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
+    xml.setAttribute("showTooltips", showTooltips);
     const bool ok = xml.writeTo(getStoreFile());
     if (!ok)
         DBG("AppPreferences::save failed (disk full / permission?): "

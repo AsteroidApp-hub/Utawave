@@ -24,6 +24,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton followSelBtn, retroBtn, rtzBtn, autoNormBtn, zoomMouseBtn, peakGuardBtn, zeroCrossBtn, stripMetaBtn;
         juce::ToggleButton showMidiExportBtn;   // 初期状態 / コールバックは showPreferences 側で設定 (アプリ全体設定)
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton tooltipsBtn;         // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
         juce::ToggleButton recCompBtn;          // 録音レイテンシ自動補正 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton monInsBtn;           // 入力モニターに INS を通す (アプリ全体設定。初期状態は showPreferences 側)
@@ -51,6 +52,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onStripMetaChanged;
         std::function<void(bool)>  onShowMidiExportChanged;
         std::function<void(bool)>  onMidiPagingChanged;
+        std::function<void(bool)>  onTooltipsChanged;
         std::function<void(bool)>  onShowAdsChanged;
         std::function<void(bool)>  onRecCompChanged;
         std::function<void(double)> onRecCompOffsetChanged;
@@ -161,6 +163,16 @@ void MainComponent::showPreferences()
                 if (onMidiPagingChanged) onMidiPagingChanged(midiPagingBtn.getToggleState());
             };
             addAndMakeVisible(midiPagingBtn);
+
+            // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)。
+            // 操作に慣れたら OFF にしてホバー時の説明を止められる。
+            tooltipsBtn.setButtonText(
+                tr(u8"ボタンの上にマウスを乗せたとき説明 (ツールチップ) を表示する"));
+            tooltipsBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            tooltipsBtn.onClick = [this] {
+                if (onTooltipsChanged) onTooltipsChanged(tooltipsBtn.getToggleState());
+            };
+            addAndMakeVisible(tooltipsBtn);
 
             // 録音フロー
             retroBtn.setButtonText(platformShortcutText(
@@ -403,7 +415,8 @@ void MainComponent::showPreferences()
             rtzBtn.setBounds      (14, y, w - 28, 24); y += 28;
             zoomMouseBtn.setBounds(14, y, w - 28, 24); y += 28;
             zeroCrossBtn.setBounds(14, y, w - 28, 24); y += 28;
-            midiPagingBtn.setBounds(14, y, w - 28, 24); y += 32;
+            midiPagingBtn.setBounds(14, y, w - 28, 24); y += 28;
+            tooltipsBtn.setBounds(14, y, w - 28, 24); y += 32;
             recLabel.setBounds(14, y, w - 28, 22); y += 26;
             retroBtn.setBounds(14, y, w - 28, 24); y += 28;
             recCompBtn.setBounds(14, y, w - 28, 24); y += 26;
@@ -603,6 +616,13 @@ void MainComponent::showPreferences()
         appPrefs.midiPagingEnabled = v;
         appPrefs.save();
         applyMidiPagingToOpenEditors();
+    };
+    // ツールチップ表示 (アプリ全体設定)。即時保存し、TooltipWindow を生成/破棄して即反映。
+    dlg->tooltipsBtn.setToggleState(appPrefs.showTooltips, juce::dontSendNotification);
+    dlg->onTooltipsChanged = [this](bool v) {
+        appPrefs.showTooltips = v;
+        appPrefs.save();
+        applyTooltipVisibility();
     };
     // 起動画面の広告表示 (アプリ全体設定)。広告がコンパイル時有効なビルドのみ。即時保存。反映は次回起動画面表示時
     if (AppPreferences::adsCompiledIn())

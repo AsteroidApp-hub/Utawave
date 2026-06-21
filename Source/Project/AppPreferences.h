@@ -34,6 +34,10 @@ public:
     // モニタ遅延が気になるユーザー向けの逃げ道として OFF にできる。録音ファイルには焼かない。
     bool monitorThroughInserts { true };
 
+    // ホバー時のツールチップ (ボタン等の説明) を表示するか (既定: 表示)。
+    // 操作に慣れたユーザーが煩わしさを減らせるよう OFF にできる。
+    bool showTooltips { true };
+
     // 広告機能のコンパイル時マスタースイッチ。公開ソースの既定は OFF (起動画面は 2 列・通信なし)。
     // 公式配布ビルドのみ CMake の UTAWAVE_ADS_ENABLED=1 で有効化する (詳細は CMakeLists / CLAUDE.md)。
     static bool adsCompiledIn();
