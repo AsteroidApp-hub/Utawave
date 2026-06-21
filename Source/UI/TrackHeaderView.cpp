@@ -86,6 +86,7 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
     lanesBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
     lanesBtn.setClickingTogglesState(true);
     lanesBtn.setButtonText("TList");
+    lanesBtn.setTooltip(tr(u8"テイク（録り直し）レーンの表示 / 非表示。録り直すと前のテイクはここに残ります"));
     lanesBtn.setWantsKeyboardFocus(false);
     lanesBtn.onClick = [this]
     {
@@ -161,6 +162,7 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
     inputChBox.setColour(juce::ComboBox::textColourId,       AppColours::text);
     inputChBox.setColour(juce::ComboBox::arrowColourId,      AppColours::textDim);
     inputChBox.setColour(juce::ComboBox::outlineColourId,    AppColours::separator);
+    inputChBox.setTooltip(tr(u8"このトラックに録音する入力（マイク）を選びます"));
     inputChBox.setWantsKeyboardFocus(false);
     inputChBox.onChange = [this]
     {
