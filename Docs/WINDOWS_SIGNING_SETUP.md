@@ -1,10 +1,14 @@
-# Windows コード署名 (SmartScreen 対策) — SignPath Foundation 手順
+# Windows コード署名 (SmartScreen 対策) — Certum Open Source 手順
 
 Windows 版 `Utawave.exe` にコードサイニング署名を付け、SmartScreen の「WindowsによってPCが保護されました」
-警告を低減するための手順。**OSS 向けに無料**で証明書と署名基盤を提供する **SignPath Foundation** を使う。
+警告を低減するための手順。**Certum Open Source Code Signing 証明書 (OSS 開発者向け・安価・年 ~$108)** を使う。
 
 > このファイルは配布側 (開発者) のセットアップ手順。アプリ本体のコードは一切変更しない
 > (署名はビルド後のバイナリに対する外部処理)。
+
+> **経緯**: 当初は SignPath Foundation (無料 OSS) を使う方針だったが OSS 審査に落選したため、
+> 有料だが確実で日本からでも取得できる Certum へ切替えた。証明書は途中で切り替えると SmartScreen の
+> 評価がリセットされるため、一度 Certum で署名を始めたら長く使い続ける ([[utawave-windows-signing-plan]])。
 
 ---
 
@@ -12,177 +16,181 @@ Windows 版 `Utawave.exe` にコードサイニング署名を付け、SmartScre
 
 - **SmartScreen 警告**は「署名が無い」または「署名はあるが評価 (ダウンロード実績) が溜まっていない」
   EXE に出る。
-- SignPath Foundation が発行するのは **OV 相当**の証明書。署名しても**最初は警告が出続け**、
+- Certum Open Source が発行するのは **OV 相当**の証明書。署名しても**最初は警告が出続け**、
   ダウンロード実績が増えるにつれ消えていく (= 評価の蓄積が必要)。
-- 「署名すれば即警告ゼロ」になるのは **EV 証明書だけ**で、これは無料では入手できない
-  (個人での購入はハードウェアトークン必須・高額)。
-- それでも**発行元が「Utawave」として表示される / 改ざん検知が効く / 評価が貯まれば警告が消える**
-  という明確なメリットがあるので、無料でできる範囲としては SignPath Foundation が最適。
+- 「署名すれば即警告ゼロ」になるのは **EV 証明書だけ**で、これは個人 OSS 開発者には高額・入手困難。
+- それでも**発行元が署名者名として表示される / 改ざん検知が効く / 評価が貯まれば警告が消える**
+  という明確なメリットがある。
 
 ---
 
-## 重要な前提：署名対象は GitHub Actions でビルドする必要がある
+## SignPath との違い (設計上の前提)
 
-SignPath Foundation は **出所検証 (Origin Verification)** を技術的に強制する。これは
-**「署名するバイナリが、指定リポジトリのソースから自動ビルドされたものである」ことを GitHub が保証する**
-仕組みで、具体的には:
+- **出所検証 (Origin Verification) の縛りが無い**。SignPath Foundation は「指定リポジトリから
+  GitHub Actions でビルドした artifact のみ署名可」という制約があったが、**Certum は任意のバイナリを
+  署名できる**。よって **CI でビルドした未署名 exe を手元で署名する運用が可能**。
+- **CI 完全自動署名は難しい**。Certum のクラウド署名 (SimplySign) はスマホアプリの **TOTP (ワンタイム
+  パスワード) 認証**を伴うため、SignPath のような完全ヘッドレス自動署名が素直にできない。
+  → **既定はローカル署名**にする (下記「手順」)。CI 自動署名は付録 (任意・上級) を参照。
 
-- 署名対象は **GitHub Actions のワークフロー成果物 (artifact)** であること
-- 出所メタデータは**ビルドスクリプトではなく GitHub 自身が付与**するため偽装できない
-- ローカル PC で手動ビルドした EXE を手で SignPath にアップロードする経路は **Foundation では使えない**
-
-→ このため**署名対象の Windows ビルドは GitHub Actions で行う**。`workflow_dispatch` (手動発火) で
-動くワークフローでも GitHub が出所メタデータを付与するので問題ない (push トリガーである必要はない)。
-
-> **macOS と統合済み**: 署名は Mac (Developer ID + 公証) と Windows (SignPath) を 1 つの手動発火
-> ワークフロー `.github/workflows/release-build.yml` にまとめてある (`windows` ジョブが SignPath 担当)。
-> Mac 側の手順は `Docs/MACOS_SIGNING_SETUP.md` を参照。以下は Windows (SignPath) 固有の設定。
+> **macOS と統合済み**: リリースワークフロー `.github/workflows/release-build.yml` は Mac
+> (Developer ID + 公証) と Windows (未署名 exe + PDB のビルド) を 1 つの手動発火にまとめてある。
+> Windows ジョブは**未署名 exe と PDB を artifact 化するところまで**を担当し、署名はこの手順で
+> ローカルに行う。Mac 側の手順は `Docs/MACOS_SIGNING_SETUP.md`。
 > **ASIO 対応も CI で行う**: 再配布制限のある SDK は非公開 repo `AsteroidApp-hub/utawave-asiosdk` に置き、
 > `windows` ジョブが read-only deploy key (secret `ASIOSDK_DEPLOY_KEY`) で取得してビルドする
-> (詳細は `RELEASE.md`)。よって ASIO 入り Windows 版もローカル手動ではなく CI で作れる
-> (現状 SignPath 未設定なので署名は付かないが、ASIO は有効)。
+> (詳細は `RELEASE.md`)。
 
 ---
 
 ## セットアップ手順
 
-### 1. SignPath Foundation に申請する
+### 1. Certum Open Source 証明書を取得する
 
-**事前準備 (申請前にやること)**
-- GitHub アカウントで **2FA (多要素認証) を有効化**しておく (Foundation の必須条件)。
-- リポジトリが **public** で、ルートに `LICENSE` (AGPLv3 全文) があることを確認 (済)。
+1. <https://shop.certum.eu/> (または日本代理店) で **Open Source Code Signing** を購入する。
+   - **クラウド署名 (SimplySign) 版を選ぶ**: 物理 USB トークン/スマートカードの郵送を待たずに済み、
+     ローカル PC からクラウド経由で署名できる。日本からでも取得可。
+   - 物理カード版 (カード + リーダーのセット) もあるが、郵送と専用リーダーが要るのでクラウド版を推奨。
+2. **本人確認 (個人開発者としての ID 確認)** を行う。書類審査に数日〜かかる前提で早めに着手する。
+3. 発行されると **SimplySign クラウドのアカウント**と証明書が使えるようになる。スマホに
+   **SimplySign モバイルアプリ**を入れ、QR でアクティベートする (TOTP 認証用)。
 
-申請は <https://signpath.org/apply.html> のフォームから行う。**公開される文 (Tagline / Description /
-Reputation) は英語で書く** (審査担当が読む & Foundation サイトに掲載されるため)。Utawave の回答案:
+> **保管 (重要)**: アクティベーション時の QR / シークレットは、CI 自動署名 (付録) に使う可能性があるので
+> 安全に保管する。証明書の thumbprint (拇印) も控えておく (signtool で指定する)。
 
-| フォーム項目 | 回答案 |
-|------|--------|
-| Project name | `Utawave` |
-| Repository URL | `https://github.com/AsteroidApp-hub/Utawave` |
-| Project website | `https://github.com/AsteroidApp-hub/Utawave` (公式サイト未公開のため。任意・空欄可・公開後に差し替え) |
-| Privacy Policy URL | **空欄**。CI でビルドする署名版はクラッシュ送信URL等を埋め込まずユーザーデータを送信しないため不要 |
-| Wikipedia URL | 空欄 (記事なし) |
-| License | `AGPL-3.0-or-later` (OSI 承認・商用デュアルライセンス無し) |
-| Tagline | `Free, open-source recording DAW for vocal cover artists.` |
-| Description | `Utawave is a free and open-source recording-focused digital audio workstation for vocal cover artists, available on Windows and macOS under the AGPL-3.0-or-later license.` (※ 依存ライブラリ/バージョン固有機能は書かない指示があるので JUCE 等は書かない) |
-| Reputation | 下記ブロック参照 |
-| Maintainer Type | `Individual` |
-| Build System | `GitHub Actions` |
-| First / Last Name | 申請者本人の氏名 (SignPath アカウント名になる) |
-| Email | 通知が届くメール |
-| Company Name | 空欄 (個人) |
-| Primary Discovery Channel | `Google search` (ネット検索で知ったため。exact source は空欄で可) |
+### 2. ローカル署名ツールを用意する
 
-**Reputation 欄 (英語・実績リンクを示す):**
+Windows 機 (リリースを作る PC) に以下を入れる:
 
+- **SimplySign Desktop** (Certum 配布) — クラウドの証明書を Windows の証明書ストアに「仮想スマートカード」
+  として読み込ませるアプリ。署名時に SimplySign アプリの TOTP でログインする。
+- **signtool.exe** — Windows SDK 同梱 (Visual Studio または Windows SDK を入れると入る)。
+  - 代替として **jsign** (Java 製・クロスプラットフォームの Authenticode 署名ツール) でも署名できる。
+    Certum を直接サポートする。Mac/Linux から署名したい場合はこちら。
+
+### 3. リリースをビルドする (CI)
+
+1. **Actions タブ → "Release Build (macOS + Windows)" → Run workflow** で version (例 `0.2.0`) を
+   入力して実行する。
+2. 完了後、Windows 関連の成果物をダウンロードする:
+   - **`utawave-unsigned`** … 署名対象の `Utawave.exe` + `lame.dll` (MP3 エンコーダの動的リンク DLL)
+   - **`Utawave-<version>-Windows-x64`** … 同梱ドキュメント + `lame.dll` 入りの zip (中の exe は未署名)
+   - **`Utawave-<version>-Windows-x64-pdb`** … クラッシュ解決用 PDB (`Utawave.pdb` + `lame.pdb`・配布しない・手元に永久保管)
+
+> **`lame.dll` について**: MP3 エンコーダ LAME を LGPL 準拠で動的リンクしているため、`Utawave.exe` は
+> 同じフォルダの `lame.dll` を必要とする (無いと起動時に DLL not found で落ちる)。zip には CI が
+> 自動同梱する。**SmartScreen の評価対象は exe 単体**なので `lame.dll` の署名は必須ではないが、
+> AV 誤検知を減らしたければ exe と同じ手順で `lame.dll` も署名してよい (任意)。
+
+### 4. exe をローカルで署名する
+
+SimplySign Desktop を起動し、スマホの SimplySign アプリの TOTP でログイン (= 証明書がストアに入る) してから、
+ダウンロードした **`Utawave.exe` を署名**する。
+
+**signtool の例** (証明書 thumbprint で指定。SHA-256 + RFC3161 タイムスタンプ):
+
+```pwsh
+signtool sign `
+  /sha1 <証明書のthumbprint> `
+  /fd SHA256 `
+  /tr http://time.certum.pl `
+  /td SHA256 `
+  /d "Utawave" `
+  Utawave.exe
+
+# 検証
+signtool verify /pa /v Utawave.exe
 ```
-Utawave is a newly released, actively maintained open-source project.
-- Source, issues and release history (public): https://github.com/AsteroidApp-hub/Utawave
-- Releases (Windows & macOS builds): https://github.com/AsteroidApp-hub/Utawave/releases
-- Development updates and announcements: https://x.com/SAsteroid2021
-It is a free, recording-focused DAW for the Japanese "vocal cover" (歌い手) community.
+
+**jsign の例** (Mac/Linux/Win 共通。CRYPTOCERTUM ストアを使う):
+
+```bash
+jsign --storetype CRYPTOCERTUM \
+      --tsaurl http://time.certum.pl \
+      Utawave.exe
 ```
 
-> **資格の根拠** (確認欄用): ① OSI 承認ライセンス (AGPLv3) で商用デュアルライセンスでない /
-> ② マルウェア・PUP を含まない / ③ アクティブにメンテされている (GitHub + X で継続開発・告知) /
-> ④ 既にリリース済み (GitHub Releases v0.1.0 で Windows / macOS 配布)。
+> **タイムスタンプは必須**。`/tr`(signtool) / `--tsaurl`(jsign) を必ず付ける。これが無いと証明書失効後に
+> 署名が無効になる。
 
-承認されると SignPath.io 上に Foundation の組織 (Organization) とプロジェクトが用意され、招待が届く。
-**SignPath 側でも 2FA を有効化**する。
+### 5. 署名済み exe を zip にし直す
 
-### 2. SignPath 側でプロジェクト / 署名ポリシーを設定
+SmartScreen の評価対象は **exe 単体**なので、**署名した exe を zip に入れて配布**する。
+CI が作った zip の中の exe を、署名済み exe で差し替える:
 
-SignPath.io の管理画面で以下を作成 (承認後に表示される値を控える):
+```pwsh
+# 1. CI の Utawave-<ver>-Windows-x64.zip を展開
+Expand-Archive Utawave-0.2.0-Windows-x64.zip -DestinationPath stage
 
-- **Organization ID** — 組織の GUID
-- **Project Slug** — 例 `utawave`
-- **Signing Policy Slug** — リリース署名用。例 `release-signing`
-- **Trusted Build System** に **GitHub** を登録し、上記リポジトリを紐付ける (出所検証の有効化)
-- 署名は**リリースごとに人間の承認 (Approver) が必須**。Author / Reviewer / Approver のロールを割り当てる
-  (個人運用なら自分が兼任で可)
+# 2. 中の Utawave.exe を、署名済み exe で上書き
+Copy-Item .\Utawave.exe .\stage\Utawave-Windows\Utawave.exe -Force
+#    (任意) lame.dll も署名したならここで上書きする。未署名のままでも起動・配布は可
+# Copy-Item .\lame.dll .\stage\Utawave-Windows\lame.dll -Force
 
-API 連携用に **SignPath の API トークン**を 1 つ発行する (次の手順で GitHub Secret に入れる)。
+# 3. zip を作り直す
+Compress-Archive -Path stage\Utawave-Windows -DestinationPath Utawave-0.2.0-Windows-x64.zip -Force
+```
 
-### 3. GitHub リポジトリに Secrets / Variables を登録
+> zip 自体には署名しない (Windows は zip の署名を見ない)。利用者が展開した `Utawave.exe` が署名済みであればよい。
+> **`lame.dll` は zip に既に含まれている** (CI が同梱) ので、exe を差し替えるだけでよい。`lame.dll` を
+> 削除しないこと (起動に必須)。
 
-`AsteroidApp-hub/Utawave` の **Settings → Secrets and variables → Actions** で:
+### 6. 配布する (RELEASE.md との接続)
 
-| 種別 | 名前 | 値 |
-|------|------|----|
-| Secret | `SIGNPATH_API_TOKEN` | SignPath で発行した API トークン |
-| Variable | `SIGNPATH_ORGANIZATION_ID` | 組織の GUID |
-| Variable | `SIGNPATH_PROJECT_SLUG` | 例 `utawave` |
-| Variable | `SIGNPATH_POLICY_SLUG` | 例 `release-signing` |
-
-### 4. ワークフローについて
-
-署名ワークフローは既に **`.github/workflows/release-build.yml`** にコミット済み (Mac と統合)。
-`windows` ジョブが「ビルド → 未署名 exe を artifact アップロード → SignPath へ署名要求 →
-署名済み exe を zip 化」を行う。手順 3 の Secrets / Variables を登録すれば動く。
-
-> **`SIGNPATH_API_TOKEN` 未登録のうちは署名ステップを自動スキップ**し、未署名 exe をそのまま
-> zip 化する (`HAS_SIGNING` ガード)。SignPath 設定前でもワークフローは緑になり、パイプライン全体を
-> テストできる。トークンを登録すると次回実行から署名 + 出所検証が有効になる。
-
-ワークフローを編集する際の要点:
-- 実際の action 名 / 入力名は SignPath のドキュメント
-  (<https://github.com/SignPath/github-action-submit-signing-request> /
-  <https://docs.signpath.io/trusted-build-systems/github>) の最新版に合わせること
-  (バージョンや入力キーが更新される場合がある)。
-- **署名は承認待ちで止まる**: ワークフローが署名要求を送信したあと、SignPath.io 上で
-  Approver が承認するまで `wait-for-completion: true` が待機する。承認するとワークフローが続行する。
-- **SignPath の署名ポリシーの出所検証設定で `workflow_dispatch` トリガー / 対象ブランチを許可**して
-  おくこと (手動発火を弾く設定だと署名要求が拒否される)。
-
-### 5. リリースで使う (RELEASE.md との接続)
-
-1. **Actions タブ → "Release Build (macOS + Windows)" → Run workflow** で version (例 `0.1.0`) を
-   入力して実行。
-2. SignPath.io で署名要求を**承認**する。
-3. 完了後、ワークフローの **`Utawave-<version>-win64` 成果物 (署名済み exe を zip 化済み) をダウンロード**。
-4. その zip をそのまま GitHub Release / 公式サイト `dl/` に配置する (`RELEASE.md` の手順 5・6)。
-
-> exe の zip 化までワークフロー側で済むので、ローカルでの再パッケージは不要。
-
-### 6. exe を zip に入れたまま署名できるか
-
-SmartScreen の評価対象は **exe 単体**なので、上記のとおり **exe を署名 → zip に格納**する流れにする。
-zip 自体には署名しない (Windows は zip の署名を見ない)。利用者が展開した `Utawave.exe` が署名済みであればよい。
+差し替えた zip をそのまま GitHub Release / 公式サイト `dl/` に配置する (`RELEASE.md` の手順 5・6)。
+PDB は配布せず手元に永久保管する (その版の RVA → 関数/行 解決に必要。署名は RVA を変えないので
+未署名 exe と PDB のペアで解決できる。詳細は `Docs/CRASH_REPORT_SETUP.md`)。
 
 ---
 
 ## SmartScreen 評価について (重要)
 
 - 署名直後の新バージョンは **しばらく警告が出続ける**。これは仕様 (OV 証明書は評価の蓄積が必要)。
-- 同じ証明書で署名し続けると**証明書全体に評価が蓄積**し、新バージョンでも警告が出にくくなる
-  → バージョンごとに証明書を変えない・SignPath で一貫して署名し続けることが重要。
+- **同じ証明書で署名し続けると証明書全体に評価が蓄積**し、新バージョンでも警告が出にくくなる
+  → バージョンごとに証明書を変えない・Certum で一貫して署名し続けることが重要。
 - ダウンロード数が少ない初期は警告が出やすい。`Docs/MANUAL.html` / `download.html` に
-  「警告が出たら『詳細情報』→『実行』」の案内を載せておくと親切 (現状 Windows 版は未署名のため
-  この案内は今も必要。macOS 版は署名 + 公証済みなので同種の案内は不要になった)。
+  「警告が出たら『詳細情報』→『実行』」の案内を載せておくと親切。
 
 ---
 
 ## チェックリスト
 
-- [ ] SignPath Foundation に OSS 申請し承認された
-- [ ] チーム全員が SignPath / GitHub で MFA 有効
-- [ ] SignPath で Project / Signing Policy / Trusted Build System (GitHub) を設定
-- [ ] GitHub に `SIGNPATH_API_TOKEN` (Secret) と組織/プロジェクト/ポリシーの Variables を登録
-- [ ] SignPath の署名ポリシーの出所検証で `workflow_dispatch` / 対象ブランチを許可した
-- [ ] `.github/workflows/release-build.yml` を手動発火で一度通した (承認 → 署名済み zip 取得)
-- [ ] 署名済み exe の発行元が「Utawave」と表示されることを Windows で確認
+- [ ] Certum Open Source 証明書 (SimplySign クラウド) を購入し本人確認が完了した
+- [ ] SimplySign モバイルアプリをアクティベートした (TOTP)
+- [ ] リリース PC に SimplySign Desktop + signtool (または jsign) を用意した
+- [ ] CI を手動発火し `utawave-unsigned` (Utawave.exe) と zip / PDB を取得した
+- [ ] signtool/jsign で exe を署名し `signtool verify /pa` が通った (タイムスタンプ付き)
+- [ ] 署名済み exe で zip の中身を差し替えた
+- [ ] 署名済み exe の発行元が署名者名で表示されることを Windows で確認
       (exe を右クリック → プロパティ → デジタル署名)
+
+---
+
+## 付録: CI 自動署名 (任意・上級)
+
+毎回ローカルで署名するのが手間な場合、CI で自動署名することも一応可能だが、**SimplySign の TOTP 認証を
+プログラムで突破する必要があり、ヘッドレス運用は壊れやすい**ため、まずはローカル署名で運用を固めてから
+検討する。
+
+- 仕組み: アクティベーション QR に含まれる `otpauth://` シークレット (Base32) を CI の Secret に入れ、
+  `oathtool` 等で **TOTP を都度生成 → SimplySign セッションを確立 → jsign / signtool で署名**する。
+- 実装する場合の配線案 (`.github/workflows/release-build.yml` の windows ジョブ):
+  1. Secrets を登録: `CERTUM_OTP_SEED` (Base32 シークレット) ほか SimplySign のログイン情報。
+  2. `Package zip` の直前に署名ステップを追加し、`signed/Utawave.exe` を生成する
+     (既存の zip 化は `Test-Path signed/Utawave.exe` で署名済みを自動的に拾う設計のまま使える)。
+  3. ステップは `env.CERTUM_OTP_SEED != ''` でガードし、未登録時は従来どおり未署名 zip にする。
+- 参考:
+  - jsign で Certum/SimplySign を自動化する手順 (TOTP 生成含む):
+    <https://www.devas.life/how-to-automate-signing-your-windows-app-with-certum/>
+  - jsign 公式 (Certum サポート): <https://ebourg.github.io/jsign/>
 
 ---
 
 ## 参考リンク
 
-- SignPath Foundation: <https://signpath.org/>
-- 申請条件 (OSS): <https://signpath.org/terms.html>
-- GitHub 連携 (Trusted Build System): <https://docs.signpath.io/trusted-build-systems/github>
-- 署名要求 Action: <https://github.com/SignPath/github-action-submit-signing-request>
-- 出所検証 (Origin Verification): <https://docs.signpath.io/origin-verification>
+- Certum Open Source (クラウド署名): <https://certum.store/open-source-code-signing-on-simplysign.html>
+- Certum: signtool / jarsigner での署名手順 (PDF):
+  <https://www.files.certum.eu/documents/manual_en/Code-Signing-signing-the-code-using-tools-like-Singtool-and-Jarsigner_v2.3.pdf>
+- jsign (クロスプラットフォーム Authenticode 署名): <https://ebourg.github.io/jsign/>
 - Microsoft: コード署名の選択肢: <https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options>
 - Microsoft: SmartScreen の評価: <https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation>
-</content>
-</invoke>

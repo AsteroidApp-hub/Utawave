@@ -223,40 +223,62 @@ if(WIN32)
     endif()
 endif()
 
-# ── 内蔵 LAME (libmp3lame) を静的ライブラリとしてビルド ──
+# ── 内蔵 LAME (libmp3lame) を「共有ライブラリ」としてビルド ──
+# LGPL v2.1+ 準拠: LAME を動的リンク (mac=liblame.dylib / win=lame.dll) にすることで、
+# 利用者が LAME 部分を自前ビルドに差し替えて再リンクできる (LGPL §6)。本体ソースを
+# 非公開にしても LAME のライセンス義務を満たせる。配置:
+#   macOS  : Utawave.app/Contents/Frameworks/liblame.dylib (@rpath で参照・POST_BUILD でコピー)
+#   Windows: Utawave.exe 隣の lame.dll (POST_BUILD でコピー・配布 zip にも同梱)
 file(GLOB LAME_LIBMP3LAME_SOURCES Source/ThirdParty/lame/libmp3lame/*.c)
 file(GLOB LAME_LIBMP3LAME_VECTOR  Source/ThirdParty/lame/libmp3lame/vector/*.c)
 file(GLOB LAME_MPGLIB_SOURCES     Source/ThirdParty/lame/mpglib/*.c)
-add_library(lame_static STATIC
+add_library(lame_shared SHARED
     ${LAME_LIBMP3LAME_SOURCES}
     ${LAME_LIBMP3LAME_VECTOR}
     ${LAME_MPGLIB_SOURCES}
 )
-target_include_directories(lame_static PRIVATE
+# 出力名を素直に "lame" にする (mac: liblame.dylib / win: lame.dll + lame.lib)
+set_target_properties(lame_shared PROPERTIES OUTPUT_NAME "lame")
+# Windows: lame.h には __declspec(dllexport) が無いため、CMake に全シンボルを
+# 自動エクスポートさせる (lame_* 関数の .lib/.dll を生成)。
+if(WIN32)
+    set_target_properties(lame_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+# macOS: dylib の install_name を @rpath/liblame.dylib にし、本体側 rpath で解決させる
+if(APPLE)
+    set_target_properties(lame_shared PROPERTIES
+        MACOSX_RPATH ON
+        BUILD_WITH_INSTALL_NAME_DIR ON
+        INSTALL_NAME_DIR "@rpath")
+endif()
+target_include_directories(lame_shared PRIVATE
     Source/ThirdParty/lame
     Source/ThirdParty/lame/libmp3lame
     Source/ThirdParty/lame/mpglib
 )
-target_include_directories(lame_static PUBLIC
+target_include_directories(lame_shared PUBLIC
     Source/ThirdParty/lame/include
 )
-target_compile_definitions(lame_static PRIVATE
+target_compile_definitions(lame_shared PRIVATE
     HAVE_CONFIG_H=1
     LAME_LIBRARY_BUILD=1
 )
 if(NOT MSVC)
-    target_compile_options(lame_static PRIVATE
+    target_compile_options(lame_shared PRIVATE
         -Wno-everything                # サードパーティの警告は抑制
     )
 else()
-    target_compile_options(lame_static PRIVATE
+    target_compile_options(lame_shared PRIVATE
         /wd4244 /wd4267 /wd4305 /wd4554 /wd4018 /wd4101 /wd4146 /wd4133 /wd4996
         /wd4819   # コードページ警告 (C4819) 抑制
         /utf-8    # ソースを UTF-8 として解釈
-        # 静的ライブラリは /Z7 (オブジェクト埋め込み) でデバッグ情報を持たせ、
-        # 本体リンク時の PDB に取り込む (クラッシュログの RVA 解決用)
+        # Release でも /Z7 でデバッグ情報を持たせ、DLL の lame.pdb を生成する
+        # (クラッシュログの "lame.dll + 0x<RVA>" を関数/行へ解決するため)
         $<$<CONFIG:Release>:/Z7>
     )
+    # /DEBUG が無いと DLL の PDB が出ないので付与 (本体 Utawave と同じ作法)。
+    # /OPT:REF /OPT:ICF は /DEBUG で既定 OFF になる最適化を復活させる。
+    target_link_options(lame_shared PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
 endif()
 
 target_link_libraries(Utawave PRIVATE
@@ -275,8 +297,30 @@ target_link_libraries(Utawave PRIVATE
     # LTO は無効化 (juce_recommended_lto_flags を外した)。有効だとメモリの少ない環境で
     # LTO リンクがハング/極端に遅くなるため。性能差は配布用途では軽微。
     juce::juce_recommended_warning_flags
-    lame_static
+    lame_shared
 )
+
+# ── 動的リンクした LAME を実行ファイルから探せるように配置 ──
+# macOS: 本体は @rpath/liblame.dylib を読むので、bundle 内に Frameworks を作って dylib をコピーし、
+#        実行ファイルに rpath (@executable_path/../Frameworks) を持たせる。
+# Windows: lame.dll を exe と同じフォルダへコピー (実行時に同階層から解決)。
+if(APPLE)
+    set_target_properties(Utawave PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "@executable_path/../Frameworks")
+    add_custom_command(TARGET Utawave POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_BUNDLE_DIR:Utawave>/Contents/Frameworks"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:lame_shared>"
+            "$<TARGET_BUNDLE_DIR:Utawave>/Contents/Frameworks/"
+        VERBATIM)
+elseif(WIN32)
+    add_custom_command(TARGET Utawave POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:lame_shared>" "$<TARGET_FILE_DIR:Utawave>/"
+        VERBATIM)
+endif()
 
 # ── 使い方ドキュメント (HTML) をアプリに同梱 ──
 # ヘルプメニュー「使い方ドキュメント...」が既定ブラウザで開く単一 HTML ファイル。
@@ -399,8 +443,20 @@ if(UTAWAVE_BUILD_TESTS)
         juce::juce_gui_basics
         juce::juce_gui_extra
         juce::juce_recommended_config_flags
-        lame_static
+        lame_shared
     )
+
+    # 動的リンクした LAME をテスト実行時に解決できるように配置
+    # (mac: 実行ファイル隣を rpath で参照 / win: 同フォルダへ DLL をコピー)
+    if(APPLE)
+        set_target_properties(UtawaveTests PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@executable_path")
+    endif()
+    add_custom_command(TARGET UtawaveTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:lame_shared>" "$<TARGET_FILE_DIR:UtawaveTests>/"
+        VERBATIM)
 
     # ── キー変更 CLI ツール (開発用) ──
     # 自社製ピッチシフト (pitchcore) で単発変換する。品質チューニング時の聴き比べ素材

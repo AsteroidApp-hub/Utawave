@@ -1,8 +1,8 @@
 # リリース手順 / Release Guide
 
 配布物（macOS / Windows のビルド済みアプリ）は **公式サイト (utawave.com)** で公開します。
-署名 (macOS: Developer ID + 公証 = **設定済み・有効** / Windows: SignPath = **未設定 = 現状未署名**) を
-付けるため、**配布ビルドは GitHub Actions (手動発火) で行います**。zip は **GitHub Releases（アプリ
+署名 (macOS: Developer ID + 公証 = **設定済み・有効** / Windows: Certum Open Source = **証明書取得中・
+現状未署名**) を付けるため、**配布ビルドは GitHub Actions (手動発火) で行います**。zip は **GitHub Releases（アプリ
 repo `AsteroidApp-hub/Utawave`）へ
 アップロード**し、**公式サイト (utawave.com) の `download.html` から、その Release アセットへ直リンク**する。
 サイトリポジトリ (Utawave-Site) には**バイナリを置かない**（zip は GitHub が配信。容量上限や repo 履歴の
@@ -13,9 +13,11 @@ repo `AsteroidApp-hub/Utawave`）へ
 > 溜まり SEO 上の不利も無い。
 
 > **署名のセットアップ**は `Docs/MACOS_SIGNING_SETUP.md` (Apple) と `Docs/WINDOWS_SIGNING_SETUP.md`
-> (SignPath) を参照。**macOS は署名 + 公証の Secrets を登録済みで、CI が自動で署名 + 公証 + ステープル
-> します**（成果物はそのままダブルクリックで起動可能）。**Windows は SignPath を未設定のため現状は
-> 未署名 exe** を zip 化します（ASIO 対応は有効）。SignPath を設定すれば次回実行から署名されます。
+> (Certum) を参照。**macOS は署名 + 公証の Secrets を登録済みで、CI が自動で署名 + 公証 + ステープル
+> します**（成果物はそのままダブルクリックで起動可能）。**Windows は Certum 証明書を取得中のため現状は
+> 未署名 exe** を zip 化します（ASIO 対応は有効）。**Certum は SignPath と違い CI 自動署名ではなく
+> ローカル署名運用**で、CI は未署名 exe + PDB を出力し、リリース前に手元の SimplySign + signtool で
+> 署名して zip を作り直します（手順は `Docs/WINDOWS_SIGNING_SETUP.md`）。
 > なお Secrets 未登録の環境 (fork 等) では macOS も自動で ad-hoc (未署名) にフォールバックします。
 >
 > **ASIO 対応の Windows 版も CI で作れます**: 再配布制限のある ASIO SDK は public repo に置けないため、
@@ -66,16 +68,23 @@ zip のファイル名にはバージョン + アーキテクチャを含めま�
 
 `CMakeLists.txt` の `VERSION`（必要なら About 等）を更新してコミット・push する。
 
-## 2. ワークフローを手動発火してビルド + 署名
+## 2. ワークフローを手動発火してビルド (+ macOS 署名)
 
 1. GitHub の **Actions タブ → "Release Build (macOS + Windows)" → Run workflow**。
 2. **version** に今回のバージョン（例 `0.1.0`）を入力して実行。
 3. macOS は自動で署名 + 公証 + ステープルされる（追加操作なし）。
-   **Windows は現状 SignPath 未設定のため未署名のまま完了する**（SignPath を設定済みの場合のみ、
-   SignPath.io で署名要求を**承認**する）。
-4. 完了後、ワークフローの成果物 (Artifacts) から以下の 2 つの zip をダウンロード:
+   **Windows は CI では未署名のまま完了する**（Certum はローカル署名運用のため。下記 2.5 で署名する）。
+4. 完了後、ワークフローの成果物 (Artifacts) から以下をダウンロード:
    - `Utawave-<version>-macOS-arm64`（**署名 + 公証済み** / Secrets 未登録の fork 等では ad-hoc）
-   - `Utawave-<version>-Windows-x64`（**現状は未署名** exe を zip 化 / SignPath 設定後は署名済み。ASIO 対応）
+   - `Utawave-<version>-Windows-x64`（**未署名** exe を zip 化。ASIO 対応）
+   - `utawave-unsigned`（署名対象の `Utawave.exe` + `lame.dll`）/ `Utawave-<version>-Windows-x64-pdb`（`Utawave.pdb` + `lame.pdb`・手元保管）
+
+## 2.5. Windows exe をローカルで署名する (Certum)
+
+Windows 機で **SimplySign Desktop にログイン → `utawave-unsigned` の `Utawave.exe` を signtool で署名
+→ `Utawave-<version>-Windows-x64.zip` の中の exe を署名済みで差し替えて zip を作り直す**。
+具体的なコマンドとチェックリストは `Docs/WINDOWS_SIGNING_SETUP.md` を参照。
+証明書取得前の段階では未署名のまま配布してよい（初回 SmartScreen で「詳細情報 → 実行」が必要）。
 
 > 両 zip とも利用者向けドキュメント（LICENSE.txt / THIRD_PARTY_LICENSES.txt / MANUAL.html / README.txt）を同梱済み。
 > **同梱物は利用者がそのまま開けるよう .txt / .html のみ**（`.md` は配布しない。`README.txt` は `Docs/README.txt`、`LICENSE.txt` は `LICENSE` をリネームしたもの）。

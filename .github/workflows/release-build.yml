@@ -61,6 +61,13 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
+          # 内側から署名する: 同梱した動的ライブラリ (liblame.dylib 等) を先に署名し、
+          # 最後に .app バンドルを署名して封をする (公証は全 dylib が hardened runtime 署名済みを要求)。
+          find "${{ steps.app.outputs.path }}/Contents/Frameworks" -name '*.dylib' -print0 2>/dev/null \
+            | while IFS= read -r -d '' dylib; do
+                codesign --force --timestamp --options runtime \
+                  --sign "$MACOS_SIGN_IDENTITY" "$dylib"
+              done
           codesign --force --timestamp --options runtime \
             --entitlements .github/macos/Utawave.entitlements \
             --sign "$MACOS_SIGN_IDENTITY" "${{ steps.app.outputs.path }}"
@@ -96,10 +103,12 @@ jobs:
           path: Utawave-${{ inputs.version }}-macOS-arm64.zip
 
   # ──────────────────────────────────────────────────────────────
-  # Windows: ビルド → (SignPath トークンがあれば署名) → zip
-  #   現状は SIGNPATH_API_TOKEN 未登録のため署名はスキップされ、未署名 exe を zip 化する。
-  #   SignPath の出所検証 (Origin Verification) のため、未署名 exe を
-  #   GitHub artifact としてアップロードしてから署名要求を出す。
+  # Windows: ビルド → 未署名 exe + PDB を artifact 化 → zip
+  #   署名は Certum Open Source 証明書 (SimplySign クラウド) で行う。Certum は SignPath と違い
+  #   出所検証 (Origin Verification) の縛りが無いため、ビルド済み exe をローカルで署名できる。
+  #   既定は CI では未署名のまま zip 化し、リリース前にローカル (SimplySign Desktop + signtool) で
+  #   署名する運用 (信頼性優先・SimplySign の TOTP 認証は完全ヘッドレス自動化が難しいため)。
+  #   手順は Docs/WINDOWS_SIGNING_SETUP.md。CI 自動署名は同 doc の付録 (任意・上級) を参照。
   # ──────────────────────────────────────────────────────────────
   windows:
     # windows-latest が Visual Studio 18 2026 / CMake 4.x に更新され、JUCE FetchContent の
@@ -107,10 +116,7 @@ jobs:
     runs-on: windows-2022
     permissions:
       contents: read
-      actions: read    # SignPath connector が artifact / 実行メタデータを読むのに必要
     env:
-      # SignPath API トークン未登録のうちは署名をスキップして未署名 exe を zip 化する
-      HAS_SIGNING: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
       # ASIO SDK の deploy key 未登録なら取得をスキップ (= WASAPI/DirectSound のみ・fork 安全)
       HAS_ASIO: ${{ secrets.ASIOSDK_DEPLOY_KEY != '' }}
     steps:
@@ -155,6 +161,10 @@ jobs:
           $exe = Get-ChildItem -Path build -Recurse -Filter Utawave.exe | Select-Object -First 1
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Copy-Item $exe.FullName artifact/Utawave.exe
+          # 動的リンクした LAME の DLL も署名入力に含める (利用者がローカルで exe と共に署名・同梱)
+          $dll = Get-ChildItem -Path build -Recurse -Filter lame.dll | Select-Object -First 1
+          if ($null -eq $dll) { Write-Host "::error::lame.dll が見つかりません (LAME の SHARED ビルドを確認)"; exit 1 }
+          Copy-Item $dll.FullName artifact/lame.dll
 
       - name: Upload unsigned exe (signing input)
         id: upload
@@ -175,6 +185,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path symbols | Out-Null
           Copy-Item $pdb.FullName symbols/
           Copy-Item artifact/Utawave.exe symbols/   # exe + PDB をペアで (RVA 解決用)
+          # LAME を DLL 化したので lame.pdb も保管 (クラッシュログの "lame.dll + 0x<RVA>" 解決用)
+          $lpdb = Get-ChildItem -Path build -Recurse -Filter lame.pdb | Select-Object -First 1
+          if ($lpdb) { Copy-Item $lpdb.FullName symbols/; Copy-Item artifact/lame.dll symbols/ }
 
       - name: Upload PDB (symbols, not distributed)
         uses: actions/upload-artifact@v4
@@ -183,25 +196,21 @@ jobs:
           path: symbols/
           retention-days: 90
 
-      - name: Submit signing request to SignPath
-        if: env.HAS_SIGNING == 'true'
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed
-
+      # 署名は CI では行わない (Certum SimplySign はローカル署名運用)。リリース前に
+      # Docs/WINDOWS_SIGNING_SETUP.md の手順で artifact の Utawave.exe をローカル署名し、
+      # zip を作り直して配布する。下の Package zip は未署名でも緑になる (パイプライン検証用)。
+      # ※ 将来 CI 自動署名を入れる場合は、ここで signed/Utawave.exe を生成すれば下の zip 化が拾う。
       - name: Package zip
         shell: pwsh
         run: |
-          # 署名済みがあればそれを、無ければ未署名 exe を使う
+          # 署名済み (signed/) があればそれを、無ければ未署名 exe を使う
           $src = if (Test-Path signed/Utawave.exe) { 'signed/Utawave.exe' } else { 'artifact/Utawave.exe' }
           New-Item -ItemType Directory -Force -Path Utawave-Windows | Out-Null
           Copy-Item $src Utawave-Windows/Utawave.exe
+          # 動的リンクした LAME の DLL を同梱 (これが無いと起動時に DLL not found で落ちる)。
+          # 署名済み (signed/lame.dll) があればそれを、無ければ未署名 DLL を使う。
+          $dll = if (Test-Path signed/lame.dll) { 'signed/lame.dll' } else { 'artifact/lame.dll' }
+          Copy-Item $dll Utawave-Windows/lame.dll
           # 利用者がそのまま読めるよう、同梱ドキュメントはテキスト/HTML で入れる
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
