@@ -174,7 +174,7 @@ TransportBar::TransportBar()
     metronomeBtn.setButtonText("CLICK");
     metronomeBtn.setTooltip(tr(u8"メトロノームのオン/オフ（右クリックで音色・音量を設定）"));
     audioSettingsBtn.setButtonText("AUDIO");
-    audioSettingsBtn.setTooltip(tr(u8"オーディオ機器の設定（入力・出力デバイスを選ぶ）"));
+    audioSettingsBtn.setTooltip(tr(u8"マイクやスピーカーなどオーディオ機器の設定です。音が出ない・録音できないときはここで入力と出力を選びます"));
 
     rewindBtn.onClick        = [this] { if (onRewind)        onRewind(); };
     stopBtn.onClick          = [this] { if (onStop)          onStop(); };
@@ -186,7 +186,7 @@ TransportBar::TransportBar()
     prefsBtn.setButtonText("SETTING");
     prefsBtn.setColour(juce::TextButton::buttonColourId,  AppColours::buttonBg);
     prefsBtn.setColour(juce::TextButton::textColourOffId, AppColours::text);
-    prefsBtn.setTooltip(platformShortcutText(tr(u8"環境設定 (Cmd+,)")));
+    prefsBtn.setTooltip(platformShortcutText(tr(u8"アプリ全体の設定です。録音・保存・表示などの動作を細かく変更できます (Cmd+,)")));
     prefsBtn.setWantsKeyboardFocus(false);
     prefsBtn.onClick = [this] { if (onPreferences) onPreferences(); };
     addAndMakeVisible(prefsBtn);

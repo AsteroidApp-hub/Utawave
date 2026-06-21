@@ -86,7 +86,7 @@ static const char* const englishTranslations =
     "\"再生 / 停止 (Space)\" = \"Play / Stop (Space)\"\n"
     "\"録音開始 / 停止 (R)\" = \"Start / Stop recording (R)\"\n"
     "\"メトロノームのオン/オフ（右クリックで音色・音量を設定）\" = \"Metronome on/off (right-click for sound and volume)\"\n"
-    "\"オーディオ機器の設定（入力・出力デバイスを選ぶ）\" = \"Audio device settings (choose input/output devices)\"\n"
+    "\"マイクやスピーカーなどオーディオ機器の設定です。音が出ない・録音できないときはここで入力と出力を選びます\" = \"Settings for audio devices such as your microphone and speakers. If you get no sound or cannot record, choose the input and output here.\"\n"
     "\"テンポ。ダブルクリックで数値を入力 / TAP ボタンで実測\" = \"Tempo. Double-click to type a value, or use the TAP button\"\n"
     "\"横方向を拡大 (再生バー中心)\" = \"Zoom in (around playhead)\"\n"
     "\"横方向を縮小 (再生バー中心)\" = \"Zoom out (around playhead)\"\n"
@@ -134,7 +134,7 @@ static const char* const englishTranslations =
     "\"Utawave について\" = \"About Utawave\"\n"
     "\"Utawave について...\" = \"About Utawave...\"\n"
     "\"環境設定\" = \"Preferences\"\n"
-    "\"環境設定 (Cmd+,)\" = \"Preferences (Cmd+,)\"\n"
+    "\"アプリ全体の設定です。録音・保存・表示などの動作を細かく変更できます (Cmd+,)\" = \"App-wide settings. Fine-tune recording, saving, display and more (Cmd+,).\"\n"
     // ── 起動画面 ──
     "\"プロジェクトを作成または開く\" = \"Create or open a project\"\n"
     "\"作成\" = \"Create\"\n"
