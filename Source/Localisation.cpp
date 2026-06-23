@@ -405,6 +405,8 @@ static const char* const englishTranslations =
     "\"トラック数: \" = \"Tracks: \"\n"
     "\"波形を読み込み中… \" = \"Loading waveforms... \"\n"
     "\"波形の読み込みが完了しました\" = \"Waveform loading complete\"\n"
+    "\"保存しました\" = \"Saved\"\n"
+    "\"自動保存しました\" = \"Auto-saved\"\n"
     // ── About ──
     "\"バージョン \" = \"Version \"\n"
         "\"ライセンス情報 / 利用しているオープンソース\" = \"License / Open-source acknowledgements\"\n"

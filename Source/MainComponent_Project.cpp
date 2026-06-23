@@ -68,11 +68,15 @@ void MainComponent::performAutoSave()
     //    本体保存の途中でクラッシュした時だけ最新バックアップが本体より新しくなり、
     //    次回起動の復旧条件（最新バックアップ > 本体）を正しく満たすための順序。
     //    保存後に古い世代を maxBackups 個まで間引く。失敗は黙って次回再挑戦。
+    bool savedAny = false;
     if (auto dir = getBackupDir(); dir != juce::File())
     {
         auto bak = BackupManager::datedFile(dir, backupBaseName(), juce::Time::getCurrentTime());
         if (ProjectManager::save(bak, s))
+        {
             BackupManager::prune(dir, backupBaseName(), appSettings.maxBackups);
+            savedAny = true;
+        }
     }
 
     // 2) 保存済みプロジェクトなら本体ファイルも自動保存する。
@@ -82,8 +86,15 @@ void MainComponent::performAutoSave()
     if (currentProjectFile.existsAsFile())
     {
         if (ProjectManager::save(currentProjectFile, s))
+        {
             clearProjectDirty();
+            savedAny = true;
+        }
     }
+
+    // 自動保存できたことが分かるようステータスバーに通知 (手動保存の「保存しました」と同じ場所)
+    if (savedAny)
+        statusBar.setMessage(tr(u8"自動保存しました"), 3000);
 }
 
 void MainComponent::offerAutoSaveRecoveryIfNeeded(const juce::File& projectFile)
@@ -110,7 +121,7 @@ void MainComponent::offerAutoSaveRecoveryIfNeeded(const juce::File& projectFile)
                 if (loadProjectFrom(newest, /*isRecovery=*/true))
                 {
                     currentProjectFile = projectFile;
-                    saveProjectTo(projectFile);
+                    saveProjectTo(projectFile, /*announce=*/false);  // 復旧の内部保存は通知しない
                     restartAutoSaveTimer();
                 }
             }
@@ -201,7 +212,7 @@ void MainComponent::migrateAudioToProjectFolder(const juce::File& newProjectFile
 }
 
 // ── 保存 ────────────────────────────────────────────────────────────
-bool MainComponent::saveProjectTo(const juce::File& f)
+bool MainComponent::saveProjectTo(const juce::File& f, bool announce)
 {
     // 保存先が現在のプロジェクトと異なる場合は、Audio/Cache を新フォルダへ移行
     const bool migrated = (currentProjectFile != f);
@@ -244,6 +255,10 @@ bool MainComponent::saveProjectTo(const juce::File& f)
         audioEngine.preparePlayback(trackManager);
     timelineView.refresh();
     RecentProjects::add(f);
+    // 保存できたことが分かるようステータスバーに通知 (波形読み込み完了と同じ場所)。
+    // 明示保存 (Cmd+S / 別名で保存 / 閉じる確認の「保存」) のときだけ出す。
+    if (announce)
+        statusBar.setMessage(tr(u8"保存しました"), 3000);
     return true;
 }
 
@@ -411,7 +426,8 @@ bool MainComponent::createNewProject(const juce::File& projectFile,
     currentProjectFile = projectFile;
 
     // 初回保存（空プロジェクト）— 以降の録音/インポートはこのフォルダ配下に保存される
-    if (!saveProjectTo(projectFile)) return false;
+    // 新規作成の内部保存なので「保存しました」通知は出さない (announce=false)
+    if (!saveProjectTo(projectFile, /*announce=*/false)) return false;
 
     statusBar.setTrackCount(trackManager.getTrackCount());
     statusBar.setSampleRate((int) sampleRate);
