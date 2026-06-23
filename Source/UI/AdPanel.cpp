@@ -176,10 +176,9 @@ void AdPanel::timerCallback()
 //==============================================================================
 juce::Rectangle<int> AdPanel::cardView() const
 {
-    auto v = getLocalBounds().reduced(kPad);
-    if ((int) ads.size() >= 2)   // 2 件以上はドット帯を下部に確保する
-        v.removeFromBottom(kDotBarH);
-    return v;
+    // ドット帯は件数に依らず常に下部へ確保する。こうするとカード領域の高さ (= カードサイズ) が
+    // 件数で変わらず、1 件→複数件でカードがリサイズして驚くことがない。
+    return getLocalBounds().reduced(kPad).withTrimmedBottom(kDotBarH);
 }
 
 juce::Rectangle<int> AdPanel::dotBar() const
@@ -191,28 +190,17 @@ AdPanel::Layout AdPanel::layout() const
 {
     Layout L;
     L.view = cardView();
-    const int n  = (int) ads.size();
     const int vh = L.view.getHeight();
 
-    if (n >= 3)
-    {
-        // 2 枚フル + 上下に kPeek の覗き。 vh = peek + gap + cardH + gap + cardH + gap + peek
-        L.cardH = juce::jmax(40, (vh - 3 * kCardGap - 2 * kPeek) / 2);
-        L.unit  = L.cardH + kCardGap;
-        L.y0    = kPeek + kCardGap;
-    }
-    else if (n == 2)
-    {
-        L.cardH = juce::jmax(40, (vh - kCardGap) / 2);   // 2 枚をぴったり
-        L.unit  = L.cardH + kCardGap;
-        L.y0    = 0;
-    }
-    else // n <= 1
-    {
-        L.cardH = juce::jmin(vh, 160);
-        L.unit  = L.cardH + kCardGap;
-        L.y0    = juce::jmax(0, (vh - L.cardH) / 2);     // 中央寄せ
-    }
+    // カード高さは常に「2 枚フル + 上下に kPeek の覗き」の幾何で算出する。件数が増えても 1 枚
+    // あたりの大きさが一定になり、1 件→複数件でカードがリサイズして驚かない。
+    //   vh = peek + gap + cardH + gap + cardH + gap + peek
+    L.cardH = juce::jmax(40, (vh - 3 * kCardGap - 2 * kPeek) / 2);
+    L.unit  = L.cardH + kCardGap;
+
+    // 先頭カードは常に上寄せ (少数でも中央に浮かせず最上部へ詰める)。スクロールする 3 件以上
+    // のときだけ、上端に前カードの覗き (peek) 分を空ける。2 件以下はスクロールしないので 0。
+    L.y0 = scrollable() ? (kPeek + kCardGap) : 0;
     return L;
 }
 
@@ -303,7 +291,8 @@ void AdPanel::drawCard(juce::Graphics& g, juce::Rectangle<int> rect, int adIndex
     const int titleH = ad.title.isNotEmpty() ? kTitleH : 0;
     auto titleArea = (titleH > 0) ? imgArea.removeFromBottom(titleH) : juce::Rectangle<int>();
 
-    // バナー画像: 幅いっぱいに cover (アスペクト維持・はみ出しはクリップ)
+    // バナー画像: 枠内に収める contain (アスペクト維持・見切れさせない)。枠と画像の比率が
+    // 違うと余白が出るので、先に黒で塗ってレターボックス背景にする (端が浮かない / 暗い UI に馴染む)。
     if (ad.image.isValid() && imgArea.getHeight() > 0)
     {
         const int iw = ad.image.getWidth();
@@ -312,7 +301,9 @@ void AdPanel::drawCard(juce::Graphics& g, juce::Rectangle<int> rect, int adIndex
         {
             juce::Graphics::ScopedSaveState s(g);
             g.reduceClipRegion(imgArea);
-            const double scale = juce::jmax((double) imgArea.getWidth()  / (double) iw,
+            g.setColour(juce::Colours::black);
+            g.fillRect(imgArea);
+            const double scale = juce::jmin((double) imgArea.getWidth()  / (double) iw,
                                             (double) imgArea.getHeight() / (double) ih);
             const int dw = juce::jmax(1, juce::roundToInt(iw * scale));
             const int dh = juce::jmax(1, juce::roundToInt(ih * scale));
