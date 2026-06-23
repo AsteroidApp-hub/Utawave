@@ -135,7 +135,8 @@ void StatusBar::paint(juce::Graphics& g)
     }
     else if (message.isNotEmpty())
     {
-        g.setColour(AppColours::textBright);
+        // 「Memory:」等の固定項目と同じ控えめな色で目立ちすぎないようにする
+        g.setColour(AppColours::textDim);
         g.setFont(juce::FontOptions(11.0f));
         g.drawText(message, msgX, 0, msgW, getHeight(),
                    juce::Justification::centredLeft);
