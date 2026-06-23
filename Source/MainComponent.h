@@ -296,6 +296,11 @@ private:
         int  synthWaveform     { 0 };
         int  octaveShift       { 0 };
         int  semitoneTranspose { 0 };
+        float volume     { 0.0f };
+        float pan        { 0.0f };
+        float reverbSend { 0.0f };
+        bool  muted  { false };
+        bool  soloed { false };
         bool operator==(const TrackState& o) const;
         bool operator!=(const TrackState& o) const { return !(*this == o); }
     };
@@ -316,7 +321,9 @@ private:
     void saveProject();        // 既存パスがあればそこへ、無ければ saveAs
     void saveProjectAs(std::function<void(bool savedOk)> onDone = {});  // 完了コールバック付き
     void openProject();        // ファイルチョーザでファイルを選択
-    bool saveProjectTo(const juce::File& f);
+    // announce=true のときだけ保存成功をステータスバーに表示する (明示保存のみ。
+    // クラッシュ復旧・新規作成の内部保存では false にして誤った通知を出さない)
+    bool saveProjectTo(const juce::File& f, bool announce = true);
     // 未保存変更の追跡
     void markProjectDirty()  { projectDirty = true; }
     void clearProjectDirty() { projectDirty = false; }

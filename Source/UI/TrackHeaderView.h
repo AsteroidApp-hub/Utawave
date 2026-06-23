@@ -97,6 +97,11 @@ private:
         if (onEditUndoable) onEditUndoable(std::move(mutate));
         else if (mutate)    mutate();
     }
+    // Vol/Pan/Rev スライダのドラッグ中フラグと、ドラッグ開始時のモデル値。
+    // ドラッグはライブ適用し、ドラッグ終了で「開始値→終了値」を 1 つの Undo にまとめる。
+    bool   mixDragging  { false };
+    double mixDragBefore { 0.0 };
+
     // refresh() から呼ぶ表示更新 (移調ラベル / 波形ボタン)。ctor で設定する。
     std::function<void()> updateMidiInfoDisplay;
     std::function<void()> refreshWaveformDisplay;

@@ -4,6 +4,8 @@
 #include "PianoRollEditor.h"
 #include "../Localisation.h"
 #include "../AppColours.h"
+#include <cstring>
+#include <cmath>
 
 // MIDI ノート編集を main UndoManager に乗せるための UndoableAction。
 // (#36: PianoRoll の独自 Undo スタックを main 統合)
@@ -174,6 +176,15 @@ double PianoRollEditor::xToTime(int x) const
 // ── シーケンス変換 ────────────────────────────────────────────────────────
 void PianoRollEditor::rebuildNotesFromClip()
 {
+    // notes を作り直すと既存の index ベースの選択/ドラッグ状態は全て無効になる。
+    // undo/redo (reloadNotesFromClip) でノート数が減ったとき、selected に残った
+    // 範囲外 index で notes[idx] が OOB アクセスになるため、ここで一括リセットする。
+    selected.clear();
+    dragOrigNotes.clear();
+    draggedIdx     = -1;
+    velocityIdx    = -1;
+    createdNoteIdx = -1;
+
     notes.clear();
     auto& seq = clip.getSequence();
     for (int i = 0; i < seq.getNumEvents(); ++i)
@@ -591,15 +602,20 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
     if (mods.isCommandDown() && k.getKeyCode() == 'C')      { copySelected(); return true; }
     if (mods.isCommandDown() && k.getKeyCode() == 'X')      { cutSelected(); return true; }
     if (mods.isCommandDown() && k.getKeyCode() == 'V')      { pasteAtPlayhead(); return true; }
-    if (mods.isCommandDown() && mods.isShiftDown()
-        && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
+    if ((mods.isCommandDown() && mods.isShiftDown()
+            && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
+        || (mods.isCommandDown() && !mods.isShiftDown()
+            && (k.getKeyCode() == 'Y' || k.getKeyCode() == 'y')))
     {
-        // Redo
+        // Redo (Cmd+Shift+Z / Cmd+Y)
         if (externalUndoManager != nullptr)
         {
             // 連続編集中の未確定アクションがあれば確定してから redo
             if (pendingCommit) commitPendingUndoAction();
-            externalUndoManager->redo();
+            // 共有 UndoManager の redo が AudioClip 編集を巻き戻した場合に備え、実際に
+            // やり直したときだけタイムライン側の選択生ポインタをクリアしてもらう (UAF 防止)
+            if (externalUndoManager->redo() && externalUndoRedoCallback)
+                externalUndoRedoCallback();
         }
         else if (!redoStack.empty())
         {
@@ -618,7 +634,10 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
         if (externalUndoManager != nullptr)
         {
             if (pendingCommit) commitPendingUndoAction();
-            externalUndoManager->undo();
+            // 共有 UndoManager の undo が AudioClip 編集を巻き戻した場合に備え、実際に
+            // 巻き戻したときだけタイムライン側の選択生ポインタをクリアしてもらう (UAF 防止)
+            if (externalUndoManager->undo() && externalUndoRedoCallback)
+                externalUndoRedoCallback();
         }
         else if (!undoStack.empty())
         {
@@ -784,6 +803,24 @@ void PianoRollEditor::snapshotForUndo()
     redoStack.clear();
 }
 
+// 2 つの MIDI シーケンスが (イベント数・各イベントの時刻と生データまで) 同一か。
+// 「ノートをクリックして選択しただけ」等で実変化が無いとき空アクションを積まないための判定。
+static bool midiSequencesEqual(const juce::MidiMessageSequence& a,
+                               const juce::MidiMessageSequence& b)
+{
+    if (a.getNumEvents() != b.getNumEvents()) return false;
+    for (int i = 0; i < a.getNumEvents(); ++i)
+    {
+        const auto& ma = a.getEventPointer(i)->message;
+        const auto& mb = b.getEventPointer(i)->message;
+        if (std::abs(ma.getTimeStamp() - mb.getTimeStamp()) > 1.0e-9) return false;
+        if (ma.getRawDataSize() != mb.getRawDataSize()) return false;
+        if (std::memcmp(ma.getRawData(), mb.getRawData(),
+                        (size_t) ma.getRawDataSize()) != 0) return false;
+    }
+    return true;
+}
+
 void PianoRollEditor::commitPendingUndoAction()
 {
     if (!pendingCommit || externalUndoManager == nullptr) return;
@@ -793,6 +830,15 @@ void PianoRollEditor::commitPendingUndoAction()
     // この時点で clip.getSequence() は最新)
     juce::MidiMessageSequence afterSeq;
     afterSeq.addSequence(clip.getSequence(), 0.0);
+
+    // 実際にノートが変化していなければ Undo 履歴に積まない (クリック選択だけで MoveNotes
+    // モードに入り writeNotesToClip → commit まで到達しても、空アクションで Cmd+Z が
+    // 無反応になるのを防ぐ)。
+    if (midiSequencesEqual(pendingBeforeSeq, afterSeq))
+    {
+        pendingBeforeSeq.clear();
+        return;
+    }
 
     externalUndoManager->beginNewTransaction("Edit MIDI notes");
     externalUndoManager->perform(new MidiNotesAction(

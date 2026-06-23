@@ -307,7 +307,7 @@ void MainComponent::showShortcutsDialog()
             { u8"Cmd+,",                  u8"環境設定" },
         }},
         { u8"編集", {
-            { u8"Cmd+Z / Cmd+Shift+Z",    u8"取り消し / やり直し" },
+            { u8"Cmd+Z / Cmd+Shift+Z (Cmd+Y)", u8"取り消し / やり直し" },
             { u8"Cmd+A",                  u8"クリップ全選択" },
             { u8"Cmd+C / Cmd+X / Cmd+V",  u8"コピー / カット / ペースト" },
             { u8"Cmd+D",                  u8"複製" },

@@ -75,6 +75,12 @@ public:
         testMoveAcrossChains();
         testMoveOntoOccupiedPreservesDisplaced();
         testResolverNullIsNoOp();
+        // バイパス状態が Undo/Redo を跨いで保たれること (extract/insert が bypassed を
+        // false に落とすため、アクション側で退避・復元する修正の回帰テスト)
+        testRemovePreservesBypass();
+        testAddWithBypass();
+        testReplacePreservesBypass();
+        testMovePreservesBypass();
     }
 
     static EditActions::ChainResolver resolverFor(PluginChain& c)
@@ -244,6 +250,88 @@ public:
 
         EditActions::PluginMoveAction moveAct(nullResolver, 0, nullResolver, 0, {}, {});
         expect(!moveAct.perform(), "move perform -> false");
+    }
+
+    // ── 削除 → Undo でバイパス状態が復元される (回帰: extract が bypassed を落とす) ──
+    void testRemovePreservesBypass()
+    {
+        beginTest("PluginSlotAction remove: bypass state restored on undo (not reset to false)");
+        PluginChain chain;
+        makeFakeInto(chain, 7);
+        chain.setBypassed(0, true);
+        expect(chain.isBypassed(0), "setup: slot0 bypassed");
+
+        EditActions::PluginSlotAction act(resolverFor(chain), 0, /*afterInstance*/ nullptr, {}, {});
+        act.perform();
+        expect(chain.getNumPlugins() == 0, "perform -> removed");
+
+        act.undo();
+        expect(chain.getNumPlugins() == 1, "undo -> restored");
+        expect(chain.isBypassed(0), "undo -> bypass ON restored");
+
+        act.perform();   // redo
+        expect(chain.getNumPlugins() == 0, "redo -> removed again");
+        act.undo();
+        expect(chain.isBypassed(0), "undo again -> bypass ON still restored");
+    }
+
+    // ── 追加時に afterBypass を指定 (バイパス中プラグインの複製でバイパスを継承する経路) ──
+    void testAddWithBypass()
+    {
+        beginTest("PluginSlotAction add with afterBypass=true (copy of a bypassed plugin)");
+        PluginChain chain;
+        EditActions::PluginSlotAction act(resolverFor(chain), 0, makeFake(3), {}, {},
+                                          /*afterBypass*/ true);
+        act.perform();
+        expect(chain.getNumPlugins() == 1, "perform -> inserted");
+        expect(chain.isBypassed(0), "perform -> inserted bypassed (afterBypass honored)");
+
+        act.undo();
+        expect(chain.getNumPlugins() == 0, "undo -> removed");
+
+        act.perform();   // redo
+        expect(chain.isBypassed(0), "redo -> bypassed again");
+    }
+
+    // ── 置換: 退避した既存プラグインのバイパスも往復する ──
+    void testReplacePreservesBypass()
+    {
+        beginTest("PluginSlotAction replace: displaced plugin's bypass restored on undo");
+        PluginChain chain;
+        makeFakeInto(chain, 1);          // slot0 = id1
+        chain.setBypassed(0, true);      // id1 をバイパス
+        EditActions::PluginSlotAction act(resolverFor(chain), 0, makeFake(2), {}, {});  // afterBypass=false
+        act.perform();
+        expect(idAt(chain, 0) == 2, "perform -> id2 in slot");
+        expect(!chain.isBypassed(0), "perform -> new id2 not bypassed");
+
+        act.undo();
+        expect(idAt(chain, 0) == 1, "undo -> id1 restored");
+        expect(chain.isBypassed(0), "undo -> id1 bypass restored");
+
+        act.perform();   // redo
+        expect(idAt(chain, 0) == 2 && !chain.isBypassed(0), "redo -> id2 not bypassed again");
+    }
+
+    // ── トラック間移動: 移動プラグイン + 退避プラグインのバイパスが往復する ──
+    void testMovePreservesBypass()
+    {
+        beginTest("PluginMoveAction: bypass of moved and displaced preserved across undo/redo");
+        PluginChain src, dst;
+        makeFakeInto(src, 5); src.setBypassed(0, true);   // src id5 をバイパス
+        makeFakeInto(dst, 9); dst.setBypassed(0, true);   // dst id9 をバイパス
+
+        EditActions::PluginMoveAction act(resolverFor(src), 0, resolverFor(dst), 0, {}, {});
+        act.perform();
+        expect(idAt(dst, 0) == 5, "perform -> id5 moved to dst");
+        expect(dst.isBypassed(0), "perform -> moved id5 keeps bypass at dst");
+
+        act.undo();
+        expect(idAt(src, 0) == 5 && src.isBypassed(0), "undo -> id5 back to src with bypass");
+        expect(idAt(dst, 0) == 9 && dst.isBypassed(0), "undo -> displaced id9 restored to dst with bypass");
+
+        act.perform();   // redo
+        expect(idAt(dst, 0) == 5 && dst.isBypassed(0), "redo -> id5 to dst bypassed again");
     }
 
 private:

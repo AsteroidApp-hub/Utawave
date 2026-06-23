@@ -149,17 +149,21 @@ bool MainComponent::perform(const InvocationInfo& info)
 // ── キーボードショートカット ─────────────────────────────────────────
 bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
 {
-    // Cmd+Z / Cmd+Shift+Z = Undo / Redo
+    // Cmd+Z / Cmd+Shift+Z = Undo / Redo、Cmd+Y = Redo (Windows 標準・Mac でも受理)
     if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'z' || key.getKeyCode() == 'Z'))
     {
-        if (key.getModifiers().isShiftDown())
-            undoManager.redo();
-        else
-            undoManager.undo();
+        const bool did = key.getModifiers().isShiftDown() ? undoManager.redo()
+                                                          : undoManager.undo();
         // 構造編集の Undo/Redo はクリップを破棄/再生成するため、タイムラインの選択中
-        // 生ポインタ (clip / crossfade) が解放済みを指す可能性がある。ここでクリアして
-        // 直後の Delete 等での UAF を防ぐ。
-        timelineView.clearSelectionsAfterExternalEdit();
+        // 生ポインタ (clip / crossfade) が解放済みを指す可能性がある。実際に巻き戻した
+        // ときだけクリアして直後の Delete 等での UAF を防ぐ (対象が無い空打ちでは選択を消さない)。
+        if (did) timelineView.clearSelectionsAfterExternalEdit();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && !key.getModifiers().isShiftDown()
+        && (key.getKeyCode() == 'y' || key.getKeyCode() == 'Y'))
+    {
+        if (undoManager.redo()) timelineView.clearSelectionsAfterExternalEdit();
         return true;
     }
 
@@ -272,14 +276,15 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
                     audioEngine.preparePlayback(trackManager);
                     return true;
                 }
-                t->setSoloed(!t->isSoloed());
-                trackHeaderPanel.refresh();
+                // ボタン経由と同じく Undo 対応にする (applyTrackEditUndoable が
+                // refresh / onTrackChanged / invalidatePlayback まで担う)。キー経由だけ
+                // 非対応だと、後続の full-snapshot Undo と状態が食い違う。
+                applyTrackEditUndoable(t, [t] { t->setSoloed(!t->isSoloed()); });
                 return true;
             }
             if (kc == 'm' || kc == 'M')
             {
-                t->setMuted(!t->isMuted());
-                trackHeaderPanel.refresh();
+                applyTrackEditUndoable(t, [t] { t->setMuted(!t->isMuted()); });
                 return true;
             }
             if (kc == 'i' || kc == 'I')

@@ -333,6 +333,13 @@ void MainComponent::openPianoRollFor(MidiClip* clip, Track* track)
             timelineView.repaint();
             markProjectDirty();
         });
+        // ピアノロール起点の undo/redo 後、タイムラインの選択生ポインタをクリアする
+        // (共有 UndoManager で AudioClip が破棄された場合の UAF 防止。メイン経路の
+        //  keyPressed が呼ぶ clearSelectionsAfterExternalEdit と同じ後始末)
+        ed->setExternalUndoRedoCallback([this]
+        {
+            timelineView.clearSelectionsAfterExternalEdit();
+        });
     }
     pianoRollWindows.add(win);
 }
@@ -443,10 +450,14 @@ void MainComponent::handlePluginDropAcrossTracks(int srcTrack, int srcSlot,
         if (state.getSize() > 0)
             instance->setStateInformation(state.getData(), (int) state.getSize());
 
-        // コピー = dst スロットへの追加 (dst が埋まっていれば退避して undo で戻す)
+        // コピー = dst スロットへの追加 (dst が埋まっていれば退避して undo で戻す)。
+        // ホスト側バイパス状態は getStateInformation に含まれないので、コピー元が
+        // バイパス中ならコピー先も同じバイパス状態で作る (afterBypass で引き継ぐ)。
+        const bool srcBypassed = srcChainPtr->isBypassed(srcSlot);
         undoManager.beginNewTransaction();
         undoManager.perform(new PluginSlotAction(
-            makeChainResolver(dstT), dstSlot, std::move(instance), onChange, willClose));
+            makeChainResolver(dstT), dstSlot, std::move(instance), onChange, willClose,
+            srcBypassed));
         return;
     }
 

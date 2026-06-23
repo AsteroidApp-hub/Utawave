@@ -70,6 +70,15 @@ public:
         externalReloadCallback = std::move(cb);
     }
 
+    // ピアノロールにフォーカスがある状態で Cmd+Z/Cmd+Shift+Z/Cmd+Y を押した時に呼ばれる。
+    // 共有 UndoManager を直接 undo/redo すると、履歴の先頭が AudioClip 編集 (分割/削除等) の
+    // 場合にタイムラインの選択生ポインタがダングリングしうるため、メイン側で
+    // clearSelectionsAfterExternalEdit() を呼んでもらう (メイン経路の keyPressed と同じ後始末)。
+    void setExternalUndoRedoCallback(std::function<void()> cb)
+    {
+        externalUndoRedoCallback = std::move(cb);
+    }
+
     // MidiClip 側のシーケンスが外部から書き換わった (undo/redo 等) ときに
     // 内部 Note 配列を再構築する。MidiNotesAction から呼ばれる。
     void reloadNotesFromClip();
@@ -167,6 +176,7 @@ private:
     // MidiClip が undo/redo で書き換わったときに該当エディタを更新するコールバック。
     // MainComponent 側で pianoRollWindows を走査して reloadNotesFromClip() を呼ぶ。
     std::function<void(MidiClip*)> externalReloadCallback;
+    std::function<void()>          externalUndoRedoCallback;
     // snapshotForUndo() で保存した「編集前のシーケンス」。
     // 編集が完了したタイミング (callAsync) で MidiNotesAction として確定する。
     juce::MidiMessageSequence pendingBeforeSeq;

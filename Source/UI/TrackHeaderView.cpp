@@ -50,14 +50,20 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
     styleToggle(muteBtn, juce::Colour(0xffffaa00), juce::Colours::black);
     muteBtn.onClick = [this] {
         if (onSelected) onSelected();
-        track.setMuted(muteBtn.getToggleState()); if (onChanged) onChanged();
+        // setClickingTogglesState(true) なので onClick 時点でボタンの toggle は既に反転済み。
+        // track 側はまだ旧値なので editTrackUndoable の前後スナップショットで差分が取れる。
+        const bool v = muteBtn.getToggleState();
+        editTrackUndoable([this, v] { track.setMuted(v); });
+        if (onChanged) onChanged();
     };
     addAndMakeVisible(muteBtn);
 
     styleToggle(soloBtn, juce::Colour(0xff44aaff), juce::Colours::black);
     soloBtn.onClick = [this] {
         if (onSelected) onSelected();
-        track.setSoloed(soloBtn.getToggleState()); if (onChanged) onChanged();
+        const bool v = soloBtn.getToggleState();
+        editTrackUndoable([this, v] { track.setSoloed(v); });
+        if (onChanged) onChanged();
     };
     addAndMakeVisible(soloBtn);
 
@@ -135,21 +141,48 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
     panSlider.setValue(track.getPan(),        juce::dontSendNotification);
     revSlider.setValue(track.getReverbSend(), juce::dontSendNotification);
 
-    volSlider.onValueChange = [this] {
-        if (onSelected) onSelected();
-        track.setVolume((float)volSlider.getValue());
-        if (onChanged) onChanged();
+    // Vol/Pan/Rev スライダを Undo 対応で配線する。
+    // ・ドラッグ中: onValueChange ごとにライブ適用 (音は即追従)。Undo には積まない。
+    // ・ドラッグ終了: 開始値→終了値を 1 トランザクションにまとめて記録 (editTrackUndoable)。
+    // ・テキスト入力 / ダブルクリック既定値: ドラッグでないので onValueChange で単発記録。
+    auto wireMixSlider = [this](juce::Slider& s,
+                                std::function<float()> getter,
+                                std::function<void(float)> setter)
+    {
+        s.onDragStart = [this, getter] { mixDragging = true; mixDragBefore = getter(); };
+        s.onValueChange = [this, &s, getter, setter]
+        {
+            if (onSelected) onSelected();
+            const float v = (float) s.getValue();
+            if (mixDragging)
+            {
+                setter(v);   // ライブ適用 (Undo はドラッグ終了でまとめて積む)
+            }
+            else
+            {
+                // ドラッグ外の単発変更。モデルはまだ旧値なので editTrackUndoable の
+                // 前後スナップショットで before(旧)→after(v) の差分が取れる。
+                editTrackUndoable([setter, v] { setter(v); });
+            }
+            if (onChanged) onChanged();
+        };
+        s.onDragEnd = [this, getter, setter]
+        {
+            mixDragging = false;
+            const float after = getter();          // ドラッグ中にライブ適用済みの最終値
+            if (mixDragBefore != after)
+            {
+                setter((float) mixDragBefore);     // capture-before が開始値を見れるよう一旦戻す
+                editTrackUndoable([setter, after] { setter(after); });
+            }
+        };
     };
-    panSlider.onValueChange = [this] {
-        if (onSelected) onSelected();
-        track.setPan((float)panSlider.getValue());
-        if (onChanged) onChanged();
-    };
-    revSlider.onValueChange = [this] {
-        if (onSelected) onSelected();
-        track.setReverbSend((float)revSlider.getValue());
-        if (onChanged) onChanged();
-    };
+    wireMixSlider(volSlider, [this] { return track.getVolume(); },
+                            [this](float v) { track.setVolume(v); });
+    wireMixSlider(panSlider, [this] { return track.getPan(); },
+                            [this](float v) { track.setPan(v); });
+    wireMixSlider(revSlider, [this] { return track.getReverbSend(); },
+                            [this](float v) { track.setReverbSend(v); });
 
     // ── In: ラベル + ComboBox ──
     inputLabel.setText("In:", juce::dontSendNotification);

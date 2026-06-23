@@ -605,6 +605,11 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         else
         {
             // ライン上クリック → 新規ポイント追加（既存エンベロープのdBを維持）
+            // Undo 用に追加前の状態を記録 (削除と同じ作法。これが無いと追加だけ Undo できない)
+            preDragStates.clear();
+            EditActions::ClipState s; s.capture(ref.clip);
+            preDragStates.push_back(s);
+
             double timeInClip = juce::jlimit(0.0, ref.clip->getDuration(),
                                               dragStartSecs - ref.clip->getStartPosition());
             // 現在のラインの位置にあわせて dB を決定（クリックYは無視）
@@ -615,6 +620,16 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             size_t insertAt = 0;
             while (insertAt < pts.size() && pts[insertAt].time < timeInClip) ++insertAt;
             pts.insert(pts.begin() + insertAt, GainPoint { timeInClip, dB });
+            if (undoManager)
+            {
+                std::vector<EditActions::ClipState> newStates;
+                EditActions::ClipState ns; ns.capture(ref.clip);
+                newStates.push_back(ns);
+                undoManager->beginNewTransaction();
+                undoManager->perform(new EditActions::ClipsPropertyAction(
+                    std::move(preDragStates), std::move(newStates), editChangeCb));
+            }
+            preDragStates.clear();
             // ドラッグせず、追加だけ。再クリックで掴んで調整する流れ
             draggedGainPointIdx = -1;
             dragMode            = DragMode::None;
@@ -1238,217 +1253,307 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
         }
     }
 
-    // ドラッグ完了時にクリップ状態が変わっていれば Undo アクションを記録。
-    // また preDrag 時の位置情報を後段のカット判定で利用するため map に控える。
-    bool didMove = false;
+    // === Move / Resize / CrossfadeCenter 完了: 全 mutation 後に 1 トランザクションで記録 ===
+    // ドラッグ中は dragged clip の位置だけを live 変更している。ここで
+    //   (1) クロスフェードのフェード長同期 (Move/CrossfadeCenter)
+    //   (2) リサイズ時のクロスフェード解除 (ResizeLeft/Right)
+    //   (3) 重なりクリップのカット/削除 (Move/Resize)
+    // をまとめて行い、影響を受けた全クリップ (dragged + 隣接 + 削除) を 1 つの Undo
+    // トランザクションに積む。これにより隣接のフェード同期/トリムや、覆われたクリップの
+    // 削除も undo→redo で対称に復元できる。旧実装は dragged clip のみ ClipsPropertyAction で
+    // 記録し、その後にフェード同期/カットを行っていたため (a) フェード同期が記録の後で非対称、
+    // (b) 覆われたクリップを clips.erase で即破棄 → Undo 不能 + 再生中 UAF、という不具合があった。
+    // 覆われたクリップは ClipDeleteAction (インスタンスを退避保持・破棄しない) で削除するので
+    // UAF は起きず、Undo でそのまま復活する。dragged clip は in-place 更新で identity を保つ
+    // (Move 後も選択が外れない)。
+
+    // dragged clip の before 状態 (mouseDown 時点) と preDrag 位置を控える
     std::map<AudioClip*, std::pair<double, double>> preDragBounds;
-    if (!preDragStates.empty())
+    std::map<AudioClip*, EditActions::ClipState>    beforeByClip;
+    for (auto& oldS : preDragStates)
     {
-        std::vector<EditActions::ClipState> newStates;
-        bool changed = false;
-        for (auto& oldS : preDragStates)
-        {
-            preDragBounds[oldS.clip] = { oldS.startPos, oldS.startPos + oldS.duration };
-            EditActions::ClipState newS;
-            newS.capture(oldS.clip);
-            newStates.push_back(newS);
-            if (oldS.differsFrom(newS)) changed = true;
-        }
-        if (changed)
-        {
-            didMove = true;
-            if (undoManager)
-            {
-                undoManager->beginNewTransaction();
-                undoManager->perform(new EditActions::ClipsPropertyAction(
-                    std::move(preDragStates), std::move(newStates), editChangeCb));
-            }
-        }
+        preDragBounds[oldS.clip] = { oldS.startPos, oldS.startPos + oldS.duration };
+        beforeByClip[oldS.clip]  = oldS;
     }
     preDragStates.clear();
 
-    // Move / CrossfadeCenter 完了時: クロスフェードペアのフェード長を overlap に同期
-    // (X 字交差を綺麗に保つため)
-    const bool isMoveDrag = (dragMode == DragMode::Move
-                              || dragMode == DragMode::CrossfadeCenter);
-    if (didMove && isMoveDrag)
+    // dragged clip が実際に変化したか
+    bool didMove = false;
+    for (auto& kv : beforeByClip)
     {
-        auto syncLaneCrossfades = [](Lane* lane)
+        EditActions::ClipState now; now.capture(kv.first);
+        if (kv.second.differsFrom(now)) { didMove = true; break; }
+    }
+
+    const bool isMoveDrag      = (dragMode == DragMode::Move
+                                  || dragMode == DragMode::CrossfadeCenter);
+    const bool isResizeDrag    = (dragMode == DragMode::ResizeLeft
+                                  || dragMode == DragMode::ResizeRight);
+    const bool isReshapingDrag = (dragMode == DragMode::Move || isResizeDrag);
+
+    if (didMove)
+    {
+        // 影響を受けるレーンを集約。dragged clip 群 (selectedClip / extraSelections) のレーンに
+        // 加え、preDragStates 由来の全クリップ (beforeByClip) のレーンも含める。
+        // クロスフェードのハンドルドラッグ (CrossfadeLeft/Right/Center) は mouseDown で
+        // selectedClip をクリアし clipA/clipB を preDragStates に積むだけなので、これが無いと
+        // lanes が空になり記録が漏れる (= ハンドルドラッグが Undo できない回帰を防ぐ)。
+        std::vector<Lane*> lanes;
+        auto addLane = [&lanes](Lane* l)
         {
-            if (!lane) return;
-            for (size_t i = 0; i < lane->clips.size(); ++i)
-            {
-                for (size_t j = i + 1; j < lane->clips.size(); ++j)
+            if (!l) return;
+            for (auto* x : lanes) if (x == l) return;
+            lanes.push_back(l);
+        };
+        auto laneOfClip = [this](AudioClip* c) -> Lane*
+        {
+            if (!c) return nullptr;
+            for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+                if (auto* tr = trackManager.getTrack(ti))
+                    for (int li = 0; li < tr->getLaneCount(); ++li)
+                        if (auto* ln = tr->getLane(li))
+                            for (auto& cp : ln->clips)
+                                if (cp.get() == c) return ln;
+            return nullptr;
+        };
+        if (selectedClip.valid()) addLane(selectedClip.lane);
+        for (auto& r : extraSelections) addLane(r.lane);
+        for (auto& kv : beforeByClip) addLane(laneOfClip(kv.first));
+
+        // mutation 前に、影響レーンの全クリップの before を捕捉 (dragged は preDragStates 由来を
+        // 優先。隣接は drag で未変更なので「今の値」がそのまま before になる)
+        for (auto* lane : lanes)
+            for (auto& cp : lane->clips)
+                if (beforeByClip.find(cp.get()) == beforeByClip.end())
                 {
-                    auto* a = lane->clips[i].get();
-                    auto* b = lane->clips[j].get();
-                    AudioClip* cA = (a->getStartPosition() <= b->getStartPosition()) ? a : b;
-                    AudioClip* cB = (a->getStartPosition() <= b->getStartPosition()) ? b : a;
-                    // cB が cA に内包される (cB.end <= cA.end) のは正規のクロスフェード境界では
-                    // ない (cA のフェードアウトが cB の無い位置に来る)。同期しない。
-                    if (cB->getEndPosition() <= cA->getEndPosition() + 0.001) continue;
-                    const double rawOverlap = cA->getEndPosition() - cB->getStartPosition();
-                    // どちらかにフェードがあれば、overlap に同期。ただし両クリップ長の半分で
-                    // クランプしてから両側に同値を入れる (#M1)。個別 setter の duration*0.5
-                    // クランプで左右非対称になり、描画 (対称な X) と実音がずれるのを防ぐ。
-                    if (rawOverlap > 0.001
-                        && (cA->getFadeOutSecs() > 0.0 || cB->getFadeInSecs() > 0.0))
+                    EditActions::ClipState s; s.capture(cp.get());
+                    beforeByClip[cp.get()] = s;
+                }
+
+        // (1) クロスフェードのフェード長同期 (Move/CrossfadeCenter)
+        if (isMoveDrag)
+        {
+            auto syncLaneCrossfades = [](Lane* lane)
+            {
+                if (!lane) return;
+                for (size_t i = 0; i < lane->clips.size(); ++i)
+                {
+                    for (size_t j = i + 1; j < lane->clips.size(); ++j)
                     {
-                        const double xf = juce::jmin(rawOverlap,
-                                                     cA->getDuration() * 0.5,
-                                                     cB->getDuration() * 0.5);
-                        cA->setFadeOutSecs(xf);
-                        cB->setFadeInSecs(xf);
+                        auto* a = lane->clips[i].get();
+                        auto* b = lane->clips[j].get();
+                        AudioClip* cA = (a->getStartPosition() <= b->getStartPosition()) ? a : b;
+                        AudioClip* cB = (a->getStartPosition() <= b->getStartPosition()) ? b : a;
+                        // cB が cA に内包される (cB.end <= cA.end) のは正規のクロスフェード境界では
+                        // ない (cA のフェードアウトが cB の無い位置に来る)。同期しない。
+                        if (cB->getEndPosition() <= cA->getEndPosition() + 0.001) continue;
+                        const double rawOverlap = cA->getEndPosition() - cB->getStartPosition();
+                        // どちらかにフェードがあれば、overlap に同期。ただし両クリップ長の半分で
+                        // クランプしてから両側に同値を入れる (#M1)。個別 setter の duration*0.5
+                        // クランプで左右非対称になり、描画 (対称な X) と実音がずれるのを防ぐ。
+                        if (rawOverlap > 0.001
+                            && (cA->getFadeOutSecs() > 0.0 || cB->getFadeInSecs() > 0.0))
+                        {
+                            const double xf = juce::jmin(rawOverlap,
+                                                         cA->getDuration() * 0.5,
+                                                         cB->getDuration() * 0.5);
+                            cA->setFadeOutSecs(xf);
+                            cB->setFadeInSecs(xf);
+                        }
                     }
                 }
-            }
-        };
-        if (selectedClip.valid())
-            syncLaneCrossfades(selectedClip.lane);
-        else if (selectedCrossfade.valid())
-        {
-            // CrossfadeCenter の場合 selectedClip は空。track 全 lane を走査
-            for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
-            {
-                auto* tr = trackManager.getTrack(ti);
-                if (!tr) continue;
-                for (int li = 0; li < tr->getLaneCount(); ++li)
-                    syncLaneCrossfades(tr->getLane(li));
-            }
+            };
+            for (auto* lane : lanes) syncLaneCrossfades(lane);
         }
-    }
 
-    // リサイズで動かした側に該当するクロスフェードのみ解除
-    //   ResizeLeft  → d の左側 (左隣クリップとの overlap) のフェードを解除
-    //   ResizeRight → d の右側 (右隣クリップとの overlap) のフェードを解除
-    const bool isResizeDrag = (dragMode == DragMode::ResizeLeft
-                                || dragMode == DragMode::ResizeRight);
-    if (didMove && isResizeDrag && selectedClip.valid() && selectedClip.lane)
-    {
-        auto* d = selectedClip.clip;
-        const double dS = d->getStartPosition();
-        const double dE = d->getEndPosition();
-        for (auto& cPtr : selectedClip.lane->clips)
+        // (2) リサイズで動かした側のクロスフェードのみ解除
+        if (isResizeDrag && selectedClip.valid() && selectedClip.lane)
         {
-            auto* c = cPtr.get();
-            if (c == d) continue;
-            const double cS = c->getStartPosition();
-            const double cE = c->getEndPosition();
-            const double overlap = juce::jmin(dE, cE) - juce::jmax(dS, cS);
-            if (overlap <= -0.001) continue;  // 完全に離れていればスキップ
-
-            if (cS < dS && dragMode == DragMode::ResizeLeft)
+            auto* d = selectedClip.clip;
+            const double dS = d->getStartPosition();
+            const double dE = d->getEndPosition();
+            for (auto& cPtr : selectedClip.lane->clips)
             {
-                // 左隣のクロスフェード: d の左端をリサイズ → クリア
-                c->setFadeOutSecs(0.0);
-                d->setFadeInSecs(0.0);
-            }
-            else if (cS >= dS && dragMode == DragMode::ResizeRight)
-            {
-                // 右隣のクロスフェード: d の右端をリサイズ → クリア
-                c->setFadeInSecs(0.0);
-                d->setFadeOutSecs(0.0);
-            }
-        }
-    }
-
-    // 移動 / リサイズ完了時、波形が重なった場合の処理:
-    //   ・対象クリップを lane の末尾へ移して描画順で上に
-    //   ・重なった下側クリップは上側クリップとの重なり領域をカット
-    const bool isReshapingDrag = (dragMode == DragMode::Move
-                                  || dragMode == DragMode::ResizeLeft
-                                  || dragMode == DragMode::ResizeRight);
-    if (didMove && isReshapingDrag)
-    {
-        auto moveClipToBack = [](Lane* lane, AudioClip* clip)
-        {
-            if (lane == nullptr || clip == nullptr) return;
-            auto& clips = lane->clips;
-            for (auto it = clips.begin(); it != clips.end(); ++it)
-            {
-                if (it->get() == clip)
-                {
-                    auto ptr = std::move(*it);
-                    clips.erase(it);
-                    clips.push_back(std::move(ptr));
-                    return;
-                }
-            }
-        };
-        // 重なった「下側クリップ」を上側との重なり分だけカット:
-        //   ・C 全体が D に覆われる → C を削除
-        //   ・C が D より左で右側が重なる → C の end を dS まで詰める
-        //   ・C が D より右で左側が重なる → C の start を dE まで詰める (fileOffset 補正)
-        // ただし D が ドラッグ前から C と重なっていた場合は、既存のクロスフェードを
-        // 維持するためカットしない (= クロスフェード調整用の Move とみなす)
-        auto cutOverlappedClips = [&preDragBounds](Lane* lane, AudioClip* dragged)
-        {
-            if (lane == nullptr || dragged == nullptr) return;
-            const double dS = dragged->getStartPosition();
-            const double dE = dragged->getEndPosition();
-
-            // ドラッグ前の D の位置範囲
-            double preDS = dS, preDE = dE;
-            auto it = preDragBounds.find(dragged);
-            if (it != preDragBounds.end()) { preDS = it->second.first; preDE = it->second.second; }
-
-            auto& clips = lane->clips;
-            for (auto it2 = clips.begin(); it2 != clips.end(); )
-            {
-                auto* c = it2->get();
-                if (c == dragged) { ++it2; continue; }
-
+                auto* c = cPtr.get();
+                if (c == d) continue;
                 const double cS = c->getStartPosition();
                 const double cE = c->getEndPosition();
+                const double overlap = juce::jmin(dE, cE) - juce::jmax(dS, cS);
+                if (overlap <= -0.001) continue;  // 完全に離れていればスキップ
 
-                if (cE <= dS || cS >= dE) { ++it2; continue; }
-
-                // 既にドラッグ前から C と重なっていた → カットしない (既存クロスフェード保持)
-                const double preOverlap = juce::jmin(preDE, cE) - juce::jmax(preDS, cS);
-                if (preOverlap > 0.001) { ++it2; continue; }
-
-                if (cS >= dS && cE <= dE)
+                if (cS < dS && dragMode == DragMode::ResizeLeft)
                 {
-                    it2 = clips.erase(it2);
-                    continue;
+                    c->setFadeOutSecs(0.0);
+                    d->setFadeInSecs(0.0);
                 }
-
-                if (cS < dS && cE > dS && cE <= dE)
+                else if (cS >= dS && dragMode == DragMode::ResizeRight)
                 {
-                    const double newDur = juce::jmax(0.01, dS - cS);
-                    c->setDuration(newDur);
-                    if (c->getFadeOutSecs() > newDur * 0.5)
-                        c->setFadeOutSecs(newDur * 0.5);
+                    c->setFadeInSecs(0.0);
+                    d->setFadeOutSecs(0.0);
                 }
-                else if (cS >= dS && cS < dE && cE > dE)
-                {
-                    const double shift = dE - cS;
-                    c->setStartPosition(dE);
-                    c->setFileOffset(c->getFileOffset() + shift);
-                    const double newDur = juce::jmax(0.01, cE - dE);
-                    c->setDuration(newDur);
-                    if (c->getFadeInSecs() > newDur * 0.5)
-                        c->setFadeInSecs(newDur * 0.5);
-                }
-                else if (cS < dS && cE > dE)
-                {
-                    const double newDur = juce::jmax(0.01, dS - cS);
-                    c->setDuration(newDur);
-                    if (c->getFadeOutSecs() > newDur * 0.5)
-                        c->setFadeOutSecs(newDur * 0.5);
-                }
-                ++it2;
             }
-        };
-        if (selectedClip.valid())
-        {
-            cutOverlappedClips(selectedClip.lane, selectedClip.clip);
-            moveClipToBack(selectedClip.lane, selectedClip.clip);
         }
-        for (auto& r : extraSelections)
+
+        // (3) 重なりクリップのカット (覆われたクリップは即破棄せず toDelete に集め、
+        //     後で ClipDeleteAction で削除する = Undo 可 + 破棄遅延で UAF 回避)
+        std::vector<std::pair<Lane*, AudioClip*>> toDelete;
+        if (isReshapingDrag)
         {
-            cutOverlappedClips(r.lane, r.clip);
-            moveClipToBack(r.lane, r.clip);
+            auto moveClipToBack = [](Lane* lane, AudioClip* clip)
+            {
+                if (lane == nullptr || clip == nullptr) return;
+                auto& clips = lane->clips;
+                for (auto it = clips.begin(); it != clips.end(); ++it)
+                {
+                    if (it->get() == clip)
+                    {
+                        auto ptr = std::move(*it);
+                        clips.erase(it);
+                        clips.push_back(std::move(ptr));
+                        return;
+                    }
+                }
+            };
+            auto cutOverlappedClips = [&preDragBounds, &toDelete](Lane* lane, AudioClip* dragged)
+            {
+                if (lane == nullptr || dragged == nullptr) return;
+                const double dS = dragged->getStartPosition();
+                const double dE = dragged->getEndPosition();
+
+                double preDS = dS, preDE = dE;
+                auto it = preDragBounds.find(dragged);
+                if (it != preDragBounds.end()) { preDS = it->second.first; preDE = it->second.second; }
+
+                for (auto& cp : lane->clips)
+                {
+                    auto* c = cp.get();
+                    if (c == dragged) continue;
+
+                    const double cS = c->getStartPosition();
+                    const double cE = c->getEndPosition();
+                    if (cE <= dS || cS >= dE) continue;
+
+                    // 既にドラッグ前から C と重なっていた → カットしない (既存クロスフェード保持)
+                    const double preOverlap = juce::jmin(preDE, cE) - juce::jmax(preDS, cS);
+                    if (preOverlap > 0.001) continue;
+
+                    if (cS >= dS && cE <= dE)
+                    {
+                        // C 全体が D に覆われる → 削除予約 (即 erase しない)
+                        toDelete.push_back({ lane, c });
+                    }
+                    else if (cS < dS && cE > dS && cE <= dE)
+                    {
+                        const double newDur = juce::jmax(0.01, dS - cS);
+                        c->setDuration(newDur);
+                        if (c->getFadeOutSecs() > newDur * 0.5)
+                            c->setFadeOutSecs(newDur * 0.5);
+                    }
+                    else if (cS >= dS && cS < dE && cE > dE)
+                    {
+                        const double shift = dE - cS;
+                        c->setStartPosition(dE);
+                        c->setFileOffset(c->getFileOffset() + shift);
+                        const double newDur = juce::jmax(0.01, cE - dE);
+                        c->setDuration(newDur);
+                        if (c->getFadeInSecs() > newDur * 0.5)
+                            c->setFadeInSecs(newDur * 0.5);
+                    }
+                    else if (cS < dS && cE > dE)
+                    {
+                        const double newDur = juce::jmax(0.01, dS - cS);
+                        c->setDuration(newDur);
+                        if (c->getFadeOutSecs() > newDur * 0.5)
+                            c->setFadeOutSecs(newDur * 0.5);
+                    }
+                }
+            };
+            if (selectedClip.valid())
+            {
+                cutOverlappedClips(selectedClip.lane, selectedClip.clip);
+                moveClipToBack(selectedClip.lane, selectedClip.clip);
+            }
+            for (auto& r : extraSelections)
+            {
+                cutOverlappedClips(r.lane, r.clip);
+                moveClipToBack(r.lane, r.clip);
+            }
+        }
+
+        // 記録: 生存し変化したクリップ → ClipsPropertyAction、覆われたクリップ → ClipDeleteAction。
+        // 全て同一トランザクションなので Cmd+Z 1 回で移動・フェード同期・カット・削除が丸ごと戻る。
+        auto isDeleted = [&toDelete](AudioClip* c)
+        {
+            for (auto& d : toDelete) if (d.second == c) return true;
+            return false;
+        };
+        if (undoManager)
+        {
+            std::vector<EditActions::ClipState> befores, afters;
+            for (auto* lane : lanes)
+                for (auto& cp : lane->clips)
+                {
+                    auto* c = cp.get();
+                    if (isDeleted(c)) continue;
+                    auto bit = beforeByClip.find(c);
+                    if (bit == beforeByClip.end()) continue;
+                    EditActions::ClipState after; after.capture(c);
+                    if (bit->second.differsFrom(after))
+                    {
+                        befores.push_back(bit->second);
+                        afters.push_back(after);
+                    }
+                }
+
+            if (!befores.empty() || !toDelete.empty())
+            {
+                undoManager->beginNewTransaction();
+                if (!befores.empty())
+                    undoManager->perform(new EditActions::ClipsPropertyAction(
+                        std::move(befores), std::move(afters), editChangeCb));
+                // 覆われたクリップが (別の dragged clip により) ドラッグ前にトリムされていた場合、
+                // ClipDeleteAction はその時点のインスタンスを退避するため、削除前に before 状態へ
+                // 戻しておくと undo で元の形状のまま復活する (削除されるので最終状態には影響しない)。
+                for (auto& d : toDelete)
+                {
+                    auto bit = beforeByClip.find(d.second);
+                    if (bit != beforeByClip.end()) bit->second.restore();
+                }
+                for (auto& d : toDelete)
+                    undoManager->perform(new EditActions::ClipDeleteAction(
+                        d.first, d.second, editChangeCb));
+            }
+        }
+        else
+        {
+            // undoManager 無し (テスト等のフォールバック): 覆われたクリップを直接除去
+            for (auto& d : toDelete)
+            {
+                auto& clips = d.first->clips;
+                clips.erase(std::remove_if(clips.begin(), clips.end(),
+                    [&](const std::unique_ptr<AudioClip>& c){ return c.get() == d.second; }),
+                    clips.end());
+            }
+            if (editChangeCb) editChangeCb();
+        }
+
+        // 覆われて削除したクリップが選択集合に残っていると、レーンから外れたクリップを
+        // 指す不整合な選択になる (次の Cmd+Z までクリアされない)。ここで取り除く。
+        if (!toDelete.empty())
+        {
+            bool selectionChanged = false;
+            for (auto& d : toDelete)
+            {
+                if (selectedClip.clip == d.second) { selectedClip.clear(); selectionChanged = true; }
+                const auto before = extraSelections.size();
+                extraSelections.erase(
+                    std::remove_if(extraSelections.begin(), extraSelections.end(),
+                        [&](const ClipRef& r){ return r.clip == d.second; }),
+                    extraSelections.end());
+                if (extraSelections.size() != before) selectionChanged = true;
+            }
+            // 選択が変わったらヘッダのトラック選択ハイライト/採用ボタン活性も更新する
+            if (selectionChanged) notifySelectionChanged();
         }
     }
 

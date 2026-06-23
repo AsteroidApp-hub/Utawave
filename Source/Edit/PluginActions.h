@@ -23,9 +23,11 @@ class PluginSlotAction : public juce::UndoableAction
 public:
     PluginSlotAction(ChainResolver chain, int slot,
                      std::unique_ptr<juce::AudioPluginInstance> afterInstanceIn,
-                     std::function<void()> onChangeIn, WillRemoveFn willRemoveIn)
+                     std::function<void()> onChangeIn, WillRemoveFn willRemoveIn,
+                     bool afterBypassIn = false)
         : resolve(std::move(chain)), slotIdx(slot),
           afterInstance(std::move(afterInstanceIn)),
+          afterBypass(afterBypassIn),
           onChanged(std::move(onChangeIn)), willRemove(std::move(willRemoveIn)) {}
 
     bool perform() override { return apply(true); }
@@ -37,18 +39,31 @@ private:
         auto* c = resolve ? resolve() : nullptr;
         if (c == nullptr) return false;   // トラック削除済み等 → no-op
 
-        // 現在スロットにあるインスタンスを退避 (反対側の状態として保存)
+        // 現在スロットにあるインスタンスを退避 (反対側の状態として保存)。extractPlugin は
+        // slot->bypassed を false に落とすので、退避する前にバイパス状態も読んでおき、
+        // インスタンスと一緒に往復させる (削除→Undo でバイパスが失われる不具合の修正)。
         std::unique_ptr<juce::AudioPluginInstance> displaced;
+        bool displacedBypass = false;
         if (auto* cur = c->getPlugin(slotIdx))
         {
+            displacedBypass = c->isBypassed(slotIdx);
             if (willRemove) willRemove(cur);
             displaced = c->extractPlugin(slotIdx);
         }
-        // 置くべきインスタンスを挿入
-        auto& toPlace = toAfter ? afterInstance : beforeInstance;
-        if (toPlace) c->insertPluginAt(slotIdx, std::move(toPlace));
-        // 退避した現在のインスタンスを反対側へ保存
+        // 置くべきインスタンスを挿入し、保存しておいたバイパス状態を復元
+        auto& toPlace      = toAfter ? afterInstance : beforeInstance;
+        const bool placeBy = toAfter ? afterBypass   : beforeBypass;
+        if (toPlace)
+        {
+            c->insertPluginAt(slotIdx, std::move(toPlace));
+            c->setBypassed(slotIdx, placeBy);
+            // setBypassed は onChainChanged を呼ばないので、チップのバイパス表示を更新する
+            // (insertPluginAt の onChainChanged は setBypassed の前に発火するため再度必要)
+            if (placeBy && c->onChainChanged) c->onChainChanged();
+        }
+        // 退避した現在のインスタンス + バイパスを反対側へ保存
         (toAfter ? beforeInstance : afterInstance) = std::move(displaced);
+        (toAfter ? beforeBypass   : afterBypass)   = displacedBypass;
 
         if (onChanged) onChanged();
         return true;
@@ -58,6 +73,8 @@ private:
     int slotIdx;
     std::unique_ptr<juce::AudioPluginInstance> beforeInstance;  // perform 前にスロットにあったもの
     std::unique_ptr<juce::AudioPluginInstance> afterInstance;   // perform 後にスロットへ置くもの
+    bool beforeBypass { false };   // beforeInstance のバイパス状態
+    bool afterBypass  { false };   // afterInstance のバイパス状態 (新規追加は既定 false)
     std::function<void()> onChanged;
     WillRemoveFn          willRemove;
 };
@@ -130,15 +147,20 @@ public:
         auto* s = srcResolve ? srcResolve() : nullptr;
         auto* d = dstResolve ? dstResolve() : nullptr;
         if (s == nullptr || d == nullptr) return false;
+        // extract はバイパス状態を落とすので、取り出す前に読んでインスタンスと一緒に往復させる。
+        movedBypass = s->isBypassed(srcIdx);
         if (auto* sp = s->getPlugin(srcIdx)) if (willRemove) willRemove(sp);  // 移動元エディタを閉じる
         auto moved = s->extractPlugin(srcIdx);
         if (!moved) return false;
         if (auto* existing = d->getPlugin(dstIdx))
         {
+            dstBypass = d->isBypassed(dstIdx);
             if (willRemove) willRemove(existing);
             dstDisplaced = d->extractPlugin(dstIdx);
         }
         d->insertPluginAt(dstIdx, std::move(moved));
+        d->setBypassed(dstIdx, movedBypass);   // 移動先でバイパス状態を維持
+        if (movedBypass && d->onChainChanged) d->onChainChanged();  // チップ表示を同期
         if (onChanged) onChanged();
         return true;
     }
@@ -150,8 +172,18 @@ public:
         if (s == nullptr || d == nullptr) return false;
         if (auto* mp = d->getPlugin(dstIdx)) if (willRemove) willRemove(mp);  // 移動先エディタを閉じる
         auto moved = d->extractPlugin(dstIdx);
-        if (dstDisplaced) d->insertPluginAt(dstIdx, std::move(dstDisplaced));
-        if (moved) s->insertPluginAt(srcIdx, std::move(moved));
+        if (dstDisplaced)
+        {
+            d->insertPluginAt(dstIdx, std::move(dstDisplaced));
+            d->setBypassed(dstIdx, dstBypass);   // 退避していた移動先プラグインのバイパスを復元
+            if (dstBypass && d->onChainChanged) d->onChainChanged();
+        }
+        if (moved)
+        {
+            s->insertPluginAt(srcIdx, std::move(moved));
+            s->setBypassed(srcIdx, movedBypass); // 移動元へ戻すときもバイパスを復元
+            if (movedBypass && s->onChainChanged) s->onChainChanged();
+        }
         if (onChanged) onChanged();
         return true;
     }
@@ -160,6 +192,8 @@ private:
     ChainResolver srcResolve, dstResolve;
     int srcIdx, dstIdx;
     std::unique_ptr<juce::AudioPluginInstance> dstDisplaced;
+    bool movedBypass { false };   // 移動するプラグインのバイパス状態
+    bool dstBypass   { false };   // 移動先に元々あったプラグインのバイパス状態
     std::function<void()> onChanged;
     WillRemoveFn          willRemove;
 };

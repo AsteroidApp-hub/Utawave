@@ -1948,7 +1948,9 @@ bool MainComponent::TrackState::operator==(const TrackState& o) const
 {
     return name == o.name && colour == o.colour && synthEnabled == o.synthEnabled
         && synthWaveform == o.synthWaveform && octaveShift == o.octaveShift
-        && semitoneTranspose == o.semitoneTranspose;
+        && semitoneTranspose == o.semitoneTranspose
+        && volume == o.volume && pan == o.pan && reverbSend == o.reverbSend
+        && muted == o.muted && soloed == o.soloed;
 }
 
 bool MainComponent::trackStillExists(Track* t) const
@@ -1969,6 +1971,11 @@ MainComponent::TrackState MainComponent::captureTrackState(Track* t) const
     s.synthWaveform     = t->getSynthWaveform();
     s.octaveShift       = t->getOctaveShift();
     s.semitoneTranspose = t->getSemitoneTranspose();
+    s.volume            = t->getVolume();
+    s.pan               = t->getPan();
+    s.reverbSend        = t->getReverbSend();
+    s.muted             = t->isMuted();
+    s.soloed            = t->isSoloed();
     return s;
 }
 
@@ -1981,6 +1988,11 @@ void MainComponent::applyTrackState(Track* t, const TrackState& s)
     t->setSynthWaveform(s.synthWaveform);
     t->setOctaveShift(s.octaveShift);
     t->setSemitoneTranspose(s.semitoneTranspose);
+    t->setVolume(s.volume);
+    t->setPan(s.pan);
+    t->setReverbSend(s.reverbSend);
+    t->setMuted(s.muted);
+    t->setSoloed(s.soloed);
 }
 
 void MainComponent::applyTrackEditUndoable(Track* t, std::function<void()> mutate)
