@@ -1979,22 +1979,6 @@ MainComponent::TrackState MainComponent::captureTrackState(Track* t) const
     return s;
 }
 
-void MainComponent::applyTrackState(Track* t, const TrackState& s)
-{
-    if (!t) return;
-    t->setName(s.name);
-    t->setColour(s.colour);
-    t->setSynthEnabled(s.synthEnabled);
-    t->setSynthWaveform(s.synthWaveform);
-    t->setOctaveShift(s.octaveShift);
-    t->setSemitoneTranspose(s.semitoneTranspose);
-    t->setVolume(s.volume);
-    t->setPan(s.pan);
-    t->setReverbSend(s.reverbSend);
-    t->setMuted(s.muted);
-    t->setSoloed(s.soloed);
-}
-
 void MainComponent::applyTrackEditUndoable(Track* t, std::function<void()> mutate)
 {
     if (!t || !mutate) return;
@@ -2003,14 +1987,29 @@ void MainComponent::applyTrackEditUndoable(Track* t, std::function<void()> mutat
     TrackState after = captureTrackState(t);
     if (before == after) return;   // 実際の変化なし
     undoManager.beginNewTransaction();
+    // 差分適用: このトランザクションで実際に変化したフィールドだけを undo/redo で書き戻す。
+    // TrackState 全体を無条件に復元すると、Undo を通さない他経路 (ラウドネス調整 /
+    // メトロノーム設定ダイアログ等) で変えた vol/pan/reverbSend を、無関係なトラック編集
+    // (リネーム等) の undo が踏み越えて静かに巻き戻してしまう (しかも記録が無いので redo でも
+    // 戻らない)。変化フィールドのみに限定してこの取りこぼしを防ぐ。
     undoManager.perform(new EditActions::SnapshotAction<TrackState>(
-        before, after, [this, t](const TrackState& s)
+        before, after, [this, t, before, after](const TrackState& s)
         {
             if (!trackStillExists(t)) return;   // トラック削除済みなら no-op (ダングリング回避)
-            applyTrackState(t, s);
-            trackHeaderPanel.refresh();         // 名前/移調/波形などの表示を更新
+            if (before.name             != after.name)             t->setName(s.name);
+            if (before.colour           != after.colour)           t->setColour(s.colour);
+            if (before.synthEnabled     != after.synthEnabled)     t->setSynthEnabled(s.synthEnabled);
+            if (before.synthWaveform    != after.synthWaveform)    t->setSynthWaveform(s.synthWaveform);
+            if (before.octaveShift      != after.octaveShift)      t->setOctaveShift(s.octaveShift);
+            if (before.semitoneTranspose!= after.semitoneTranspose)t->setSemitoneTranspose(s.semitoneTranspose);
+            if (before.volume           != after.volume)           t->setVolume(s.volume);
+            if (before.pan              != after.pan)              t->setPan(s.pan);
+            if (before.reverbSend       != after.reverbSend)       t->setReverbSend(s.reverbSend);
+            if (before.muted            != after.muted)            t->setMuted(s.muted);
+            if (before.soloed           != after.soloed)           t->setSoloed(s.soloed);
+            trackHeaderPanel.refresh();         // 名前/移調/波形/フェーダー等の表示を更新
             if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
-            audioEngine.invalidatePlayback();   // 内蔵シンセ設定をエンジンへ反映
+            audioEngine.invalidatePlayback();   // 内蔵シンセ/ソロ等をエンジンへ反映
         }));
 }
 

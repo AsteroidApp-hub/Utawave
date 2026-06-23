@@ -305,7 +305,6 @@ private:
         bool operator!=(const TrackState& o) const { return !(*this == o); }
     };
     TrackState captureTrackState(Track*) const;
-    void       applyTrackState(Track*, const TrackState&);
     void       applyTrackEditUndoable(Track*, std::function<void()> mutate);
     bool       trackStillExists(Track*) const;
     // ── プラグインチェーン操作の Undo (追加 / 削除 / バイパス / 並べ替え / トラック間移動) ──
