@@ -95,5 +95,9 @@ private:
     juce::Rectangle<int>      updateBannerArea;   // リンクを右寄せ配置する領域 (右端基準)
     UpdateChecker::CancelFlag updateCancel;
 
+    // 起動画面は MainComponent とは別に表示されるため、ツールチップ (広告タイトルの全文など) を
+    // 出すには専用の TooltipWindow が要る。AppPreferences::showTooltips が ON のときだけ生成する。
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StartupComponent)
 };

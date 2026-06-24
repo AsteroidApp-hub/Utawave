@@ -4,10 +4,22 @@
 #include "StartupComponent.h"
 #include "../Localisation.h"
 #include "../Project/RecentProjects.h"
+#include "../Project/AppPreferences.h"
+#include "UtawaveLookAndFeel.h"
 
 StartupComponent::StartupComponent(bool showAds)
     : adsEnabled(showAds)
 {
+    // 起動画面専用の TooltipWindow (無いと setTooltip / TooltipClient が機能しない)。
+    // ツールチップは UtawaveLookAndFeel で描く (グローバル既定 LnF が無いため明示適用)。
+    // アプリ全体の「ツールチップ表示」設定 (既定 ON) を尊重し、OFF なら作らない。
+    if (AppPreferences::load().showTooltips)
+    {
+        static UtawaveLookAndFeel tooltipLnF;   // 全 TooltipWindow より長生き (関数ローカル static)
+        tooltipWindow = std::make_unique<juce::TooltipWindow>(this);
+        tooltipWindow->setLookAndFeel(&tooltipLnF);
+    }
+
     titleLabel.setText("Utawave", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(28.0f, juce::Font::bold));
     titleLabel.setJustificationType(juce::Justification::centredLeft);

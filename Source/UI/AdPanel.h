@@ -11,6 +11,7 @@
 // マウスホイール)。広告クリックで既定ブラウザを開く。データが無い時は案内文を表示する。
 // 描画用の枠 (角丸カード) は親 (StartupComponent) が描くため、本コンポーネントは透過。
 class AdPanel : public juce::Component,
+                public juce::TooltipClient,
                 private juce::Timer
 {
 public:
@@ -27,6 +28,9 @@ public:
     void mouseEnter(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+    // 見出しは枠内では省略 (…) 表示なので、見出しの上にマウスが来たら全文をツールチップで出す。
+    juce::String getTooltip() override;
 
 private:
     // NoAds : サーバーに到達できたが広告が 0 件 (中立表示。エラーではない)
@@ -52,7 +56,8 @@ private:
     juce::Rectangle<int> upChevron() const;
     juce::Rectangle<int> downChevron() const;
     juce::Rectangle<int> retryHit() const;
-    int  adIndexAt(juce::Point<int>) const;     // 可視カード上の広告 index (無ければ -1)
+    int  adIndexAt(juce::Point<int>) const;      // 可視カード上の広告 index (無ければ -1)
+    int  titleAdIndexAt(juce::Point<int>) const; // 見出し帯上にある広告 index (ツールチップ用・無ければ -1)
 
     // ページ位置ドット (下部に横並び・件数と現在位置を示す。ホバー時のみ表示)
     std::vector<juce::Rectangle<int>> dotRects() const;

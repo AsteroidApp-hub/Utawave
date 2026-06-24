@@ -279,6 +279,44 @@ int AdPanel::adIndexAt(juce::Point<int> p) const
     return -1;
 }
 
+// マウス位置が、ある広告カードの「見出し帯」(下端 kTitleH・drawCard と同じ) 上にあれば、その広告
+// index を返す。枠内では見出しが … で省略されるため、ここで全文ツールチップを出す判定に使う。
+int AdPanel::titleAdIndexAt(juce::Point<int> p) const
+{
+    if (! cardView().contains(p)) return -1;
+    const auto L = layout();
+    const int n = (int) ads.size();
+
+    auto overTitle = [&](int slot, double sp, int adIdx) -> bool
+    {
+        if (adIdx < 0 || adIdx >= n || ads[(size_t) adIdx].title.isEmpty()) return false;
+        auto card = cardRect(slot, sp, L);
+        return card.removeFromBottom(kTitleH).contains(p);   // 見出し帯のみ
+    };
+
+    if (n <= 0) return -1;
+    if (n <= 2)
+    {
+        for (int s = 0; s < n; ++s)
+            if (overTitle(s, 0.0, s)) return s;
+        return -1;
+    }
+    const double sp = scrollPos();
+    for (int i = currentIndex - 2; i <= currentIndex + 3; ++i)
+    {
+        const int idx = wrapIndex(i);
+        if (overTitle(i, sp, idx)) return idx;
+    }
+    return -1;
+}
+
+juce::String AdPanel::getTooltip()
+{
+    if (state != State::ShowingAds) return {};
+    const int idx = titleAdIndexAt(getMouseXYRelative());
+    return (idx >= 0 && idx < (int) ads.size()) ? ads[(size_t) idx].title : juce::String();
+}
+
 //==============================================================================
 // 描画
 //==============================================================================
