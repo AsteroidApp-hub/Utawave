@@ -1884,15 +1884,29 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         // deltaY > 0 = 上 (前のトラックへ) / deltaY < 0 = 下 (後ろのトラックへ)。
         // しきい値は「1 ノッチ ≒ 1 トラック」になるよう調整 (mac の 1 ノッチ deltaY ≒ 0.19)。
         constexpr double kStepPerTrack = 0.15;
-        if ((w.deltaY > 0.0) != (wheelAccumY > 0.0)) wheelAccumY = 0.0;  // 方向反転でリセット
-        wheelAccumY += w.deltaY;
-        int steps = (int) (wheelAccumY / kStepPerTrack);                 // deltaY>0=上(+) / <0=下(-)
-        if (steps != 0)
+        const juce::uint32 now = juce::Time::getMillisecondCounter();
+        const bool idle = (now - lastWheelMs > 150);   // 連続フリックでない孤立ノッチか
+        lastWheelMs = now;
+        if (idle)
         {
-            wheelAccumY -= steps * kStepPerTrack;
-            steps = juce::jlimit(-16, 16, steps);                        // 1 イベントでの過剰ジャンプ防止
-            const int dir = (steps > 0) ? -1 : +1;                       // deltaY>0(steps>0) → 上(-1)
-            for (int i = 0, n = std::abs(steps); i < n; ++i) scrollByTracks(dir);
+            // 孤立ノッチ (ゆっくり): delta の大きさに依らず確実に 1 トラック送る。微スクロールで
+            // しきい値に届かず動かない事故を防ぎ、ゆっくり時は厳密に 1 トラック/ノッチにする。
+            wheelAccumY = 0.0;
+            scrollByTracks((w.deltaY > 0.0) ? -1 : +1);   // deltaY>0 → 上(-1)
+        }
+        else
+        {
+            // 連続フリック / トラックパッド: delta を累積しスクロール量に比例して複数トラック送る。
+            if ((w.deltaY > 0.0) != (wheelAccumY > 0.0)) wheelAccumY = 0.0;  // 方向反転でリセット
+            wheelAccumY += w.deltaY;
+            int steps = (int) (wheelAccumY / kStepPerTrack);                 // deltaY>0=上(+) / <0=下(-)
+            if (steps != 0)
+            {
+                wheelAccumY -= steps * kStepPerTrack;
+                steps = juce::jlimit(-16, 16, steps);                        // 1 イベントでの過剰ジャンプ防止
+                const int dir = (steps > 0) ? -1 : +1;                       // deltaY>0(steps>0) → 上(-1)
+                for (int i = 0, n = std::abs(steps); i < n; ++i) scrollByTracks(dir);
+            }
         }
     }
     repaint();

@@ -495,7 +495,9 @@ private:
     int    scrollY        { 0 };
     // 縦スクロールのトラックスナップ用: ホイール delta を累積し、しきい値ごとに 1 トラック送る。
     // ゆっくり=1 トラックずつ (スナップ維持)、速いフリック=スクロール量に比例して複数トラック。
-    double wheelAccumY    { 0.0 };
+    // アイドル (前回ホイールから一定時間経過) で端数をリセットし、ゆっくり時は厳密に 1:1 にする。
+    double       wheelAccumY  { 0.0 };
+    juce::uint32 lastWheelMs  { 0 };
     double playheadSecs   { 0.0 };
     double bpm            { 120.0 };
     double sampleRate     { 44100.0 };
