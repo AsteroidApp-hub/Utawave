@@ -1288,6 +1288,16 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                     const double dE = moved->getEndPosition();
                     std::vector<EditActions::ClipState> trimBefore, trimAfter;
                     std::vector<AudioClip*> covered;
+                    // 内包クリップ (c が moved を跨ぐ) を分割した「右側の残り」を新クリップとして
+                    // 追加するための予約。ループ後にまとめて ClipAddAction で追加する。
+                    struct RightPart
+                    {
+                        EditActions::ClipParams params;
+                        FadeCurve               fadeOutCurve { FadeCurve::Linear };
+                        bool                    hasCustomColour { false };
+                        std::vector<GainPoint>  gainPoints;
+                    };
+                    std::vector<RightPart> rightParts;
                     EditActions::ClipState movedBefore; movedBefore.capture(moved);
 
                     for (auto& cp : destLane->clips)
@@ -1304,11 +1314,21 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                             continue;
                         }
                         EditActions::ClipState before; before.capture(c);
-                        if (cS < dS)   // 左隣が moved の左端に被る
+                        if (cS < dS)   // 左隣が moved の左端に被る (内包 cE>dE も含む)
                         {
-                            // 隣接ではなく moved の左端に xf だけ重ねてクロスフェードを作る
-                            // (重なり領域が無いと X が描かれないため)。xf は moved 外側 (dS-cS) と
-                            // 重なり量 (cE-dS)、両クリップ長の半分に収める。
+                            // c が moved を完全内包する場合は「左側 [cS, dS] + 右側 [dE, cE]」へ
+                            // 分割し、moved の前後に残す (末尾を捨てない = B 方針)。右側は後で
+                            // 新クリップとして追加する。先に c をトリムする前に右側情報を控える。
+                            // 右側は moved の終端 (dE) に「隣接」させる (重ねない)。重ねると新クリップが
+                            // moved の上に描かれ、末尾が xfR ぶん手前から見えて「ずれて」見えるため。
+                            const bool contains = (cE > dE + 0.001);
+                            const double rightLocal  = dE - cS;   // c ローカル時刻 (= moved 終端)
+                            const float rightDbAtStart = (contains && !before.gainPoints.empty())
+                                ? c->getEnvelopeDBAt(rightLocal) : 0.0f;
+
+                            // 左端は moved に xf だけ重ねてクロスフェードを作る (左側は moved の下に
+                            // 隠れるためズレては見えない)。xf は moved 外側 (dS-cS) と重なり量
+                            // (cE-dS)、両クリップ長の半分に収める。
                             const double xf = juce::jmin(kMinXfade,
                                                          dS - cS, cE - dS,
                                                          moved->getDuration() * 0.5);
@@ -1320,6 +1340,32 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                             }
                             else
                                 c->setDuration(juce::jmax(0.01, dS - cS));  // 余裕なし → 隣接
+
+                            if (contains)
+                            {
+                                RightPart rp;
+                                rp.params.file       = c->getFile();
+                                rp.params.startPos   = dE;               // 隣接 (ずれ防止: 重ねない)
+                                rp.params.duration   = cE - dE;
+                                rp.params.fileOffset = before.fileOffset + rightLocal;
+                                rp.params.fadeIn     = juce::jmin(0.010, (cE - dE) * 0.5);  // カット端の小フェード
+                                rp.params.fadeOut    = before.fadeOut;   // 元の末尾フェードを維持
+                                rp.params.gain       = before.gain;
+                                rp.params.name       = before.name;
+                                rp.params.colour     = c->getColour();
+                                rp.fadeOutCurve      = before.fadeOutCurve;
+                                rp.hasCustomColour   = c->hasCustomColour();
+                                // ゲインエンベロープの右側を時刻シフトして引き継ぐ (ClipSplitAction と同手法)
+                                if (!before.gainPoints.empty())
+                                {
+                                    rp.gainPoints.push_back({ 0.0, rightDbAtStart });
+                                    for (auto& gp : before.gainPoints)
+                                        if (gp.time > rightLocal)
+                                            rp.gainPoints.push_back({ gp.time - rightLocal, gp.dB });
+                                }
+                                rightParts.push_back(std::move(rp));
+                                // 右側は隣接させるため moved の fadeOut は変更しない (右クロスフェードは作らない)
+                            }
                         }
                         else           // 右隣が moved の右端に被る
                         {
@@ -1363,6 +1409,27 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                     for (auto* c : covered)
                         undoManager->perform(new EditActions::ClipDeleteAction(
                             destLane, c, editChangeCb));
+                    // 内包クリップを分割した右側の残りを追加 (フェードカーブ/色/エンベロープを反映)。
+                    // ClipAddAction が同一インスタンスを延命所有するので、追加後に設定した値は
+                    // undo/redo を跨いで保持される。
+                    for (auto& rp : rightParts)
+                    {
+                        auto* addR = new EditActions::ClipAddAction(
+                            destLane, rp.params,
+                            destTrack->getFormatManager(),
+                            destTrack->getThumbnailCache(),
+                            editChangeCb);
+                        undoManager->perform(addR);
+                        if (auto* rc = addR->getAddedClip())
+                        {
+                            rc->setFadeOutCurve(rp.fadeOutCurve);
+                            // ClipAddAction は無条件で setColour (= customColour 化) するため、
+                            // 元がトラック色追従だった場合は resetColour で追従に戻す (色が変わるのを防ぐ)。
+                            if (rp.hasCustomColour) rc->setColour(rp.params.colour);
+                            else                    rc->resetColour();
+                            if (!rp.gainPoints.empty()) rc->getGainPointsRW() = rp.gainPoints;
+                        }
+                    }
                 }
             }
             preDragStates.clear();
@@ -1539,6 +1606,17 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
         // (3) 重なりクリップのカット (覆われたクリップは即破棄せず toDelete に集め、
         //     後で ClipDeleteAction で削除する = Undo 可 + 破棄遅延で UAF 回避)
         std::vector<std::pair<Lane*, AudioClip*>> toDelete;
+        // 内包クリップ (dragged を跨ぐ) を分割した「右側の残り」を新クリップとして追加する予約。
+        // 末尾を捨てず moved の後ろに残すため (B 方針)。記録セクションで ClipAddAction する。
+        struct PendingRightClip
+        {
+            Lane*                   lane { nullptr };
+            EditActions::ClipParams params;
+            FadeCurve               fadeOutCurve { FadeCurve::Linear };
+            bool                    hasCustomColour { false };
+            std::vector<GainPoint>  gainPoints;
+        };
+        std::vector<PendingRightClip> rightAdds;
         if (isReshapingDrag)
         {
             auto moveClipToBack = [](Lane* lane, AudioClip* clip)
@@ -1556,7 +1634,8 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                     }
                 }
             };
-            auto cutOverlappedClips = [&preDragBounds, &toDelete](Lane* lane, AudioClip* dragged)
+            auto cutOverlappedClips = [&preDragBounds, &toDelete, &rightAdds, &beforeByClip]
+                                      (Lane* lane, AudioClip* dragged)
             {
                 if (lane == nullptr || dragged == nullptr) return;
                 const double dS = dragged->getStartPosition();
@@ -1603,6 +1682,45 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                     }
                     else if (cS < dS && cE > dE)
                     {
+                        // c が dragged を完全内包 → 左 [cS,dS] + 右 [dE,cE] へ分割し、末尾を
+                        // 新クリップとして残す (B 方針: 末尾を捨てない)。元の値は beforeByClip
+                        // (ドラッグ前) を優先参照。
+                        const EditActions::ClipState* orig = nullptr;
+                        auto bit = beforeByClip.find(c);
+                        if (bit != beforeByClip.end()) orig = &bit->second;
+                        const double origFO      = orig ? orig->fileOffset : c->getFileOffset();
+                        const double origFadeOut = orig ? orig->fadeOut    : c->getFadeOutSecs();
+                        const float  origGain    = orig ? orig->gain       : c->getGain();
+                        const FadeCurve origFOC  = orig ? orig->fadeOutCurve : c->getFadeOutCurve();
+                        const std::vector<GainPoint>& origPts =
+                            orig ? orig->gainPoints : c->getGainPoints();
+                        const double splitLocal  = dE - cS;   // c ローカル時刻 (右側の開始)
+                        const float  dbAtSplit   = !origPts.empty()
+                                                   ? c->getEnvelopeDBAt(splitLocal) : 0.0f;
+
+                        PendingRightClip rc;
+                        rc.lane              = lane;
+                        rc.params.file       = c->getFile();
+                        rc.params.startPos   = dE;
+                        rc.params.duration   = juce::jmax(0.01, cE - dE);
+                        rc.params.fileOffset = origFO + splitLocal;
+                        rc.params.fadeIn     = juce::jmin(0.010, (cE - dE) * 0.5);  // カット端の小フェード
+                        rc.params.fadeOut    = origFadeOut;                          // 元の末尾フェード維持
+                        rc.params.gain       = origGain;
+                        rc.params.name       = c->getName();
+                        rc.params.colour     = c->getColour();
+                        rc.fadeOutCurve      = origFOC;
+                        rc.hasCustomColour   = c->hasCustomColour();
+                        if (!origPts.empty())
+                        {
+                            rc.gainPoints.push_back({ 0.0, dbAtSplit });
+                            for (auto& gp : origPts)
+                                if (gp.time > splitLocal)
+                                    rc.gainPoints.push_back({ gp.time - splitLocal, gp.dB });
+                        }
+                        rightAdds.push_back(std::move(rc));
+
+                        // 左部分にトリム (隣接)
                         const double newDur = juce::jmax(0.01, dS - cS);
                         c->setDuration(newDur);
                         if (c->getFadeOutSecs() > newDur * 0.5)
@@ -1647,7 +1765,17 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                     }
                 }
 
-            if (!befores.empty() || !toDelete.empty())
+            // rc.lane を所有する Track を解決 (新クリップ追加に format manager / cache が要る)
+            auto trackForLane = [this](Lane* ln) -> Track*
+            {
+                for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+                    if (auto* tr = trackManager.getTrack(ti))
+                        for (int li = 0; li < tr->getLaneCount(); ++li)
+                            if (tr->getLane(li) == ln) return tr;
+                return nullptr;
+            };
+
+            if (!befores.empty() || !toDelete.empty() || !rightAdds.empty())
             {
                 undoManager->beginNewTransaction();
                 if (!befores.empty())
@@ -1664,6 +1792,25 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                 for (auto& d : toDelete)
                     undoManager->perform(new EditActions::ClipDeleteAction(
                         d.first, d.second, editChangeCb));
+                // 内包クリップを分割した右側の残りを追加
+                for (auto& rc : rightAdds)
+                {
+                    auto* tr = trackForLane(rc.lane);
+                    if (!tr) continue;
+                    auto* addR = new EditActions::ClipAddAction(
+                        rc.lane, rc.params,
+                        tr->getFormatManager(), tr->getThumbnailCache(), editChangeCb);
+                    undoManager->perform(addR);
+                    if (auto* added = addR->getAddedClip())
+                    {
+                        added->setFadeOutCurve(rc.fadeOutCurve);
+                        // ClipAddAction は無条件で customColour 化するため、元がトラック色追従なら
+                        // resetColour で追従へ戻す (分割した末尾の色が変わるのを防ぐ)。
+                        if (rc.hasCustomColour) added->setColour(rc.params.colour);
+                        else                    added->resetColour();
+                        if (!rc.gainPoints.empty()) added->getGainPointsRW() = rc.gainPoints;
+                    }
+                }
             }
         }
         else
@@ -1675,6 +1822,29 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                 clips.erase(std::remove_if(clips.begin(), clips.end(),
                     [&](const std::unique_ptr<AudioClip>& c){ return c.get() == d.second; }),
                     clips.end());
+            }
+            // 内包分割の右側を直接追加 (Track の format manager / cache を解決)
+            for (auto& rc : rightAdds)
+            {
+                Track* tr = nullptr;
+                for (int ti = 0; ti < trackManager.getTrackCount() && !tr; ++ti)
+                    if (auto* t = trackManager.getTrack(ti))
+                        for (int li = 0; li < t->getLaneCount(); ++li)
+                            if (t->getLane(li) == rc.lane) { tr = t; break; }
+                if (!tr) continue;
+                if (auto* added = rc.lane->addClip(rc.params.file, rc.params.startPos,
+                                                   rc.params.duration,
+                                                   tr->getFormatManager(), tr->getThumbnailCache()))
+                {
+                    added->setFileOffset(rc.params.fileOffset);
+                    added->setFadeInSecs(rc.params.fadeIn);
+                    added->setFadeOutSecs(rc.params.fadeOut);
+                    added->setGain(rc.params.gain);
+                    added->setName(rc.params.name);
+                    added->setFadeOutCurve(rc.fadeOutCurve);
+                    if (rc.hasCustomColour) added->setColour(rc.params.colour);
+                    if (!rc.gainPoints.empty()) added->getGainPointsRW() = rc.gainPoints;
+                }
             }
             if (editChangeCb) editChangeCb();
         }
