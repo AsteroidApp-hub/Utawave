@@ -1076,29 +1076,41 @@ void TimelineView::applyHorizontalZoomStep(double deltaY)
 void TimelineView::scrollByTracks(int steps)
 {
     // 縦スクロールを 1 トラック単位でスナップさせる。トラックは可変高さなので
-    // 固定ピクセルではなく境界 (getTrackY) を行き来する。
+    // 固定ピクセルではなく境界 (getTrackY) を行き来する。ただしトラックがビューポート
+    // より高いと境界スナップだけでは下端 (末尾の余白) まで届かない (スクロールバーは
+    // 届く)。その場合はビューポート分のページ送りにして maxScroll まで到達できるようにする。
     const int count = trackManager.getTrackCount();
     if (count <= 0 || steps == 0) return;
+
+    const int viewportH = getContentArea().getHeight();
+    const int totalH    = trackManager.getTotalHeight();
+    // maxScroll は vScrollBar と同じ「末尾余白込み」(jmax(400, totalH+200)) で計算する。
+    // これを合わせないとホイールがスクロールバーより手前 (余白の分) で止まる。
+    const int maxScroll = juce::jmax(0, juce::jmax(400, totalH + 200) - viewportH);
 
     int top = trackManager.trackAtY(scrollY);
     if (top < 0) top = count - 1;
     const int curTop  = trackManager.getTrackY(top);
-    const bool partial = scrollY > curTop;   // トラック途中まで隠れている
+    const int nextTop = (top + 1 < count) ? trackManager.getTrackY(top + 1) : totalH;
 
-    int idx;
-    if (steps > 0)                            // 下 (後ろのトラックへ)
-        idx = top + steps;
-    else                                      // 上 (前のトラックへ): 途中ならまず現在トラック頭へ
-        idx = (partial ? top + 1 : top) + steps;
-    idx = juce::jlimit(0, count - 1, idx);
+    int target = scrollY;
+    if (steps > 0)   // 下方向
+    {
+        // 現在トラックがビューポートより高く下端がまだ見えていない → ページ送り。
+        // そうでなければ次トラック頭へスナップ。
+        target = (nextTop - scrollY > viewportH) ? (scrollY + viewportH) : nextTop;
+    }
+    else             // 上方向
+    {
+        if (scrollY - curTop > viewportH)
+            target = scrollY - viewportH;                    // 高いトラック内をページ送り
+        else if (scrollY > curTop)
+            target = curTop;                                 // 途中ならまず現在トラック頭へ
+        else
+            target = (top > 0) ? trackManager.getTrackY(top - 1) : 0;  // 前トラック頭へ
+    }
 
-    int target = trackManager.getTrackY(idx);
-
-    // 末尾は空白に入り込みすぎないようビューポート分でクランプ
-    const int viewportH = getContentArea().getHeight();
-    const int maxScroll = juce::jmax(0, trackManager.getTotalHeight() - viewportH);
     target = juce::jlimit(0, maxScroll, target);
-
     if (target == scrollY) return;
     scrollY = target;
     vScrollBar.setCurrentRange(scrollY, vScrollBar.getCurrentRangeSize());
