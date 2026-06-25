@@ -7,7 +7,8 @@
 #include "../Tracks/Track.h"
 
 class TrackHeaderView : public juce::Component,
-                        public juce::DragAndDropTarget
+                        public juce::DragAndDropTarget,
+                        public juce::TooltipClient
 {
 public:
     // 既存コントロール (Vol/Pan/Rev/M/S/R/I 等) の固定幅。
@@ -24,6 +25,10 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
+
+    // juce::TooltipClient — テイクレーンの ↑ (差し込み) / S (ソロ) は paint() で直接描く
+    // 疑似ボタンなので setTooltip を持てない。ホバー位置から該当ボタンの説明を返す。
+    juce::String getTooltip() override;
 
     // juce::DragAndDropTarget
     bool isInterestedInDragSource(const SourceDetails&) override;

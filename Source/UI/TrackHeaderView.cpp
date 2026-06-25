@@ -666,6 +666,25 @@ juce::Rectangle<int> TrackHeaderView::getLanePromoteBtnRect(int laneIndex) const
     return s.translated(-(s.getWidth() + gap), 0);
 }
 
+juce::String TrackHeaderView::getTooltip()
+{
+    // 折りたたみ時はテイク行ボタンを描いていない (paint の早期 return と対称)。
+    if (track.isLanesCollapsed() || track.getLaneCount() <= 1) return {};
+    const auto p = getMouseXYRelative();
+    for (int li = 1; li < track.getLaneCount(); ++li)
+    {
+        if (getLanePromoteBtnRect(li).contains(p))
+            return tr(u8"このテイクを録音レーンへ差し込みます。"
+                      "選択範囲があればその範囲だけ、無ければ選択中のクリップを採用し、"
+                      "差し込んだ前後は自動でクロスフェードして繋ぎます。"
+                      "タイムラインでテイクを選んでから Shift+↑ でも同じ操作ができます");
+        if (getLaneSoloBtnRect(li).contains(p))
+            return tr(u8"このテイクだけを試聴 (ソロ) します。録り直した複数のテイクを"
+                      "聴き比べて、どれを採用するか選ぶときに使います");
+    }
+    return {};
+}
+
 void TrackHeaderView::paint(juce::Graphics& g)
 {
     const int w = getWidth(), laneCount = track.getLaneCount();
