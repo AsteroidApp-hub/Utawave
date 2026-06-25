@@ -1936,7 +1936,7 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         // deltaY が ~0.19 しかないため、ゲイン (≈ 1/0.19) を掛けて 2^(deltaY*gain) ≒ 2 にする。
         // トラックパッド (細かい delta が多数) でも比例して滑らかに連続変化する
         const double kWheelZoomGain = 5.3;
-        pixelsPerBeat = juce::jlimit(1.0, 200000.0,
+        pixelsPerBeat = juce::jlimit(1.0, maxPixelsPerBeat(),
                                      pixelsPerBeat * std::pow(2.0, w.deltaY * kWheelZoomGain));
 
         // anchorTime が anchorX に来るよう scrollX を再計算

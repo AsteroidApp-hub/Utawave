@@ -773,7 +773,7 @@ TimelineView::TimelineView(TrackManager& tm) : trackManager(tm)
     // ルーラーを上下ドラッグして横方向ズーム
     ruler.onZoomDragged = [this](double newPpb, double centerTime, int centerXLocal)
     {
-        pixelsPerBeat = newPpb;
+        pixelsPerBeat = juce::jmin(newPpb, maxPixelsPerBeat());   // 拡大上限 (約 2 拍)
         const double bps = bpm / 60.0;
         // クリックした位置 (centerXLocal) が centerTime のまま動かないよう scrollX を再計算
         scrollX = juce::jmax(0.0, centerTime * bps * pixelsPerBeat - (double) centerXLocal);
@@ -853,6 +853,16 @@ juce::Rectangle<int> TimelineView::getContentArea() const
                .withTrimmedTop(rulerHeight())
                .withTrimmedRight(scrollLaneSize)
                .withTrimmedBottom(scrollLaneSize);
+}
+
+double TimelineView::maxPixelsPerBeat() const
+{
+    // 最大ズーム = 約 4 拍がビュー幅に収まる所 (contentW / 4 拍)。これ以上の拡大は
+    // 描画が重くなる割に用途が無いため制限する。レイアウト前 (幅 ~0) はハード上限を返し、
+    // プロジェクトロード時の復元値を不当に潰さない。
+    const double w = (double) getContentArea().getWidth();
+    if (w < 50.0) return 200000.0;
+    return juce::jlimit(50.0, 200000.0, w * 0.25);
 }
 
 ClipRef TimelineView::getClipAt(int mouseX, int mouseY) const

@@ -1063,7 +1063,7 @@ void TimelineView::applyHorizontalZoomStep(double deltaY)
     // Cmd+スクロールと同じロジック (再生バー中心)。1 ステップ = 倍率一定 (×2 / ÷2) の指数ズーム
     const double bps      = bpm / 60.0;
     const double contentW = (double) getContentArea().getWidth();
-    pixelsPerBeat = juce::jlimit(1.0, 200000.0, pixelsPerBeat * std::pow(2.0, deltaY));
+    pixelsPerBeat = juce::jlimit(1.0, maxPixelsPerBeat(), pixelsPerBeat * std::pow(2.0, deltaY));
     scrollX = juce::jmax(0.0, playheadSecs * bps * pixelsPerBeat - contentW * 0.5);
     ruler.setPlayheadX(playheadSecs * bps * pixelsPerBeat);
     ruler.setPixelsPerBeat(pixelsPerBeat);
