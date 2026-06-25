@@ -384,6 +384,9 @@ private:
     // 桁落ちで 0.0299999... と 30ms をわずかに下回ることがある。そこで判定はデフォルトの
     // クリック防止フェード (5〜10ms) と確実に区別できる 20ms を閾値にする (描画/カーソル共通)。
     static constexpr double kCrossfadeFadeMinSecs { 0.020 };
+    // 差し込み (ドラッグ別トラック / ペースト) で接合部に作る最小クロスフェード長。
+    // 幾何計算は ClipInsertGeometry::planInsertOverlap、末尾分割は makeSplitTail に一本化。
+    static constexpr double kMinCrossfadeSecs    { 0.030 };
 
     // ヒット判定の許容値 (カーソル判定 mouseMove / 掴み判定 mouseDown / 描画で共通)
     static constexpr int    kXfadeHandleHitPx    { 8 };      // クロスフェード両端ハンドル半径
@@ -475,6 +478,17 @@ private:
     void applyVerticalZoomStep(double deltaY);    // deltaY > 0 で拡大 (波形振幅)
     void resetVerticalZoom();                     // 波形振幅を既定値へリセット
     void scrollByTracks(int steps);               // steps>0 = 下(後ろ) / <0 = 上(前)へ N トラック
+
+    // 差し込みで内包クリップを分割した「右側末尾」を作る共通ヘルパ (ドラッグ別トラック /
+    // ペースト / 同一レーンドラッグで共用)。undoManager があれば ClipAddAction、無ければ
+    // 直接 addClip。色 (トラック色追従の維持) / フェードカーブ / ゲインエンベロープの右シフトを
+    // 一括適用する。srcGainPoints は元クリップの全ポイント、splitLocalSecs は右側の開始 (元
+    // クリップローカル秒)、dbAtSplit はそこのエンベロープ値。
+    AudioClip* makeSplitTail(Lane* lane, const EditActions::ClipParams& params,
+                             FadeCurve srcFadeOutCurve, bool srcHasCustomColour,
+                             const std::vector<GainPoint>& srcGainPoints,
+                             double splitLocalSecs, float dbAtSplit,
+                             juce::AudioFormatManager& fmt, juce::AudioThumbnailCache& cache);
 
     double pixelsPerBeat  { 80.0 };
     double scrollX        { 0.0 };

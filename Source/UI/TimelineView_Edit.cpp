@@ -11,6 +11,7 @@
 #include "../AppColours.h"
 #include "../Tracks/MidiClip.h"
 #include "../Edit/SilenceDetector.h"
+#include "../Edit/ClipInsertGeometry.h"
 #include "TextImageCache.h"
 #include <set>
 #include <map>
@@ -313,8 +314,8 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
                double& leftXfOut, double& rightXfOut)
     {
         if (!lane || !undoManager) return;
+        using namespace ClipInsertGeometry;
         constexpr double kEps = 1e-4;
-        constexpr double kXf  = 0.030;
         const double pasteDur = pEnd - pStart;
         // 先に対象を集める (アクションがレーンを変更するので live イテレートしない)
         std::vector<AudioClip*> targets;
@@ -327,80 +328,61 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
         }
         for (auto* c : targets)
         {
-            const double cS = c->getStartPosition();
-            const double cE = c->getEndPosition();
-            if (cE <= pStart + kEps || cS >= pEnd - kEps) continue;  // 重なり無し / 接触のみ
-
-            if (cS >= pStart - kEps && cE <= pEnd + kEps)
+            const Plan plan = planInsertOverlap(c->getStartPosition(), c->getEndPosition(),
+                                                pStart, pEnd, pasteDur, kMinCrossfadeSecs, kEps);
+            if (plan.kind == OverlapKind::None) continue;
+            if (plan.kind == OverlapKind::Covered)
             {
-                // 既存がペースト範囲に完全に覆われる → 削除
                 undoManager->perform(new EditActions::ClipDeleteAction(lane, c, editChangeCb));
+                continue;
             }
-            else if (cS < pStart && cE > pEnd)
-            {
-                // 既存がペースト範囲を内包 → 左 [cS,pStart] + 右 [pEnd,cE] に分割し、ペーストの
-                // 前後に最小クロスフェードを作る (左は pStart+xfL まで、右は pEnd-xfR から重ねる)。
-                const bool   origCustom = c->hasCustomColour();
-                const double xfL = juce::jmin(kXf, pStart - cS, cE - pStart, pasteDur * 0.5);
-                const double xfR = juce::jmin(kXf, cE - pEnd, pEnd - cS, pasteDur * 0.5);
-                EditActions::ClipState before; before.capture(c);
-                EditActions::ClipState left = before;
-                left.duration = juce::jmax(0.01, (pStart + xfL) - cS);
-                left.fadeOut  = (xfL > 0.001) ? xfL : juce::jmin(before.fadeOut, left.duration * 0.5);
-                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { left }, editChangeCb));
-                leftXfOut = juce::jmax(leftXfOut, xfL);
 
-                const double rStart = pEnd - xfR;
+            EditActions::ClipState before; before.capture(c);
+            // Split は右側末尾を c のトリム前に控える (エンベロープ値 dbAtSplit を正確に取る)
+            const bool isSplit = (plan.kind == OverlapKind::Split);
+            const double splitLocal = plan.rightFileOffsetDelta;
+            const float  dbAtSplit  = (isSplit && ! before.gainPoints.empty())
+                                      ? c->getEnvelopeDBAt(splitLocal) : 0.0f;
+
+            if (plan.kind == OverlapKind::LeftCut || plan.kind == OverlapKind::Split)
+            {
+                // 既存を「左部分」へ縮める + 接合部クロスフェード (0 のとき元フェードを尺で再クランプ)
+                EditActions::ClipState after = before;
+                after.duration = plan.leftDuration;
+                after.fadeOut  = (plan.leftFadeOut > 0.001) ? plan.leftFadeOut
+                                                            : juce::jmin(before.fadeOut, plan.leftDuration * 0.5);
+                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+                leftXfOut = juce::jmax(leftXfOut, plan.insFadeIn);
+            }
+            else // RightCut
+            {
+                EditActions::ClipState after = before;
+                after.startPos   = plan.rightStart;
+                after.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
+                after.duration   = plan.rightDuration;
+                after.fadeIn     = (plan.rightFadeIn > 0.001) ? plan.rightFadeIn
+                                                              : juce::jmin(before.fadeIn, plan.rightDuration * 0.5);
+                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+                rightXfOut = juce::jmax(rightXfOut, plan.insFadeOut);
+            }
+
+            if (isSplit)
+            {
+                // 右側末尾を新クリップとして残す (色/カーブ/エンベロープ引き継ぎは makeSplitTail)
                 EditActions::ClipParams rp;
                 rp.file       = c->getFile();
-                rp.startPos   = rStart;
-                rp.duration   = juce::jmax(0.01, cE - rStart);
-                rp.fileOffset = before.fileOffset + (rStart - cS);
+                rp.startPos   = plan.rightStart;
+                rp.duration   = plan.rightDuration;
+                rp.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
                 rp.gain       = before.gain;
                 rp.name       = before.name;
                 rp.colour     = c->getColour();
-                rp.fadeIn     = (xfR > 0.001) ? xfR : juce::jmin(0.010, rp.duration * 0.5);
-                rp.fadeOut    = juce::jmin(before.fadeOut, rp.duration * 0.5);
-                auto* addTail = new EditActions::ClipAddAction(lane, rp, fmt, cache, editChangeCb);
-                undoManager->perform(addTail);
-                if (auto* t = addTail->getAddedClip())
-                {
-                    t->setFadeOutCurve(before.fadeOutCurve);
-                    // ClipAddAction は無条件で customColour 化するため、元がトラック色追従なら
-                    // resetColour で追従に戻す (末尾の色が変わるのを防ぐ)。
-                    if (!origCustom) t->resetColour();
-                }
-                rightXfOut = juce::jmax(rightXfOut, xfR);
-            }
-            else if (cS < pStart)
-            {
-                // 既存の右側が重なる → 末尾を pStart+xfL まで詰めてクロスフェード。
-                // xfL は pStart-cS でも抑える: 抑えないと既存の残り尺 (pStart+xfL-cS) が 2·xfL
-                // 未満になり、setFadeOutSecs の dur*0.5 クランプで既存側だけフェードが短くなって
-                // ペースト側 (fadeIn=xfL) と左右非対称になる (#M1 違反・レベルディップ)。
-                const double xfL = juce::jmin(kXf, pStart - cS, cE - pStart, pasteDur * 0.5);
-                EditActions::ClipState before; before.capture(c);
-                EditActions::ClipState after = before;
-                after.duration = juce::jmax(0.01, (pStart + xfL) - cS);
-                after.fadeOut  = (xfL > 0.001) ? xfL : juce::jmin(before.fadeOut, after.duration * 0.5);
-                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
-                leftXfOut = juce::jmax(leftXfOut, xfL);
-            }
-            else
-            {
-                // 既存の左側が重なる → 開始を pEnd-xfR まで詰めてクロスフェード (fileOffset 補正)。
-                // xfR は cE-pEnd でも抑える: 抑えないと既存の残り尺 ((cE-pEnd)+xfR) が 2·xfR 未満に
-                // なり、setFadeInSecs の dur*0.5 クランプで既存側だけ短くなり左右非対称になる (#M1)。
-                const double xfR = juce::jmin(kXf, cE - pEnd, pEnd - cS, pasteDur * 0.5);
-                const double nStart = pEnd - xfR;
-                EditActions::ClipState before; before.capture(c);
-                EditActions::ClipState after = before;
-                after.startPos   = nStart;
-                after.fileOffset = before.fileOffset + (nStart - cS);
-                after.duration   = juce::jmax(0.01, cE - nStart);
-                after.fadeIn     = (xfR > 0.001) ? xfR : juce::jmin(before.fadeIn, after.duration * 0.5);
-                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
-                rightXfOut = juce::jmax(rightXfOut, xfR);
+                rp.fadeIn     = (plan.rightFadeIn > 0.001) ? plan.rightFadeIn
+                                                           : juce::jmin(0.010, plan.rightDuration * 0.5);
+                rp.fadeOut    = juce::jmin(before.fadeOut, plan.rightDuration * 0.5);
+                makeSplitTail(lane, rp, before.fadeOutCurve, c->hasCustomColour(),
+                              before.gainPoints, splitLocal, dbAtSplit, fmt, cache);
+                rightXfOut = juce::jmax(rightXfOut, plan.insFadeOut);
             }
         }
     };
@@ -605,7 +587,7 @@ bool TimelineView::promoteRangeToLane0(Track* track, Lane* srcLane, double t1, d
     for (auto& cp : dstLane->clips)
         beforeSnap.push_back(EditActions::LaneSnapshotAction::ClipSnap::capture(cp.get()));
 
-    constexpr double kXfade = 0.030;
+    constexpr double kXfade = kMinCrossfadeSecs;   // テイク差し込みの最小クロスフェード (30ms)
     // 境界で 30ms overlap を残してトリムするため、トリム範囲を内側に狭める
     const double trimT1 = t1 + kXfade;
     const double trimT2 = t2 - kXfade;
@@ -1076,6 +1058,48 @@ void TimelineView::applyHorizontalZoomStep(double deltaY)
     hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
     resized();
     repaint();
+}
+
+AudioClip* TimelineView::makeSplitTail(Lane* lane, const EditActions::ClipParams& params,
+                                       FadeCurve srcFadeOutCurve, bool srcHasCustomColour,
+                                       const std::vector<GainPoint>& srcGainPoints,
+                                       double splitLocalSecs, float dbAtSplit,
+                                       juce::AudioFormatManager& fmt, juce::AudioThumbnailCache& cache)
+{
+    AudioClip* tail = nullptr;
+    if (undoManager)
+    {
+        // ClipAddAction は同一インスタンスを延命所有するので、追加後に設定した値は undo/redo を跨ぐ
+        auto* add = new EditActions::ClipAddAction(lane, params, fmt, cache, editChangeCb);
+        undoManager->perform(add);
+        tail = add->getAddedClip();
+    }
+    else
+    {
+        // undoManager 無し (テスト等のフォールバック): 直接追加
+        tail = lane->addClip(params.file, params.startPos, params.duration, fmt, cache);
+        if (tail)
+        {
+            tail->setFileOffset(params.fileOffset);
+            tail->setFadeInSecs(params.fadeIn);
+            tail->setFadeOutSecs(params.fadeOut);
+            tail->setGain(params.gain);
+            if (params.name.isNotEmpty()) tail->setName(params.name);
+        }
+    }
+    if (tail != nullptr)
+    {
+        tail->setFadeOutCurve(srcFadeOutCurve);
+        // ClipAddAction / setColour は無条件で customColour 化するため、元がトラック色追従だった
+        // 場合は resetColour で追従に戻す (分割した末尾の色が変わるのを防ぐ)。
+        if (srcHasCustomColour) tail->setColour(params.colour);
+        else                    tail->resetColour();
+        // ゲインエンベロープの右側を時刻シフトして引き継ぐ
+        if (! srcGainPoints.empty())
+            tail->getGainPointsRW() = ClipInsertGeometry::shiftRightEnvelope(
+                srcGainPoints, splitLocalSecs, dbAtSplit);
+    }
+    return tail;
 }
 
 void TimelineView::scrollByTracks(int steps)

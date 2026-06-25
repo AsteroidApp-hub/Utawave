@@ -311,6 +311,7 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/AppSettingsTests.cpp
         Tests/MidiClipTests.cpp
         Tests/SilenceDetectorTests.cpp
+        Tests/ClipInsertGeometryTests.cpp
         Tests/EditActionsTests.cpp
         Tests/PluginActionsTests.cpp
         Tests/LufsMeterTests.cpp
