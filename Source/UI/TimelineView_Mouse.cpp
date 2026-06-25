@@ -1879,19 +1879,20 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
     }
     else if (std::abs(w.deltaY) > 1.0e-4)
     {
-        // 縦スクロールは 1 ノッチ = 1 トラックのスナップスクロール。
-        // ホイールの 1 ノッチは大きさのバラつく複数イベントとして届くため、delta の
-        // 大きさには依存せず「向き + 時間デバウンス」で送る: 動きがあれば 1 トラック送り、
-        // 直後の短時間 (kBurstMs) は同方向の追加イベントを 1 ノッチ分としてまとめる。
-        // deltaY > 0 = 上 (前のトラックへ) / deltaY < 0 = 下 (後ろのトラックへ)
-        const int dir = (w.deltaY > 0.0) ? -1 : +1;
-        const juce::uint32 now = juce::Time::getMillisecondCounter();
-        const juce::uint32 kBurstMs = 80;
-        if (dir != lastWheelStepDir || now - lastWheelStepMs >= kBurstMs)
+        // 縦スクロールは 1 トラックスナップを維持しつつ、ホイール delta を累積して
+        // スクロール量に比例した数だけトラックを送る (速いフリックほど機敏に進む)。
+        // deltaY > 0 = 上 (前のトラックへ) / deltaY < 0 = 下 (後ろのトラックへ)。
+        // しきい値は「1 ノッチ ≒ 1 トラック」になるよう調整 (mac の 1 ノッチ deltaY ≒ 0.19)。
+        constexpr double kStepPerTrack = 0.15;
+        if ((w.deltaY > 0.0) != (wheelAccumY > 0.0)) wheelAccumY = 0.0;  // 方向反転でリセット
+        wheelAccumY += w.deltaY;
+        int steps = (int) (wheelAccumY / kStepPerTrack);                 // deltaY>0=上(+) / <0=下(-)
+        if (steps != 0)
         {
-            scrollByTracks(dir);
-            lastWheelStepDir = dir;
-            lastWheelStepMs  = now;
+            wheelAccumY -= steps * kStepPerTrack;
+            steps = juce::jlimit(-16, 16, steps);                        // 1 イベントでの過剰ジャンプ防止
+            const int dir = (steps > 0) ? -1 : +1;                       // deltaY>0(steps>0) → 上(-1)
+            for (int i = 0, n = std::abs(steps); i < n; ++i) scrollByTracks(dir);
         }
     }
     repaint();

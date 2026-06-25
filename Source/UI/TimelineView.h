@@ -493,9 +493,9 @@ private:
     double pixelsPerBeat  { 80.0 };
     double scrollX        { 0.0 };
     int    scrollY        { 0 };
-    // 縦スクロールのトラックスナップ用: delta の大きさに依存せず「向き + 時間デバウンス」で 1 ノッチ=1 トラック
-    juce::uint32 lastWheelStepMs  { 0 };
-    int          lastWheelStepDir { 0 };
+    // 縦スクロールのトラックスナップ用: ホイール delta を累積し、しきい値ごとに 1 トラック送る。
+    // ゆっくり=1 トラックずつ (スナップ維持)、速いフリック=スクロール量に比例して複数トラック。
+    double wheelAccumY    { 0.0 };
     double playheadSecs   { 0.0 };
     double bpm            { 120.0 };
     double sampleRate     { 44100.0 };
