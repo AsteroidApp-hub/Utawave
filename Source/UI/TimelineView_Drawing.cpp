@@ -238,12 +238,24 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                     drawClipWaveform(ig, clip, { 0, 0, scaledW, scaledH },
                                      fo, clip.getDuration(), verticalZoom, wfColour);
                 }
-                // 物理解像度の Image を wfRect ぴったりに縮小して貼る (端数も含め正確にフィット)
+                // 物理解像度の Image を貼る。横は「丸めた矩形 (wfRect.getX()/needW)」ではなく
+                // クリップ開始/尺から計算した端数 (fractional) の絶対位置・絶対幅で貼ることで、
+                // 波形が絶対タイムライングリッドに揃う。これによりクリップを分割/トリムして矩形
+                // (丸め) が変わっても波形が ±1px ずれて見えない (カット端が動かない)。
+                // キャッシュ内容はクリップ相対 [0,scaledW]→[fileOffset,+duration] のままなので
+                // スクロール非依存・再生成不要。
+                const double pxPerSec = pixelsPerBeat * (bpm / 60.0);
+                const double exactL   = clip.getStartPosition() * pxPerSec - scrollX;
+                const double exactW   = juce::jmax(1.0, clip.getDuration() * pxPerSec);
                 g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+                // 端数貼り付けで波形が矩形を最大 ~0.5px はみ出し得るので、クリップ矩形に
+                // クリップして隣のクリップへにじまないようにする (本体のグリッド整合は不変)。
+                juce::Graphics::ScopedSaveState wfClip(g);
+                g.reduceClipRegion(wfRect);
                 g.drawImageTransformed(cache.image,
-                    juce::AffineTransform::scale((float) needW / (float) scaledW,
+                    juce::AffineTransform::scale((float) (exactW / (double) scaledW),
                                                  (float) needH / (float) scaledH)
-                        .translated((float) wfRect.getX(), (float) wfRect.getY()));
+                        .translated((float) exactL, (float) wfRect.getY()));
             }
             else
             {
