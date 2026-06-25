@@ -374,8 +374,11 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
             }
             else if (cS < pStart)
             {
-                // 既存の右側が重なる → 末尾を pStart+xfL まで詰めてクロスフェード
-                const double xfL = juce::jmin(kXf, cE - pStart, pasteDur * 0.5);
+                // 既存の右側が重なる → 末尾を pStart+xfL まで詰めてクロスフェード。
+                // xfL は pStart-cS でも抑える: 抑えないと既存の残り尺 (pStart+xfL-cS) が 2·xfL
+                // 未満になり、setFadeOutSecs の dur*0.5 クランプで既存側だけフェードが短くなって
+                // ペースト側 (fadeIn=xfL) と左右非対称になる (#M1 違反・レベルディップ)。
+                const double xfL = juce::jmin(kXf, pStart - cS, cE - pStart, pasteDur * 0.5);
                 EditActions::ClipState before; before.capture(c);
                 EditActions::ClipState after = before;
                 after.duration = juce::jmax(0.01, (pStart + xfL) - cS);
@@ -385,8 +388,10 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
             }
             else
             {
-                // 既存の左側が重なる → 開始を pEnd-xfR まで詰めてクロスフェード (fileOffset 補正)
-                const double xfR = juce::jmin(kXf, pEnd - cS, pasteDur * 0.5);
+                // 既存の左側が重なる → 開始を pEnd-xfR まで詰めてクロスフェード (fileOffset 補正)。
+                // xfR は cE-pEnd でも抑える: 抑えないと既存の残り尺 ((cE-pEnd)+xfR) が 2·xfR 未満に
+                // なり、setFadeInSecs の dur*0.5 クランプで既存側だけ短くなり左右非対称になる (#M1)。
+                const double xfR = juce::jmin(kXf, cE - pEnd, pEnd - cS, pasteDur * 0.5);
                 const double nStart = pEnd - xfR;
                 EditActions::ClipState before; before.capture(c);
                 EditActions::ClipState after = before;

@@ -264,7 +264,7 @@ public:
 
     // 横ズーム量 (px / beat)。プロジェクトに保存して次回ロード時に復元するため公開。
     double getHorizontalZoom() const { return pixelsPerBeat; }
-    // 横ズームの上限 (px/beat)。最大でも約 2 拍がビュー幅に収まる所までに制限する
+    // 横ズームの上限 (px/beat)。最大でも約 4 拍がビュー幅に収まる所までに制限する
     // (極端な拡大は描画が重くなる割に用途が無いため)。未レイアウト時はハード上限を返す。
     double maxPixelsPerBeat() const;
     void   setHorizontalZoom(double ppb)
