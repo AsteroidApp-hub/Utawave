@@ -829,9 +829,16 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
     {
         case DragMode::Move:
         {
+            // Cmd (Mac) / Ctrl 押下中は左右（時間）を固定し、トラック間の上下移動だけを許す。
+            // 別トラックへ「同じ位置のまま」移し替えたいときのため。
+            const bool lockHorizontal = e.mods.isCommandDown();
             // プライマリの新しい位置（snap適用）
-            double newStart = juce::jmax(0.0, clipOrigStart + delta);
-            newStart = snapTime(newStart);
+            double newStart = clipOrigStart;
+            if (! lockHorizontal)
+            {
+                newStart = juce::jmax(0.0, clipOrigStart + delta);
+                newStart = snapTime(newStart);
+            }
             double effectiveDelta = newStart - clipOrigStart;
             selectedClip.clip->setStartPosition(newStart);
             for (size_t i = 0; i < extraSelections.size() && i < extraOrigStarts.size(); ++i)
@@ -1227,8 +1234,30 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             p.startPos   = selectedClip.clip->getStartPosition();
             p.duration   = selectedClip.clip->getDuration();
             p.fileOffset = selectedClip.clip->getFileOffset();
-            p.fadeIn     = selectedClip.clip->getFadeInSecs();
-            p.fadeOut    = selectedClip.clip->getFadeOutSecs();
+            // 端のフェードがソースレーンでのクロスフェード由来 (= その端に別クリップが重なって
+            // いた) なら、移動先には相手がいない/別の相手なので「元の巨大フェード」を持ち込まず
+            // 小さな既定値に戻す (コピー/複製と同じ作法)。これをしないと元のクロスフェード長
+            // ぶんの巨大な X が移動先で描かれてしまう。
+            auto edgeOverlapsNeighbor = [](Lane* lane, AudioClip* self, double edgeTime)
+            {
+                if (!lane) return false;
+                for (auto& cp : lane->clips)
+                {
+                    auto* o = cp.get();
+                    if (o == self) continue;
+                    if (o->getStartPosition() < edgeTime - 0.001
+                        && o->getEndPosition() > edgeTime + 0.001)
+                        return true;
+                }
+                return false;
+            };
+            const double minEdgeFade = juce::jmin(0.010, selectedClip.clip->getDuration() * 0.5);
+            p.fadeIn     = edgeOverlapsNeighbor(selectedClip.lane, selectedClip.clip,
+                                                selectedClip.clip->getStartPosition())
+                           ? minEdgeFade : selectedClip.clip->getFadeInSecs();
+            p.fadeOut    = edgeOverlapsNeighbor(selectedClip.lane, selectedClip.clip,
+                                                selectedClip.clip->getEndPosition())
+                           ? minEdgeFade : selectedClip.clip->getFadeOutSecs();
             p.gain       = selectedClip.clip->getGain();
             p.name       = selectedClip.clip->getName();
             p.colour     = selectedClip.clip->getColour();
@@ -1237,11 +1266,104 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             {
                 undoManager->perform(new EditActions::ClipDeleteAction(
                     selectedClip.lane, selectedClip.clip, editChangeCb));
-                undoManager->perform(new EditActions::ClipAddAction(
+                auto* addAction = new EditActions::ClipAddAction(
                     destLane, p,
                     destTrack->getFormatManager(),
                     destTrack->getThumbnailCache(),
-                    editChangeCb));
+                    editChangeCb);
+                undoManager->perform(addAction);
+
+                // 移動先で既存クリップと重なった場合の整理 (within-lane ドラッグと同じ作法を
+                // この経路にも適用)。早期 return するこの cross-track 経路はこれまで重なりを
+                // 一切処理せず、移動クリップ/移動先クリップの「元のフェード長ぶん」の巨大な X が
+                // そのまま残っていた。ここで:
+                //   ・完全に覆われたクリップは削除 (ClipDeleteAction = インスタンス退避で Undo 可)
+                //   ・部分的に重なるクリップはトリムして隣接させる
+                //   ・接合部のクロスフェードは最小サイズ kMinXfade に留める (巨大 X を防ぐ)
+                // すべて同じ "Move to Track" トランザクションに積むので Cmd+Z 1 回で戻る。
+                if (auto* moved = addAction->getAddedClip())
+                {
+                    constexpr double kMinXfade = 0.030;
+                    const double dS = moved->getStartPosition();
+                    const double dE = moved->getEndPosition();
+                    std::vector<EditActions::ClipState> trimBefore, trimAfter;
+                    std::vector<AudioClip*> covered;
+                    EditActions::ClipState movedBefore; movedBefore.capture(moved);
+
+                    for (auto& cp : destLane->clips)
+                    {
+                        auto* c = cp.get();
+                        if (c == moved) continue;
+                        const double cS = c->getStartPosition();
+                        const double cE = c->getEndPosition();
+                        if (cE <= dS + 0.001 || cS >= dE - 0.001) continue;  // 重なりなし
+
+                        if (cS >= dS - 0.001 && cE <= dE + 0.001)
+                        {
+                            covered.push_back(c);   // 完全に覆われる → 削除
+                            continue;
+                        }
+                        EditActions::ClipState before; before.capture(c);
+                        if (cS < dS)   // 左隣が moved の左端に被る
+                        {
+                            // 隣接ではなく moved の左端に xf だけ重ねてクロスフェードを作る
+                            // (重なり領域が無いと X が描かれないため)。xf は moved 外側 (dS-cS) と
+                            // 重なり量 (cE-dS)、両クリップ長の半分に収める。
+                            const double xf = juce::jmin(kMinXfade,
+                                                         dS - cS, cE - dS,
+                                                         moved->getDuration() * 0.5);
+                            if (xf > 0.001)
+                            {
+                                c->setDuration(juce::jmax(0.01, (dS + xf) - cS));
+                                c->setFadeOutSecs(xf);
+                                moved->setFadeInSecs(xf);
+                            }
+                            else
+                                c->setDuration(juce::jmax(0.01, dS - cS));  // 余裕なし → 隣接
+                        }
+                        else           // 右隣が moved の右端に被る
+                        {
+                            // moved の右端に xf だけ重ねてクロスフェードを作る。neighbor の頭を
+                            // dE-xf まで詰める。xf は重なり量 (dE-cS) と neighbor 尾 (cE-dE)、
+                            // moved 長の半分に収める。
+                            const double xf = juce::jmin(kMinXfade,
+                                                         dE - cS, cE - dE,
+                                                         moved->getDuration() * 0.5);
+                            if (xf > 0.001)
+                            {
+                                const double newStart = dE - xf;
+                                c->setFileOffset(c->getFileOffset() + (newStart - cS));
+                                c->setStartPosition(newStart);
+                                c->setDuration(juce::jmax(0.01, cE - newStart));
+                                c->setFadeInSecs(xf);
+                                moved->setFadeOutSecs(xf);
+                            }
+                            else
+                            {
+                                const double shift = dE - cS;             // 余裕なし → 隣接
+                                c->setStartPosition(dE);
+                                c->setFileOffset(c->getFileOffset() + shift);
+                                c->setDuration(juce::jmax(0.01, cE - dE));
+                            }
+                        }
+                        trimBefore.push_back(before);
+                        EditActions::ClipState after; after.capture(c);
+                        trimAfter.push_back(after);
+                    }
+
+                    EditActions::ClipState movedAfter; movedAfter.capture(moved);
+                    if (movedBefore.differsFrom(movedAfter))
+                    {
+                        trimBefore.push_back(movedBefore);
+                        trimAfter.push_back(movedAfter);
+                    }
+                    if (!trimBefore.empty())
+                        undoManager->perform(new EditActions::ClipsPropertyAction(
+                            std::move(trimBefore), std::move(trimAfter), editChangeCb));
+                    for (auto* c : covered)
+                        undoManager->perform(new EditActions::ClipDeleteAction(
+                            destLane, c, editChangeCb));
+                }
             }
             preDragStates.clear();
             extraOrigStarts.clear();
@@ -1333,7 +1455,18 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
         // (1) クロスフェードのフェード長同期 (Move/CrossfadeCenter)
         if (isMoveDrag)
         {
-            auto syncLaneCrossfades = [](Lane* lane)
+            // ドラッグ前のクリップ境界 (動かしたクリップは preDragBounds、未変更クリップは現在値)。
+            // 「その重なりがドラッグで新しく作られたか」を判定するために使う。
+            auto preBoundsOf = [&preDragBounds](AudioClip* c) -> std::pair<double, double>
+            {
+                auto it = preDragBounds.find(c);
+                if (it != preDragBounds.end()) return it->second;
+                return { c->getStartPosition(), c->getEndPosition() };
+            };
+            // 差し込み (新しく作られた重なり) のクロスフェードは最小サイズにする。重なり全体に
+            // 伸ばすと、元のフェード長や大きな重なりぶんの巨大な X になり使いづらいため。
+            constexpr double kMinXfade = 0.030;
+            auto syncLaneCrossfades = [&preBoundsOf](Lane* lane)
             {
                 if (!lane) return;
                 for (size_t i = 0; i < lane->clips.size(); ++i)
@@ -1348,13 +1481,22 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                         // ない (cA のフェードアウトが cB の無い位置に来る)。同期しない。
                         if (cB->getEndPosition() <= cA->getEndPosition() + 0.001) continue;
                         const double rawOverlap = cA->getEndPosition() - cB->getStartPosition();
-                        // どちらかにフェードがあれば、overlap に同期。ただし両クリップ長の半分で
+                        // どちらかにフェードがあれば overlap に同期。ただし両クリップ長の半分で
                         // クランプしてから両側に同値を入れる (#M1)。個別 setter の duration*0.5
                         // クランプで左右非対称になり、描画 (対称な X) と実音がずれるのを防ぐ。
                         if (rawOverlap > 0.001
                             && (cA->getFadeOutSecs() > 0.0 || cB->getFadeInSecs() > 0.0))
                         {
-                            const double xf = juce::jmin(rawOverlap,
+                            // ドラッグ前から重なっていた = 既存クロスフェードの微調整 → 従来どおり
+                            // 重なり全体に同期。新たに作られた重なり (差し込み) → 最小サイズに留める。
+                            auto pa = preBoundsOf(cA);
+                            auto pb = preBoundsOf(cB);
+                            const double preOverlap = juce::jmin(pa.second, pb.second)
+                                                      - juce::jmax(pa.first, pb.first);
+                            const bool existed = preOverlap > 0.001;
+                            const double cap = existed ? rawOverlap
+                                                       : juce::jmin(rawOverlap, kMinXfade);
+                            const double xf = juce::jmin(cap,
                                                          cA->getDuration() * 0.5,
                                                          cB->getDuration() * 0.5);
                             cA->setFadeOutSecs(xf);

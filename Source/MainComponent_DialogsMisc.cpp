@@ -317,6 +317,7 @@ void MainComponent::showShortcutsDialog()
             { u8"F",                      u8"選択範囲で fade-in / fade-out" },
             { u8"X",                      u8"選択範囲でクロスフェード" },
             { u8"Alt+クリック",           u8"クリップ分割 (波形 / MIDI のカット)" },
+            { u8"Cmd+ドラッグ",           u8"クリップ移動を左右固定 (上下=トラック移動のみ)" },
             { u8"Cmd+クリック",           u8"プラグインをバイパス (INS チップ)" },
         }},
         { u8"トラック", {
