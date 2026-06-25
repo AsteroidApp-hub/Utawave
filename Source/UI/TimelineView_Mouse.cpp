@@ -1317,18 +1317,20 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                         if (cS < dS)   // 左隣が moved の左端に被る (内包 cE>dE も含む)
                         {
                             // c が moved を完全内包する場合は「左側 [cS, dS] + 右側 [dE, cE]」へ
-                            // 分割し、moved の前後に残す (末尾を捨てない = B 方針)。右側は後で
-                            // 新クリップとして追加する。先に c をトリムする前に右側情報を控える。
-                            // 右側は moved の終端 (dE) に「隣接」させる (重ねない)。重ねると新クリップが
-                            // moved の上に描かれ、末尾が xfR ぶん手前から見えて「ずれて」見えるため。
+                            // 分割し、moved の前後に最小クロスフェードを作って残す (末尾を捨てない)。
+                            // moved はこの後リスト末尾(最前面)へ移すので、重なり領域では分割片が
+                            // moved の下に隠れ「ずれ」ては見えない。先に c をトリムする前に右側情報を控える。
                             const bool contains = (cE > dE + 0.001);
-                            const double rightLocal  = dE - cS;   // c ローカル時刻 (= moved 終端)
+                            const double xfR = contains
+                                ? juce::jmin(kMinXfade, cE - dE, moved->getDuration() * 0.5)
+                                : 0.0;
+                            const double rightStart  = dE - xfR;        // 右側クリップ開始 (moved 右端に重ねる)
+                            const double rightLocal  = rightStart - cS; // c ローカル時刻
                             const float rightDbAtStart = (contains && !before.gainPoints.empty())
                                 ? c->getEnvelopeDBAt(rightLocal) : 0.0f;
 
-                            // 左端は moved に xf だけ重ねてクロスフェードを作る (左側は moved の下に
-                            // 隠れるためズレては見えない)。xf は moved 外側 (dS-cS) と重なり量
-                            // (cE-dS)、両クリップ長の半分に収める。
+                            // 左端は moved に xf だけ重ねてクロスフェードを作る。xf は moved 外側
+                            // (dS-cS) と重なり量 (cE-dS)、両クリップ長の半分に収める。
                             const double xf = juce::jmin(kMinXfade,
                                                          dS - cS, cE - dS,
                                                          moved->getDuration() * 0.5);
@@ -1345,10 +1347,11 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                             {
                                 RightPart rp;
                                 rp.params.file       = c->getFile();
-                                rp.params.startPos   = dE;               // 隣接 (ずれ防止: 重ねない)
-                                rp.params.duration   = cE - dE;
+                                rp.params.startPos   = rightStart;
+                                rp.params.duration   = juce::jmax(0.01, cE - rightStart);
                                 rp.params.fileOffset = before.fileOffset + rightLocal;
-                                rp.params.fadeIn     = juce::jmin(0.010, (cE - dE) * 0.5);  // カット端の小フェード
+                                rp.params.fadeIn     = (xfR > 0.001) ? xfR
+                                                       : juce::jmin(0.010, (cE - dE) * 0.5);
                                 rp.params.fadeOut    = before.fadeOut;   // 元の末尾フェードを維持
                                 rp.params.gain       = before.gain;
                                 rp.params.name       = before.name;
@@ -1364,7 +1367,7 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                                             rp.gainPoints.push_back({ gp.time - rightLocal, gp.dB });
                                 }
                                 rightParts.push_back(std::move(rp));
-                                // 右側は隣接させるため moved の fadeOut は変更しない (右クロスフェードは作らない)
+                                if (xfR > 0.001) moved->setFadeOutSecs(xfR);   // 右クロスフェード
                             }
                         }
                         else           // 右隣が moved の右端に被る
@@ -1429,6 +1432,20 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                             else                    rc->resetColour();
                             if (!rp.gainPoints.empty()) rc->getGainPointsRW() = rp.gainPoints;
                         }
+                    }
+                    // moved をリスト末尾 (最前面) へ移す。重なり領域 (左 c / 右 末尾) が moved の
+                    // 下に隠れ、分割片が手前にずれて見えるのを防ぐ (描画順だけの調整・Undo 非対象)。
+                    if (!rightParts.empty())
+                    {
+                        auto& cl = destLane->clips;
+                        for (auto it = cl.begin(); it != cl.end(); ++it)
+                            if (it->get() == moved)
+                            {
+                                auto ptr = std::move(*it);
+                                cl.erase(it);
+                                cl.push_back(std::move(ptr));
+                                break;
+                            }
                     }
                 }
             }

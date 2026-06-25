@@ -303,13 +303,19 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
     // 重ならないようにする (録音やドラッグ重ねと同じ挙動)。重なったままだと最小クロスフェードを
     // 組めないことがあったため。すでに追加したペーストクリップ同士はカットしない (コピーした塊を保つ)。
     std::vector<AudioClip*> pastedClips;
+    // 重なる既存クリップをカットし、接合部に最小クロスフェードを作る。ペーストクリップは後で
+    // 最前面に追加されるので、重なり領域では既存側が下に隠れて「ずれ」て見えない。leftXfOut /
+    // rightXfOut にペースト左右端のクロスフェード長を返し、呼び出し側がペーストクリップへ反映する。
     auto cutOverlapForPaste =
         [this](Lane* lane, double pStart, double pEnd,
                juce::AudioFormatManager& fmt, juce::AudioThumbnailCache& cache,
-               const std::vector<AudioClip*>& pasted)
+               const std::vector<AudioClip*>& pasted,
+               double& leftXfOut, double& rightXfOut)
     {
         if (!lane || !undoManager) return;
         constexpr double kEps = 1e-4;
+        constexpr double kXf  = 0.030;
+        const double pasteDur = pEnd - pStart;
         // 先に対象を集める (アクションがレーンを変更するので live イテレートしない)
         std::vector<AudioClip*> targets;
         for (auto& cp : lane->clips)
@@ -332,44 +338,64 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
             }
             else if (cS < pStart && cE > pEnd)
             {
-                // 既存がペースト範囲を内包 → 左 [cS,pStart] に縮め、右 [pEnd,cE] を別クリップで残す
+                // 既存がペースト範囲を内包 → 左 [cS,pStart] + 右 [pEnd,cE] に分割し、ペーストの
+                // 前後に最小クロスフェードを作る (左は pStart+xfL まで、右は pEnd-xfR から重ねる)。
+                const bool   origCustom = c->hasCustomColour();
+                const double xfL = juce::jmin(kXf, pStart - cS, cE - pStart, pasteDur * 0.5);
+                const double xfR = juce::jmin(kXf, cE - pEnd, pEnd - cS, pasteDur * 0.5);
                 EditActions::ClipState before; before.capture(c);
                 EditActions::ClipState left = before;
-                left.duration = juce::jmax(0.01, pStart - cS);
-                if (left.fadeOut > left.duration * 0.5) left.fadeOut = left.duration * 0.5;
+                left.duration = juce::jmax(0.01, (pStart + xfL) - cS);
+                left.fadeOut  = (xfL > 0.001) ? xfL : juce::jmin(before.fadeOut, left.duration * 0.5);
                 undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { left }, editChangeCb));
+                leftXfOut = juce::jmax(leftXfOut, xfL);
 
+                const double rStart = pEnd - xfR;
                 EditActions::ClipParams rp;
                 rp.file       = c->getFile();
-                rp.startPos   = pEnd;
-                rp.duration   = juce::jmax(0.01, cE - pEnd);
-                rp.fileOffset = before.fileOffset + (pEnd - cS);
+                rp.startPos   = rStart;
+                rp.duration   = juce::jmax(0.01, cE - rStart);
+                rp.fileOffset = before.fileOffset + (rStart - cS);
                 rp.gain       = before.gain;
                 rp.name       = before.name;
                 rp.colour     = c->getColour();
-                rp.fadeIn     = juce::jmin(0.010, rp.duration * 0.5);     // カット端のクリック防止
+                rp.fadeIn     = (xfR > 0.001) ? xfR : juce::jmin(0.010, rp.duration * 0.5);
                 rp.fadeOut    = juce::jmin(before.fadeOut, rp.duration * 0.5);
-                undoManager->perform(new EditActions::ClipAddAction(lane, rp, fmt, cache, editChangeCb));
+                auto* addTail = new EditActions::ClipAddAction(lane, rp, fmt, cache, editChangeCb);
+                undoManager->perform(addTail);
+                if (auto* t = addTail->getAddedClip())
+                {
+                    t->setFadeOutCurve(before.fadeOutCurve);
+                    // ClipAddAction は無条件で customColour 化するため、元がトラック色追従なら
+                    // resetColour で追従に戻す (末尾の色が変わるのを防ぐ)。
+                    if (!origCustom) t->resetColour();
+                }
+                rightXfOut = juce::jmax(rightXfOut, xfR);
             }
             else if (cS < pStart)
             {
-                // 既存の右側が重なる → 末尾を pStart まで詰める
+                // 既存の右側が重なる → 末尾を pStart+xfL まで詰めてクロスフェード
+                const double xfL = juce::jmin(kXf, cE - pStart, pasteDur * 0.5);
                 EditActions::ClipState before; before.capture(c);
                 EditActions::ClipState after = before;
-                after.duration = juce::jmax(0.01, pStart - cS);
-                if (after.fadeOut > after.duration * 0.5) after.fadeOut = after.duration * 0.5;
+                after.duration = juce::jmax(0.01, (pStart + xfL) - cS);
+                after.fadeOut  = (xfL > 0.001) ? xfL : juce::jmin(before.fadeOut, after.duration * 0.5);
                 undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+                leftXfOut = juce::jmax(leftXfOut, xfL);
             }
             else
             {
-                // 既存の左側が重なる → 開始を pEnd まで詰める (fileOffset 補正)
+                // 既存の左側が重なる → 開始を pEnd-xfR まで詰めてクロスフェード (fileOffset 補正)
+                const double xfR = juce::jmin(kXf, pEnd - cS, pasteDur * 0.5);
+                const double nStart = pEnd - xfR;
                 EditActions::ClipState before; before.capture(c);
                 EditActions::ClipState after = before;
-                after.startPos   = pEnd;
-                after.fileOffset = before.fileOffset + (pEnd - cS);
-                after.duration   = juce::jmax(0.01, cE - pEnd);
-                if (after.fadeIn > after.duration * 0.5) after.fadeIn = after.duration * 0.5;
+                after.startPos   = nStart;
+                after.fileOffset = before.fileOffset + (nStart - cS);
+                after.duration   = juce::jmax(0.01, cE - nStart);
+                after.fadeIn     = (xfR > 0.001) ? xfR : juce::jmin(before.fadeIn, after.duration * 0.5);
                 undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+                rightXfOut = juce::jmax(rightXfOut, xfR);
             }
         }
     };
@@ -418,9 +444,15 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
         {
             auto& fmt   = targetTrack->getFormatManager();
             auto& cache = targetTrack->getThumbnailCache();
-            // 先に重なる既存クリップをカット (最新=ペーストを上に・録音と同様に重ねない)
+            // 先に重なる既存クリップをカット (最新=ペーストを上に・録音と同様に重ねない)。
+            // 接合部の最小クロスフェード長を受け取り、ペーストクリップの端フェードへ反映する
+            // (両側にフェードが揃って初めて X が描かれ、等パワーで繋がる)。
+            double leftXf = 0.0, rightXf = 0.0;
             cutOverlapForPaste(targetLane, params.startPos,
-                               params.startPos + params.duration, fmt, cache, pastedClips);
+                               params.startPos + params.duration, fmt, cache, pastedClips,
+                               leftXf, rightXf);
+            if (leftXf  > 0.001) params.fadeIn  = juce::jmin(leftXf,  params.duration * 0.5);
+            if (rightXf > 0.001) params.fadeOut = juce::jmin(rightXf, params.duration * 0.5);
             // ペーストクリップを追加し、以降のカット対象から除外するため記録する
             auto* add = new EditActions::ClipAddAction(targetLane, params, fmt, cache, editChangeCb);
             if (undoManager->perform(add))
