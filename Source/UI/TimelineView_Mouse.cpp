@@ -1881,6 +1881,10 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         scrollX = juce::jmax(0.0, scrollX - delta * 200.0);
         ruler.setScrollX(scrollX);
         hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
+        // 直前のズーム (zoomActive) が 70ms タイマーで残っていると、巨大クリップ Path-2 が
+        // 帯の再生成を抑止したまま横移動して端が一瞬空白になりうる。横スクロールは確定的な
+        // ナビゲーションなので zoomActive を解除し、新しい位置で帯を正しく再生成させる。
+        zoomActive = false;
     }
     else if (std::abs(w.deltaY) > 1.0e-4)
     {
