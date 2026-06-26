@@ -1108,43 +1108,61 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
     const int clipT = clipBounds.getY();
     const int clipB = clipBounds.getBottom();
 
-    // ── グリッド線（ルーラーと同じ拍子・BPM変更を反映） ──
-    if (pixelsPerBeat > 0.5)
+    // ── 背景グリッド線の X 座標を一度だけ算出 ──
+    // GRID が Off のときは空 (線を一切描かない = 背景すっきり)。GRID オン時のみ、小節線
+    // (アンカー) と GRID 設定値の間隔の細線の X を集める。小節/拍は拍子・BPM 変更を反映。
+    // ここでは描画せず、各トラックの背景塗りの後 (クリップの下) に描く。先に 1 回描いて
+    // しまうと、後段の不透明なトラック背景 fillRect に覆われて一部トラックで消えるため。
+    std::vector<float> barLineXs;   // 小節線 (明るめ)
+    std::vector<float> gridLineXs;  // GRID 単位の細線 (暗め)
+    if (pixelsPerBeat > 0.5 && appSettings.snapMode != SnapMode::Off)
     {
         const double pxPerSec = pixelsPerBeat * (bpm / 60.0);
+        const double spb = 60.0 / juce::jmax(1.0, bpm);
+        // グリッド単位を「拍数」で表す (音価なので BPM に依らず一定。Bar=4 / Quarter=1 / Eighth=0.5 …)。
+        const double gridUnitBeats = snapModeUnitSecs(appSettings.snapMode, bpm) / juce::jmax(1e-9, spb);
+        // サブグリッドの画面間隔が狭すぎ (密集して塗りに見える) なら小節線のみにする。
+        const bool collectSubGrid = gridUnitBeats > 1e-6 && (gridUnitBeats * pixelsPerBeat) >= 6.0;
+
         int   bar = 1;
         double t = 0.0;
         const int W = area.getRight();
-        std::vector<double> beatTimes;  // ループ外でヒープ確保を 1 回に抑える
+        std::vector<double> beatBounds;  // 小節内の各拍境界の時刻 (size n+1)。ヒープ確保はループ外で 1 回
         while (true)
         {
             int n, d; ruler.getMeterAtBar1(bar, n, d);
             n = juce::jmax(1, n);
             double barStart = t;
-            beatTimes.clear();
-            beatTimes.push_back(t);
+            beatBounds.clear();
+            beatBounds.push_back(t);
             for (int beat = 0; beat < n; ++beat)
             {
                 double bp = ruler.bpmAt(t);
                 t += 60.0 / juce::jmax(1.0, bp);
-                if (beat + 1 < n) beatTimes.push_back(t);
+                beatBounds.push_back(t);
             }
             double x1 = area.getX() + barStart * pxPerSec - scrollX;
             double x2 = area.getX() + t * pxPerSec - scrollX;
             if (x2 < area.getX()) { ++bar; if (bar > 100000) break; continue; }
             if (x1 > W) break;
-            // クリップ範囲外の bar はグリッド描画スキップ
+            // クリップ範囲外の bar はスキップ
             if (x2 < clipL || x1 > clipR) { ++bar; if (bar > 100000) break; continue; }
 
-            g.setColour(AppColours::rulerLineBright.withAlpha(0.15f));
-            g.drawLine((float)x1, (float)area.getY(),
-                       (float)x1, (float)area.getBottom(), 1.0f);
-            for (size_t bi = 1; bi < beatTimes.size(); ++bi)
+            barLineXs.push_back((float)x1);
+
+            // GRID 設定値の間隔の細線 (小節頭 p=0 は小節線が担うので gridUnitBeats から)
+            if (collectSubGrid)
             {
-                float bx = (float)(area.getX() + beatTimes[bi] * pxPerSec - scrollX);
-                if (bx < clipL || bx > clipR) continue;
-                g.setColour(AppColours::rulerLine.withAlpha(0.08f));
-                g.drawLine(bx, (float)area.getY(), bx, (float)area.getBottom(), 1.0f);
+                for (double p = gridUnitBeats; p < (double)n - 1e-6; p += gridUnitBeats)
+                {
+                    const int j = (int)p;                 // 拍インデックス
+                    if (j >= (int)beatBounds.size() - 1) break;
+                    const double frac = p - (double)j;    // 拍内の位置 (拍内は等速補間)
+                    const double tt = beatBounds[j] + frac * (beatBounds[j + 1] - beatBounds[j]);
+                    const float bx = (float)(area.getX() + tt * pxPerSec - scrollX);
+                    if (bx < clipL || bx > clipR) continue;
+                    gridLineXs.push_back(bx);
+                }
             }
 
             ++bar;
@@ -1176,6 +1194,22 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
         {
             g.setColour(AppColours::recRed.withAlpha(0.06f));
             g.fillRect(trackBounds);
+        }
+
+        // ── 背景グリッド線 (トラック背景の上・クリップの下に描く) ──
+        // 不透明なトラック背景を塗った後にここで描くことで、全トラックの空き領域に確実に出る
+        // (クリップは後段で上書きするので、クリップのある所はグリッドが隠れて従来どおり)。
+        if (!barLineXs.empty() || !gridLineXs.empty())
+        {
+            const float gy0 = (float)juce::jmax(trackTop, area.getY());
+            const float gy1 = (float)juce::jmin(trackBot, area.getBottom());
+            if (gy1 > gy0)
+            {
+                g.setColour(AppColours::rulerLine.withAlpha(0.08f));
+                for (const float gx : gridLineXs) g.drawLine(gx, gy0, gx, gy1, 1.0f);
+                g.setColour(AppColours::rulerLineBright.withAlpha(0.15f));
+                for (const float gx : barLineXs)  g.drawLine(gx, gy0, gx, gy1, 1.0f);
+            }
         }
 
         // ── レーンごとに描画（非等分: Lane0=defaultHeight, Lane1以降=laneHeight）──

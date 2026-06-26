@@ -363,6 +363,7 @@ public:
         ruler.setMeter(s.meterNumerator, s.meterDenominator);
         ruler.setMeterChanges(s.meterChanges);
         ruler.setBpmChanges(s.bpmChanges);
+        repaint();  // GRID / 拍子 / BPM 変更を背景グリッド等へ即反映
     }
     void setUndoManager(juce::UndoManager* um)        { undoManager = um; }
     void setEditChangeCallback(std::function<void()> cb) { editChangeCb = std::move(cb); }
