@@ -1113,16 +1113,22 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
     // (アンカー) と GRID 設定値の間隔の細線の X を集める。小節/拍は拍子・BPM 変更を反映。
     // ここでは描画せず、各トラックの背景塗りの後 (クリップの下) に描く。先に 1 回描いて
     // しまうと、後段の不透明なトラック背景 fillRect に覆われて一部トラックで消えるため。
-    std::vector<float> barLineXs;   // 小節線 (明るめ)
-    std::vector<float> gridLineXs;  // GRID 単位の細線 (暗め)
+    std::vector<float>& barLineXs  = gridBarXScratch;   // 小節線 (明るめ)。毎 paint 確保を避けメンバ再利用
+    std::vector<float>& gridLineXs = gridLineXScratch;  // GRID 単位の細線 (暗め)
+    barLineXs.clear();
+    gridLineXs.clear();
     if (pixelsPerBeat > 0.5 && appSettings.snapMode != SnapMode::Off)
     {
         const double pxPerSec = pixelsPerBeat * (bpm / 60.0);
         const double spb = 60.0 / juce::jmax(1.0, bpm);
         // グリッド単位を「拍数」で表す (音価なので BPM に依らず一定。Bar=4 / Quarter=1 / Eighth=0.5 …)。
         const double gridUnitBeats = snapModeUnitSecs(appSettings.snapMode, bpm) / juce::jmax(1e-9, spb);
-        // サブグリッドの画面間隔が狭すぎ (密集して塗りに見える) なら小節線のみにする。
-        const bool collectSubGrid = gridUnitBeats > 1e-6 && (gridUnitBeats * pixelsPerBeat) >= 6.0;
+        // サブグリッドを集めるか。Bar スナップは小節線そのものがグリッドなので細線は出さない
+        // (Bar の gridUnitBeats は 4 固定で、6/4・8/4 等では小節中央に無意味な線が出てしまうため)。
+        // 画面間隔が狭すぎ (密集して塗りに見える) る場合も小節線のみにする。
+        const bool collectSubGrid = gridUnitBeats > 1e-6
+                                 && appSettings.snapMode != SnapMode::Bar
+                                 && (gridUnitBeats * pixelsPerBeat) >= 6.0;
 
         int   bar = 1;
         double t = 0.0;

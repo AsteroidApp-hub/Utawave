@@ -522,6 +522,8 @@ private:
     std::vector<juce::Point<float>> samplePtsScratch;  // サンプル単位描画の点列 (スプライン用)
     std::vector<float>              waveTopScratch;     // 波形シルエットの上辺 (max)
     std::vector<float>              waveBotScratch;     // 波形シルエットの下辺 (min)
+    std::vector<float>              gridBarXScratch;    // 背景グリッドの小節線 X (毎 paint 確保を避け再利用)
+    std::vector<float>              gridLineXScratch;   // 背景グリッドの GRID 単位線 X
 
     // 編集状態
     ClipRef    selectedClip;
