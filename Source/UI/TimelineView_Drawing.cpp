@@ -20,6 +20,14 @@ static const juce::Font& sharedTimeFont()     { static const juce::Font f { juce
 static const juce::Font& sharedHeaderFont()   { static const juce::Font f { juce::FontOptions(10.0f, juce::Font::bold) }; return f; }
 static const juce::Font& sharedClipNameFont() { static const juce::Font f { juce::FontOptions(10.0f) }; return f; }
 
+// クロスフェード視覚要素 (X カーブ / 端ハンドル) のアルファ減衰係数。重なりが画面上で
+// 細い (= 縮小) ほど小さくして白い縦線が目立たないようにする。drawCrossfadeOverlay と
+// drawTrackRows の Lane0 オーバーレイで共用 (係数のドリフト防止)。
+static float crossfadeWidthVis(float overlapPx) noexcept
+{
+    return juce::jlimit(0.28f, 1.0f, (overlapPx + 1.0f) / 13.0f);
+}
+
 TimelineView::DragMode TimelineView::getDragMode(const ClipRef& ref, int mouseX, int mouseY) const
 {
     if (!ref.valid()) return DragMode::None;
@@ -931,11 +939,10 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
         // 多少ずれても、描画は常に重なり領域いっぱいの対称な X になり、綺麗な X 字を保てる
         // (初心者にとって分かりやすい)。ここに来るのは入口ゲート (>=30ms) を通った「意図的な
         // クロスフェード」だけ。縮小 (ズームアウト) で重なりが細くなると X が縦線化して白く
-        // 目立つため、幅が狭いほどアルファを大きく落として控えめにする (floor を低めに)。
-        auto widthVis = [](float w){ return juce::jlimit(0.28f, 1.0f, (w + 1.0f) / 13.0f); };
+        // 目立つため、crossfadeWidthVis で幅が狭いほどアルファを大きく落として控えめにする。
         const float xOvL  = secToX(bStart);
         const float xOvR  = secToX(ovEnd);
-        const float ovVis = widthVis(xOvR - xOvL);
+        const float ovVis = crossfadeWidthVis(xOvR - xOvL);
         const int   ovSegs = juce::jmax(8, (int)((xOvR - xOvL) / 3.0f));
 
         if (fOutA > 0.001 && ovVis > 0.001f)
@@ -1382,9 +1389,9 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
 
                     // 両端のリサイズハンドル（縦バー）。非選択時は控えめの白（目立ちすぎ防止）。
                     // 縮小で重なりが細いほどさらに薄くし、白い縦線が目立たないようにする。
-                    const float ovis = juce::jlimit(0.28f, 1.0f, (float)(xRight - xLeft + 1) / 13.0f);
+                    const float ovVis = crossfadeWidthVis((float)(xRight - xLeft));
                     g.setColour(xfadeSelected ? juce::Colour(0xffff8800).withAlpha(0.85f)
-                                              : juce::Colours::white.withAlpha(0.16f * ovis));
+                                              : juce::Colours::white.withAlpha(0.16f * ovVis));
                     g.fillRect(xLeft - 2,  laneTop + 2, 3, laneH - 4);
                     g.fillRect(xRight - 1, laneTop + 2, 3, laneH - 4);
                 }
