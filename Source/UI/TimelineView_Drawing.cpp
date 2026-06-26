@@ -930,8 +930,9 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
         // 左右のフェード長 (fOutA / fInB) が setFade*Secs の個別クランプ (duration*0.5) 等で
         // 多少ずれても、描画は常に重なり領域いっぱいの対称な X になり、綺麗な X 字を保てる
         // (初心者にとって分かりやすい)。ここに来るのは入口ゲート (>=30ms) を通った「意図的な
-        // クロスフェード」だけ。ズームで細くても薄く消さず、最低 0.55 のアルファで必ず見せる。
-        auto widthVis = [](float w){ return juce::jlimit(0.55f, 1.0f, (w + 2.0f) / 11.0f); };
+        // クロスフェード」だけ。縮小 (ズームアウト) で重なりが細くなると X が縦線化して白く
+        // 目立つため、幅が狭いほどアルファを大きく落として控えめにする (floor を低めに)。
+        auto widthVis = [](float w){ return juce::jlimit(0.28f, 1.0f, (w + 1.0f) / 13.0f); };
         const float xOvL  = secToX(bStart);
         const float xOvR  = secToX(ovEnd);
         const float ovVis = widthVis(xOvR - xOvL);
@@ -950,7 +951,7 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
                 if (s == 0) pa.startNewSubPath(x, y);
                 else        pa.lineTo(x, y);
             }
-            g.setColour(juce::Colours::white.withAlpha(0.55f * ovVis));
+            g.setColour(juce::Colours::white.withAlpha(0.42f * ovVis));
             g.strokePath(pa, juce::PathStrokeType(1.4f));
         }
 
@@ -967,7 +968,7 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
                 if (s == 0) pb.startNewSubPath(x, y);
                 else        pb.lineTo(x, y);
             }
-            g.setColour(juce::Colours::white.withAlpha(0.55f * ovVis));
+            g.setColour(juce::Colours::white.withAlpha(0.42f * ovVis));
             g.strokePath(pb, juce::PathStrokeType(1.4f));
         }
 
@@ -979,7 +980,7 @@ void TimelineView::drawCrossfadeOverlay(juce::Graphics& g, Lane* lane,
                                && selectedCrossfade.clipB == clipB);
         juce::Colour handleColour = selected
                                       ? juce::Colour(0xffff8800).withAlpha(0.95f)
-                                      : juce::Colours::white.withAlpha(0.33f);
+                                      : juce::Colours::white.withAlpha(0.22f * ovVis);
         const float lineW = selected ? 2.0f : 1.0f;
         g.setColour(handleColour);
         g.drawLine((float)xL, (float)(laneBounds.getY() + 2),
@@ -1380,8 +1381,10 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
                     }
 
                     // 両端のリサイズハンドル（縦バー）。非選択時は控えめの白（目立ちすぎ防止）。
+                    // 縮小で重なりが細いほどさらに薄くし、白い縦線が目立たないようにする。
+                    const float ovis = juce::jlimit(0.28f, 1.0f, (float)(xRight - xLeft + 1) / 13.0f);
                     g.setColour(xfadeSelected ? juce::Colour(0xffff8800).withAlpha(0.85f)
-                                              : juce::Colours::white.withAlpha(0.24f));
+                                              : juce::Colours::white.withAlpha(0.16f * ovis));
                     g.fillRect(xLeft - 2,  laneTop + 2, 3, laneH - 4);
                     g.fillRect(xRight - 1, laneTop + 2, 3, laneH - 4);
                 }
