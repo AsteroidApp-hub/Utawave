@@ -716,21 +716,24 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
     // ── MIDI クリップ 左右リサイズ (GRID 単位) ──
     if (resizingMidiClip != nullptr)
     {
-        const double unit = gridUnitSecs();
+        // Cmd (Mac)/Ctrl 押下中はスナップを一時解除して微調整 (音声リサイズと同じ操作感)。
+        const bool noSnap = e.mods.isCommandDown();
+        const double unit = juce::jmax(0.01, gridUnitSecs());  // 最低尺 (GRID Off は 10ms)
         const double t    = juce::jmax(0.0, xToPosition(e.x));
+        const double minSize = noSnap ? 0.01 : unit;
         if (midiResizeLeft)
         {
-            // 左端: GRID にスナップ。最低 1 グリッド単位は残す。
-            double newStart = snapTime(t);
-            newStart = juce::jlimit(0.0, midiResizeOrigEnd - unit, newStart);
+            // 左端: GRID にスナップ (Cmd で解除)。最低 1 グリッド単位は残す。
+            double newStart = noSnap ? t : snapTime(t);
+            newStart = juce::jlimit(0.0, midiResizeOrigEnd - minSize, newStart);
             resizingMidiClip->setStartPosition(newStart);
             resizingMidiClip->setDuration(midiResizeOrigEnd - newStart);
         }
         else
         {
-            // 右端: GRID にスナップ。最低 1 グリッド単位。
-            double newEnd = snapTime(t);
-            newEnd = juce::jmax(midiResizeOrigStart + unit, newEnd);
+            // 右端: GRID にスナップ (Cmd で解除)。最低 1 グリッド単位。
+            double newEnd = noSnap ? t : snapTime(t);
+            newEnd = juce::jmax(midiResizeOrigStart + minSize, newEnd);
             resizingMidiClip->setDuration(newEnd - midiResizeOrigStart);
         }
         // ドラッグ中は再描画のみ (rebuild は mouseUp で 1 回)
@@ -826,6 +829,11 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
     const double curSec = (e.x + scrollX) / (bps * pixelsPerBeat);
     const double delta  = curSec - dragStartSecs;
 
+    // リサイズ端のスナップ: GRID 設定に従う (snapTime は GRID Off なら恒等)。Cmd (Mac)/Ctrl
+    // 押下中は一時的にスナップを外して微調整できるようにする。
+    const bool resizeNoSnap = e.mods.isCommandDown();
+    auto snapEdge = [this, resizeNoSnap](double t){ return resizeNoSnap ? t : snapTime(t); };
+
     switch (dragMode)
     {
         case DragMode::Move:
@@ -892,10 +900,11 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
         }
         case DragMode::ResizeLeft:
         {
-            // 左端ドラッグ：開始位置を動かし右端は固定
+            // 左端ドラッグ：開始位置を動かし右端は固定。開始位置を GRID にスナップ (Cmd で一時解除)。
             // fileOffset が 0 未満にならないよう、引き伸ばし上限を制限
             double minStart = clipOrigStart - origFileOffset;
-            double newStart = juce::jlimit(minStart, clipOrigEnd - 0.05, clipOrigStart + delta);
+            double newStart = snapEdge(clipOrigStart + delta);
+            newStart = juce::jlimit(minStart, clipOrigEnd - 0.05, newStart);
             double newFO    = origFileOffset + (newStart - clipOrigStart);
             double newDur   = clipOrigEnd - newStart;
             selectedClip.clip->setStartPosition(newStart);
@@ -905,11 +914,13 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
         }
         case DragMode::ResizeRight:
         {
+            // 右端ドラッグ：終了位置を GRID にスナップ (Cmd で一時解除)、尺をファイル長で制限。
             double fileLen = selectedClip.clip->getThumbnail().getTotalLength();
             double maxDur  = (fileLen > 0.0)
                              ? fileLen - selectedClip.clip->getFileOffset()
                              : clipOrigEnd - clipOrigStart;
-            double newDur  = juce::jlimit(0.05, maxDur, clipOrigEnd + delta - clipOrigStart);
+            double newEnd  = snapEdge(clipOrigEnd + delta);
+            double newDur  = juce::jlimit(0.05, maxDur, newEnd - clipOrigStart);
             selectedClip.clip->setDuration(newDur);
             break;
         }
