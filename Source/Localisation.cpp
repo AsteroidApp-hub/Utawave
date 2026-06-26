@@ -116,6 +116,7 @@ static const char* const englishTranslations =
     "\"保存\" = \"Save\"\n"
     "\"別名で保存...\" = \"Save As...\"\n"
     "\"プロジェクトを保存\" = \"Save Project\"\n"
+    "\"プロジェクトフォルダを開く\" = \"Open Project Folder\"\n"
     "\"プロジェクトを閉じる\" = \"Close Project\"\n"
     "\"オーディオを読み込む...\" = \"Import Audio...\"\n"
     "\"MIDI を読み込む\" = \"Import MIDI\"\n"

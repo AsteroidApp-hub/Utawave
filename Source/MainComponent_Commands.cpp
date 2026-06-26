@@ -35,6 +35,14 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         m.addSeparator();
         addItem(m, 3, tr(u8"保存"),                    tr(u8"⌘S"));
         addItem(m, 4, tr(u8"別名で保存..."),         tr(u8"⇧⌘S"));
+        {
+            // プロジェクトの保存先フォルダを Finder / Explorer で開く。未保存 (保存先が無い) は非活性。
+            juce::PopupMenu::Item item;
+            item.itemID    = 11;
+            item.text      = tr(u8"プロジェクトフォルダを開く");
+            item.isEnabled = currentProjectFile.existsAsFile();
+            m.addItem(item);
+        }
         m.addSeparator();
         addItem(m, 9, tr(u8"オーディオを読み込む..."), tr(u8"⌘I"));
         addItem(m, 8, tr(u8"MIDI を読み込む..."),     "");
@@ -81,6 +89,10 @@ void MainComponent::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/)
         case 8: showImportMidiDialog(); break;
         case 9: showImportDialog(); break;
         case 10: showMidiExportDialog(); break;
+        case 11:  // プロジェクトの保存先フォルダを開く (保存済みのみ・メニューで非活性化済み)
+            if (auto dir = getProjectFolder(); dir.isDirectory())
+                dir.startAsProcess();
+            break;
         case 100: showAboutDialog(); break;
         case 101: showShortcutsDialog(); break;
         case 102: showDocumentation(); break;
