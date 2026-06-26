@@ -30,9 +30,9 @@ public:
     static constexpr int defaultHeight { 100 };  // 基本: 上段 + Vol/Pan + メータ + In/TList 行
     static constexpr int laneHeight    { 48 };
 
-    // INS スロット枠 (固定数、トラック右側に表示)
+    // INS スロット枠 (固定数、トラック右側に表示)。スロット高は UI 側 (TrackHeaderView::insSlotH)
+    // が単一の真実源。旧 insertSlotHeight (model 側 18) は未使用で UI の 22 と食い違うため撤去。
     static constexpr int insertSlotCount  { 8 };
-    static constexpr int insertSlotHeight { 18 };
     static constexpr int insertAreaWidth  { 130 };  // 横に確保する幅
 
     Track(const juce::String& trackName, juce::AudioFormatManager& fmt,

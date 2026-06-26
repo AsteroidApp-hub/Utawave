@@ -452,8 +452,16 @@ int TrackHeaderView::findInsertSlotAt(juce::Point<int> localPos) const
     const int innerY = frameY + 13;
     const int slotH  = insSlotH;
     if (slotH <= 0) return -1;
+    // 描画 (resized) と同じ「枠に収まるチップだけ表示」基準で可視スロット数を数え、それを超える
+    // (= チップ非表示の) スロットへは落とさない。frameH の下端に数 px 残る「収まらないスロットの帯」
+    // へ D&D で落として隠れスロットにプラグインが入り「消えた」ように見えるのを防ぐ。
+    int visibleSlots = 0;
+    while (visibleSlots < Track::insertSlotCount
+           && innerY + visibleSlots * slotH + 1 + (slotH - 2) <= frameH)
+        ++visibleSlots;
+    if (visibleSlots <= 0) return -1;
     int idx = (localPos.y - innerY) / slotH;
-    return juce::jlimit(0, Track::insertSlotCount - 1, idx);
+    return juce::jlimit(0, visibleSlots - 1, idx);
 }
 
 bool TrackHeaderView::isInterestedInDragSource(const SourceDetails& d)
