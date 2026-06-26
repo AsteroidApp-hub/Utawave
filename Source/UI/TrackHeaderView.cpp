@@ -716,7 +716,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
         g.fillRect(4, 0, w - 4, mainH);
     }
 
-    // ── INS スロット枠 (トラック右側に固定 4 スロット) ──
+    // ── INS スロット枠 (トラック右側に固定スロット) ──
     if (track.isInsertSlotsVisible() && w > controlsWidth + 8)
     {
         const int frameX = controlsWidth + 4;
@@ -970,7 +970,7 @@ void TrackHeaderView::resized()
     panSlider.setVisible(showPanRevRow);
     revSlider.setVisible(showPanRevRow);
 
-    // INS スロット 4 枠 (paint() で描いた外枠の内側にチップを敷く)
+    // INS スロット枠 (paint() で描いた外枠の内側にチップを敷く)
     if (slotsVisible && insAreaW > 0)
     {
         const int totalH = getHeight();

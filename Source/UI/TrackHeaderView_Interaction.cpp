@@ -446,9 +446,11 @@ int TrackHeaderView::findInsertSlotAt(juce::Point<int> localPos) const
     if (localPos.x < frameX || localPos.x >= frameX + frameW) return -1;
     if (localPos.y < frameY || localPos.y >= frameY + frameH) return -1;
 
+    // スロット高は描画 (paint / resized) と同じ固定値 (insSlotH)。innerH/数で割ると
+    // トラックが枠より低い時にスロットが圧縮され、描画 (固定高 + クリップ) とヒット判定が
+    // ずれる (8 スロットで顕著)。可視範囲は上の frameH ガードが既に制限している。
     const int innerY = frameY + 13;
-    const int innerH = frameH - 14;
-    const int slotH  = innerH / Track::insertSlotCount;
+    const int slotH  = insSlotH;
     if (slotH <= 0) return -1;
     int idx = (localPos.y - innerY) / slotH;
     return juce::jlimit(0, Track::insertSlotCount - 1, idx);

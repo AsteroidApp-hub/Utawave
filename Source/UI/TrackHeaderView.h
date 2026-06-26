@@ -94,7 +94,10 @@ private:
     // INS パネルの固定サイズ (トラック高さを大きくしてもスロットは伸縮しない)
     static constexpr int insHeaderH { 13 };
     static constexpr int insSlotH   { 22 };
-    static constexpr int insFrameH  { insHeaderH + 1 + insSlotH * 4 };  // = 102
+    static constexpr int insFrameH  { insHeaderH + 1 + insSlotH * Track::insertSlotCount };  // 8 枠 = 190
+    // トラック高さ上限は INS 枠の高さと一致させる (8 スロット全部が出せる所まで)。
+    static_assert(insFrameH == Track::maxHeight,
+                  "Track::maxHeight は INS パネルの高さ (insFrameH) と一致させること");
 
     // mutate を Undo 対応で実行する (onEditUndoable があればそこへ委譲)
     void editTrackUndoable(std::function<void()> mutate)

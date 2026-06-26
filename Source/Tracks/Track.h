@@ -24,12 +24,14 @@ class Track
 {
 public:
     static constexpr int minHeight     { 30 };   // 名前行 (M/S/R/I) だけが見える最小サイズ
-    static constexpr int maxHeight     { 500 };
+    // 高さ上限 = INS 8 スロット枠の高さ (TrackHeaderView::insFrameH と一致させる。static_assert で担保)。
+    // 8 スロット全部を出せる所までドラッグできれば十分で、それ以上は INS パネルより高くなり余白が出る。
+    static constexpr int maxHeight     { 190 };
     static constexpr int defaultHeight { 100 };  // 基本: 上段 + Vol/Pan + メータ + In/TList 行
     static constexpr int laneHeight    { 48 };
 
-    // INS スロット枠 (4 スロット固定、トラック右側に表示)
-    static constexpr int insertSlotCount  { 4 };
+    // INS スロット枠 (固定数、トラック右側に表示)
+    static constexpr int insertSlotCount  { 8 };
     static constexpr int insertSlotHeight { 18 };
     static constexpr int insertAreaWidth  { 130 };  // 横に確保する幅
 
