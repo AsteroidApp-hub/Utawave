@@ -860,16 +860,20 @@ void TimelineView::timerCallback()
 // スクロール中だけ遅延でき (滑らかに流れる)、遅いスクロールでは従来どおり鮮明に追従する。
 void TimelineView::noteHorizontalScrollVelocity(double pxMoved)
 {
+    // しきい値 ≒ 2 ビューポート/秒。これ以上速いと波形の詳細は読めないので帯再生成を遅延し
+    // 滑らかさを優先する (set のみ・clear はタイマー側で行う)。
+    constexpr double kFastScrollPxPerSec = 4000.0;
     const juce::uint32 now = juce::Time::getMillisecondCounter();
     const double dt = (double)(now - lastHScrollMs);
     lastHScrollMs = now;
     if (dt > 150.0) scrollVelPxPerSec = 0.0;  // 間が空いたら新しいジェスチャとして仕切り直す
     const double moved = std::abs(pxMoved);
-    const double inst  = (dt > 0.0) ? (moved / dt * 1000.0) : (moved * 1000.0);
+    // dt を 4ms (≒240Hz) で下限クランプ。同一 ms に複数イベントが来る (高頻度なスクロール
+    // バードラッグ等) と dt≈0 で瞬間速度が過大評価され、遅いスクロールでも誤って遅延判定に
+    // なってしまう。下限を設けて瞬間値の暴れを抑える。
+    const double inst = moved / juce::jmax(4.0, dt) * 1000.0;
     scrollVelPxPerSec = 0.6 * scrollVelPxPerSec + 0.4 * inst;
-    // しきい値 ≒ 2 ビューポート/秒。これ以上速いと波形の詳細は読めないので帯再生成を遅延し
-    // 滑らかさを優先する。タイマーが止まりを検出して解禁・鮮明化する (set のみ・clear はタイマー)。
-    if (scrollVelPxPerSec > 4000.0)
+    if (scrollVelPxPerSec > kFastScrollPxPerSec)
     {
         deferBigClipRegen = true;
         startTimer(80);
