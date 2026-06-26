@@ -3,6 +3,7 @@
 
 #pragma once
 #include <vector>
+#include <string>
 
 enum class SnapMode {
     Off,
@@ -111,6 +112,10 @@ struct AppSettings
     bool     exportPeakGuard          { true };
     // Cmd+スクロール拡大の支点: false=再生バー中央、true=マウスカーソル位置
     bool     zoomToMousePosition      { true };
+
+    // 歌詞表示窓に貼り付けたテキスト (UTF-8)。曲ごとに保持するためプロジェクトに保存する。
+    // AppSettings.h を JUCE 非依存に保つため std::string (中身は UTF-8 バイト列)。
+    std::string lyrics;
 
     // bar N (1-based) の拍子を返す
     void getMeterAtBar(int bar1, int& outNum, int& outDen) const

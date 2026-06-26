@@ -249,6 +249,63 @@ void MainComponent::PianoRollWindow::closeButtonPressed()
     if (onClose) onClose(this);
 }
 
+// ── LyricsWindow 実装 ────────────────────────────────────────────────
+MainComponent::LyricsWindow::LyricsWindow(
+    const juce::String& initialText, int fontSize,
+    std::function<void(LyricsWindow*)> onCloseCb,
+    std::function<void(const juce::String&)> onTextChangedCb,
+    std::function<void(int)> onFontSizeChangedCb)
+    : DocumentWindow(tr(u8"歌詞"),
+                     juce::Colour(0xff1a1a1a),
+                     DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+      view(std::make_unique<LyricsView>(initialText, fontSize)),
+      onClose(std::move(onCloseCb))
+{
+    setUsingNativeTitleBar(true);
+    setResizable(true, false);
+    setAlwaysOnTop(true);   // プラグインエディタ等と同様、歌唱中も背面に隠れない
+    view->onTextChanged    = std::move(onTextChangedCb);
+    view->onFontSizeChanged = std::move(onFontSizeChangedCb);
+    view->setSize(460, 640);
+    setContentNonOwned(view.get(), true);
+    centreWithSize(getWidth(), getHeight());
+    setVisible(true);
+}
+
+MainComponent::LyricsWindow::~LyricsWindow()
+{
+    setContentNonOwned(nullptr, false);
+}
+
+void MainComponent::LyricsWindow::closeButtonPressed()
+{
+    if (onClose) onClose(this);
+}
+
+void MainComponent::openLyricsWindow()
+{
+    // 1 枚だけ持つ。既に開いていれば前面へ。
+    if (lyricsWindow)
+    {
+        lyricsWindow->toFront(true);
+        return;
+    }
+    lyricsWindow = std::make_unique<LyricsWindow>(
+        juce::String::fromUTF8(appSettings.lyrics.c_str()),
+        appPrefs.lyricsFontSize,
+        [this](LyricsWindow*) { lyricsWindow.reset(); },
+        [this](const juce::String& text)
+        {
+            appSettings.lyrics = text.toStdString();
+            markProjectDirty();
+        },
+        [this](int fontSize)
+        {
+            appPrefs.lyricsFontSize = fontSize;
+            appPrefs.save();
+        });
+}
+
 void MainComponent::propagatePlayheadToPianoRolls(double playheadSecs)
 {
     for (auto* w : pianoRollWindows)

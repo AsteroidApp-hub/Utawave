@@ -167,6 +167,11 @@ bool ProjectManager::save(const juce::File& projectFile, const State& s)
     settings->setAttribute("zoomToMousePosition",      s.appSettings->zoomToMousePosition ? 1 : 0);
     settings->setAttribute("exportPeakGuard",          s.appSettings->exportPeakGuard ? 1 : 0);
 
+    // 歌詞 (複数行になるため属性ではなく子要素のテキストとして保存)。空なら書き出さない。
+    if (! s.appSettings->lyrics.empty())
+        root->createNewChildElement("Lyrics")
+            ->addTextElement(juce::String::fromUTF8(s.appSettings->lyrics.c_str()));
+
     // Tracks
     auto* tracks = root->createNewChildElement("Tracks");
     for (int ti = 0; ti < s.trackManager->getTrackCount(); ++ti)
@@ -479,6 +484,12 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
         s.appSettings->zoomToMousePosition      = settings->getIntAttribute("zoomToMousePosition", def.zoomToMousePosition ? 1 : 0) != 0;
         s.appSettings->exportPeakGuard          = settings->getIntAttribute("exportPeakGuard", def.exportPeakGuard ? 1 : 0) != 0;
     }
+
+    // 歌詞 (子要素のテキスト)。要素が無ければ空にリセットする (前のプロジェクトの持ち越し防止)。
+    if (auto* lyricsEl = xml->getChildByName("Lyrics"))
+        s.appSettings->lyrics = lyricsEl->getAllSubText().toStdString();
+    else
+        s.appSettings->lyrics.clear();
 
     // Tracks
     if (auto* tracks = xml->getChildByName("Tracks"))

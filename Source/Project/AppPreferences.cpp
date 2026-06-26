@@ -33,6 +33,9 @@ AppPreferences AppPreferences::load()
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
+        // 範囲は LyricsView::kMinFont/kMaxFont と一致させる (UI へ依存させないため数値で持つ)
+        p.lyricsFontSize     = juce::jlimit(12, 96,
+            xml->getIntAttribute("lyricsFontSize", p.lyricsFontSize));
     }
     return p;
 }
@@ -47,6 +50,7 @@ bool AppPreferences::save() const
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
+    xml.setAttribute("lyricsFontSize", lyricsFontSize);
     const bool ok = xml.writeTo(getStoreFile());
     if (!ok)
         DBG("AppPreferences::save failed (disk full / permission?): "

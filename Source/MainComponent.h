@@ -19,6 +19,7 @@
 #include "UI/MasterPanel.h"
 #include "UI/StatusBar.h"
 #include "UI/PianoRollEditor.h"  // MainComponent::PianoRollWindow が unique_ptr<PianoRollEditor> を保持
+#include "UI/LyricsView.h"       // MainComponent::LyricsWindow が unique_ptr<LyricsView> を保持
 #include "AppSettings.h"
 
 class MainComponent : public juce::Component,
@@ -186,6 +187,27 @@ private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoRollWindow)
     };
     juce::OwnedArray<PianoRollWindow> pianoRollWindows;
+
+    // 歌詞表示 自己管理ウィンドウ (常に最前面)。歌唱中に歌詞をコピペして読む。
+    // テキストはプロジェクト (.uta) の AppSettings.lyrics に保存する。
+    class LyricsWindow : public juce::DocumentWindow
+    {
+    public:
+        LyricsWindow(const juce::String& initialText, int fontSize,
+                     std::function<void(LyricsWindow*)> onCloseCb,
+                     std::function<void(const juce::String&)> onTextChangedCb,
+                     std::function<void(int)> onFontSizeChangedCb);
+        ~LyricsWindow() override;
+        void closeButtonPressed() override;
+        LyricsView* getView() const { return view.get(); }
+    private:
+        std::unique_ptr<LyricsView> view;
+        std::function<void(LyricsWindow*)> onClose;
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LyricsWindow)
+    };
+    std::unique_ptr<LyricsWindow> lyricsWindow;
+    void openLyricsWindow();
+
     void openPianoRollFor(class MidiClip* clip, class Track* track);
     void propagatePlayheadToPianoRolls(double playheadSecs);
     // 開いている全ピアノロールへ自動ページング設定 (appPrefs.midiPagingEnabled) を反映

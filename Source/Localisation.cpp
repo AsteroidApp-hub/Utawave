@@ -106,6 +106,18 @@ static const char* const englishTranslations =
     // ── メニュー (ファイル / ヘルプ) ──
     "\"ファイル\" = \"File\"\n"
     "\"ヘルプ\" = \"Help\"\n"
+    // ── 歌詞表示窓 ──
+    "\"歌詞を表示...\" = \"Show Lyrics...\"\n"
+    "\"歌詞\" = \"Lyrics\"\n"
+    "\"編集モード\" = \"Edit Mode\"\n"
+    "\"表示モード\" = \"View Mode\"\n"
+    "\"歌詞を貼り付け / 編集する\" = \"Paste / edit lyrics\"\n"
+    "\"大きな文字で読む表示に切り替える\" = \"Switch to large read-only display\"\n"
+    "\"文字を小さく\" = \"Smaller text\"\n"
+    "\"文字を大きく\" = \"Larger text\"\n"
+    "\"読み込み\" = \"Load\"\n"
+    "\"テキストファイルから歌詞を読み込む\" = \"Load lyrics from a text file\"\n"
+    "\"歌詞テキストを読み込む\" = \"Load Lyrics Text\"\n"
     "\"新規プロジェクト\" = \"New Project\"\n"
     "\"新規プロジェクト...\" = \"New Project...\"\n"
     "\"開く...\" = \"Open...\"\n"

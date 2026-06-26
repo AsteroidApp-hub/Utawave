@@ -38,6 +38,10 @@ public:
     // 操作に慣れたユーザーが煩わしさを減らせるよう OFF にできる。
     bool showTooltips { true };
 
+    // 歌詞表示窓の文字サイズ (px)。歌唱中の見やすさは人それぞれなのでアプリ全体で記憶する
+    // (歌詞テキスト自体はプロジェクトごとに .uta へ保存)。load 時に妥当範囲へクランプ。
+    int lyricsFontSize { 16 };
+
     // 広告機能のコンパイル時マスタースイッチ。公開ソースの既定は OFF (起動画面は 2 列・通信なし)。
     // 公式配布ビルドのみ CMake の UTAWAVE_ADS_ENABLED=1 で有効化する (詳細は CMakeLists / CLAUDE.md)。
     static bool adsCompiledIn();

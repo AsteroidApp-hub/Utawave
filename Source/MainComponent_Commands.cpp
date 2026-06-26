@@ -60,6 +60,8 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
             m.addItem(item);
         }
         m.addSeparator();
+        addItem(m, 200, tr(u8"歌詞を表示..."), "");
+        m.addSeparator();
         addItem(m, 7, tr(u8"プラグインを管理..."),  "");
         m.addSeparator();
         addItem(m, 5, tr(u8"プロジェクトを閉じる"), "");
@@ -98,6 +100,7 @@ void MainComponent::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/)
         case 100: showAboutDialog(); break;
         case 101: showShortcutsDialog(); break;
         case 102: showDocumentation(); break;
+        case 200: openLyricsWindow(); break;
         case 103: juce::URL(tr(u8"https://donate.stripe.com/8x29ATdTI6g07vo49S38404")).launchInDefaultBrowser(); break;
         default: break;
     }
