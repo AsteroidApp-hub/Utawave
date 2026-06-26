@@ -718,9 +718,9 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
     {
         // Cmd (Mac)/Ctrl 押下中はスナップを一時解除して微調整 (音声リサイズと同じ操作感)。
         const bool noSnap = e.mods.isCommandDown();
-        const double unit = juce::jmax(0.01, gridUnitSecs());  // 最低尺 (GRID Off は 10ms)
+        const double unit = gridUnitSecs();   // GRID Off でも 1 拍 (gridUnitSecs が floor する)
         const double t    = juce::jmax(0.0, xToPosition(e.x));
-        const double minSize = noSnap ? 0.01 : unit;
+        const double minSize = noSnap ? 0.01 : unit;  // Cmd 微調整中だけ最低尺を 10ms へ下げる
         if (midiResizeLeft)
         {
             // 左端: GRID にスナップ (Cmd で解除)。最低 1 グリッド単位は残す。
@@ -919,6 +919,7 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
             double maxDur  = (fileLen > 0.0)
                              ? fileLen - selectedClip.clip->getFileOffset()
                              : clipOrigEnd - clipOrigStart;
+            maxDur = juce::jmax(0.05, maxDur);  // jlimit の下限 0.05 を下回らないよう保証 (下限>上限の反転防止)
             double newEnd  = snapEdge(clipOrigEnd + delta);
             double newDur  = juce::jlimit(0.05, maxDur, newEnd - clipOrigStart);
             selectedClip.clip->setDuration(newDur);
