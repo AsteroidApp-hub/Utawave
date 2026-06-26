@@ -1877,7 +1877,9 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         ruler.setPlayheadX(playheadSecs * bps * pixelsPerBeat);
         ruler.setPixelsPerBeat(pixelsPerBeat);
         ruler.setScrollX(scrollX);
-        hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
+        // dontSendNotification: 非同期 scrollBarMoved の往復 (二重 repaint = paint 2 倍) を断つ。
+        // ルーラー同期・resized・repaint はこのハンドラでインライン実施済み。
+        hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize(), juce::dontSendNotification);
         resized();
         // 連続ズーム中は波形キャッシュ再生成を抑止 (既存を拡縮 blit)。止まって少し後に
         // タイマーが綺麗に再描画する。これでズームのもたつきを解消する。
@@ -1890,16 +1892,17 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         // Shift+スクロール または トラックパッドで横スワイプ
         // macOSはShift押下時にdeltaYがdeltaXに切り替わることがあるため両軸を見る
         double delta = (std::abs(w.deltaX) > std::abs(w.deltaY)) ? w.deltaX : w.deltaY;
-        const double prevScrollX = scrollX;
         scrollX = juce::jmax(0.0, scrollX - delta * 200.0);
         ruler.setScrollX(scrollX);
-        hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
+        // dontSendNotification: 非同期 scrollBarMoved の往復を断つ (放置すると二重 repaint = paint が
+        // 2 倍になる)。ルーラー同期・noteHorizontalScroll・repaint はこのハンドラでインライン実施済み。
+        hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize(), juce::dontSendNotification);
         // 直前のズーム (zoomActive) が 70ms タイマーで残っていると、巨大クリップ Path-2 が
         // 帯の再生成を抑止したまま横移動して端が一瞬空白になりうる。横スクロールは確定的な
         // ナビゲーションなので zoomActive を解除し、新しい位置で帯を正しく再生成させる。
         zoomActive = false;
-        // 速いスクロールの間だけ巨大クリップの帯再生成を遅延 (カクつき防止)。遅い時は false のまま。
-        noteHorizontalScrollVelocity(scrollX - prevScrollX);
+        // スクロール中は巨大クリップの帯再生成を遅延し、止まってから再生成 (一瞬カクつき防止)。
+        noteHorizontalScroll();
     }
     else if (std::abs(w.deltaY) > 1.0e-4)
     {

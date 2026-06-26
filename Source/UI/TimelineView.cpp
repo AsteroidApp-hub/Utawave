@@ -849,35 +849,20 @@ void TimelineView::timerCallback()
     {
         zoomActive = false;
         deferBigClipRegen = false;
-        scrollVelPxPerSec = 0.0;
         repaint();
     }
     stopTimer();
 }
 
-// 横スクロール速度を平滑化して追跡し、しきい値を超える「速い」スクロールの間だけ
-// deferBigClipRegen を立てる。これにより巨大クリップ (Path-2) の重い帯再生成を速い
-// スクロール中だけ遅延でき (滑らかに流れる)、遅いスクロールでは従来どおり鮮明に追従する。
-void TimelineView::noteHorizontalScrollVelocity(double pxMoved)
+// 横スクロール中は巨大クリップ (Path-2) の重い帯再生成 (fillPath) を一切走らせず、既存帯を
+// blit して滑らかに流す。スクロールが止まって 80ms 後にタイマーが 1 度だけ綺麗に再生成する。
+// 速度に依らず必ず遅延するので、しきい値チューニング (デバイス差・速度ゆらぎ) に頼らず常に
+// 滑らか。スクロール毎にタイマーを延長するので、止まるまで途中で再生成 = 一瞬のカクつきが
+// 起きない (帯の外は一時的に stale/空白になるが、止まれば追従描画される。多くの DAW と同じ挙動)。
+void TimelineView::noteHorizontalScroll()
 {
-    // しきい値 ≒ 2 ビューポート/秒。これ以上速いと波形の詳細は読めないので帯再生成を遅延し
-    // 滑らかさを優先する (set のみ・clear はタイマー側で行う)。
-    constexpr double kFastScrollPxPerSec = 4000.0;
-    const juce::uint32 now = juce::Time::getMillisecondCounter();
-    const double dt = (double)(now - lastHScrollMs);
-    lastHScrollMs = now;
-    if (dt > 150.0) scrollVelPxPerSec = 0.0;  // 間が空いたら新しいジェスチャとして仕切り直す
-    const double moved = std::abs(pxMoved);
-    // dt を 4ms (≒240Hz) で下限クランプ。同一 ms に複数イベントが来る (高頻度なスクロール
-    // バードラッグ等) と dt≈0 で瞬間速度が過大評価され、遅いスクロールでも誤って遅延判定に
-    // なってしまう。下限を設けて瞬間値の暴れを抑える。
-    const double inst = moved / juce::jmax(4.0, dt) * 1000.0;
-    scrollVelPxPerSec = 0.6 * scrollVelPxPerSec + 0.4 * inst;
-    if (scrollVelPxPerSec > kFastScrollPxPerSec)
-    {
-        deferBigClipRegen = true;
-        startTimer(80);
-    }
+    deferBigClipRegen = true;
+    startTimer(80);
 }
 
 //==============================================================================
@@ -1246,7 +1231,7 @@ void TimelineView::scrollBarMoved(juce::ScrollBar* bar, double newRange)
 {
     if (bar == &hScrollBar)
     {
-        noteHorizontalScrollVelocity(newRange - scrollX);  // 速い間は巨大クリップの帯再生成を遅延
+        noteHorizontalScroll();  // スクロール中は巨大クリップの帯再生成を遅延 (止まってから再生成)
         scrollX = newRange;
         ruler.setScrollX(scrollX);
     }
