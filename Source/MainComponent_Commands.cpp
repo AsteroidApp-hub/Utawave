@@ -89,9 +89,11 @@ void MainComponent::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/)
         case 8: showImportMidiDialog(); break;
         case 9: showImportDialog(); break;
         case 10: showMidiExportDialog(); break;
-        case 11:  // プロジェクトの保存先フォルダを開く (保存済みのみ・メニューで非活性化済み)
-            if (auto dir = getProjectFolder(); dir.isDirectory())
-                dir.startAsProcess();
+        case 11:  // プロジェクトの保存先フォルダを開く。メニューの非活性化と同じ条件 (保存済み) で
+                  // ガードし、未保存時に内部の untitled/temp フォルダを開かないようにする。
+            if (currentProjectFile.existsAsFile())
+                if (auto dir = getProjectFolder(); dir.isDirectory())
+                    dir.startAsProcess();
             break;
         case 100: showAboutDialog(); break;
         case 101: showShortcutsDialog(); break;
