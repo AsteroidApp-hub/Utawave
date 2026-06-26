@@ -319,10 +319,11 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                     // 可視範囲が帯に収まっているか (ppb 不変前提の絶対座標比較)
                     const bool covered = contentSame && zoomSame
                         && visAbsL >= cache.bigBandL - 0.5 && visAbsR <= cache.bigBandR + 0.5;
-                    // ズーム中は内容一致なら再生成を抑止 (stale 帯を時刻写像で拡縮 blit)
-                    const bool reuseForZoom = contentSame && zoomActive;
+                    // ズーム中 / 高速スクロール中は内容一致なら再生成を抑止し、stale 帯を時刻写像で
+                    // 拡縮 blit する (重い fillPath を走らせず滑らかに流す。止まるとタイマーで鮮明化)。
+                    const bool reuseDeferred = contentSame && (zoomActive || deferBigClipRegen);
 
-                    if (!covered && !reuseForZoom)
+                    if (!covered && !reuseDeferred)
                     {
                         const double bandL = juce::jmax(clipAbsL, visAbsL - margin);
                         const double bandR = juce::jmin(clipAbsR, visAbsR + margin);

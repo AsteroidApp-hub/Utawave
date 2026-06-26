@@ -843,13 +843,37 @@ TimelineView::~TimelineView()
 
 void TimelineView::timerCallback()
 {
-    // 横ズームが止まったら、抑止していた波形キャッシュ再生成を解禁して 1 度だけ綺麗に再描画する
-    if (zoomActive)
+    // 横ズーム / 高速横スクロールが止まったら、抑止していた波形キャッシュ再生成を解禁して
+    // 1 度だけ綺麗に再描画する (巨大クリップの帯が新しい位置/倍率で鮮明に描き直される)。
+    if (zoomActive || deferBigClipRegen)
     {
         zoomActive = false;
+        deferBigClipRegen = false;
+        scrollVelPxPerSec = 0.0;
         repaint();
     }
     stopTimer();
+}
+
+// 横スクロール速度を平滑化して追跡し、しきい値を超える「速い」スクロールの間だけ
+// deferBigClipRegen を立てる。これにより巨大クリップ (Path-2) の重い帯再生成を速い
+// スクロール中だけ遅延でき (滑らかに流れる)、遅いスクロールでは従来どおり鮮明に追従する。
+void TimelineView::noteHorizontalScrollVelocity(double pxMoved)
+{
+    const juce::uint32 now = juce::Time::getMillisecondCounter();
+    const double dt = (double)(now - lastHScrollMs);
+    lastHScrollMs = now;
+    if (dt > 150.0) scrollVelPxPerSec = 0.0;  // 間が空いたら新しいジェスチャとして仕切り直す
+    const double moved = std::abs(pxMoved);
+    const double inst  = (dt > 0.0) ? (moved / dt * 1000.0) : (moved * 1000.0);
+    scrollVelPxPerSec = 0.6 * scrollVelPxPerSec + 0.4 * inst;
+    // しきい値 ≒ 2 ビューポート/秒。これ以上速いと波形の詳細は読めないので帯再生成を遅延し
+    // 滑らかさを優先する。タイマーが止まりを検出して解禁・鮮明化する (set のみ・clear はタイマー)。
+    if (scrollVelPxPerSec > 4000.0)
+    {
+        deferBigClipRegen = true;
+        startTimer(80);
+    }
 }
 
 //==============================================================================
@@ -1218,6 +1242,7 @@ void TimelineView::scrollBarMoved(juce::ScrollBar* bar, double newRange)
 {
     if (bar == &hScrollBar)
     {
+        noteHorizontalScrollVelocity(newRange - scrollX);  // 速い間は巨大クリップの帯再生成を遅延
         scrollX = newRange;
         ruler.setScrollX(scrollX);
     }

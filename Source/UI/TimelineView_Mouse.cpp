@@ -1878,6 +1878,7 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         // Shift+スクロール または トラックパッドで横スワイプ
         // macOSはShift押下時にdeltaYがdeltaXに切り替わることがあるため両軸を見る
         double delta = (std::abs(w.deltaX) > std::abs(w.deltaY)) ? w.deltaX : w.deltaY;
+        const double prevScrollX = scrollX;
         scrollX = juce::jmax(0.0, scrollX - delta * 200.0);
         ruler.setScrollX(scrollX);
         hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
@@ -1885,6 +1886,8 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         // 帯の再生成を抑止したまま横移動して端が一瞬空白になりうる。横スクロールは確定的な
         // ナビゲーションなので zoomActive を解除し、新しい位置で帯を正しく再生成させる。
         zoomActive = false;
+        // 速いスクロールの間だけ巨大クリップの帯再生成を遅延 (カクつき防止)。遅い時は false のまま。
+        noteHorizontalScrollVelocity(scrollX - prevScrollX);
     }
     else if (std::abs(w.deltaY) > 1.0e-4)
     {

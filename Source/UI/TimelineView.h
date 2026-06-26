@@ -501,6 +501,14 @@ private:
     // 横ズーム中フラグ: 連続ズーム中は波形キャッシュを再生成せず既存を拡縮 blit するだけにし、
     // ズームが止まって (アイドルタイマー) から 1 度だけ綺麗に再描画する (もたつき防止)。
     bool         zoomActive   { false };
+    // 高速横スクロール中フラグ: 巨大クリップ (Path-2) の帯再生成は重い fillPath なので、速い
+    // スクロールでマージン帯を横切るたびに走るとカクつく。速度がしきい値を超える間だけ再生成を
+    // 遅延し (既存帯を blit して滑らかに流す)、止まってからタイマーで 1 度だけ綺麗に再描画する。
+    // 遅いスクロールでは false のまま = 従来どおり鮮明に追従描画する (空白を出さない)。
+    bool         deferBigClipRegen { false };
+    double       scrollVelPxPerSec { 0.0 };  // 平滑化した横スクロール速度 (px/秒)
+    juce::uint32 lastHScrollMs     { 0 };
+    void noteHorizontalScrollVelocity(double pxMoved);  // 速度更新 + 高速判定 (TimelineView.cpp)
     double playheadSecs   { 0.0 };
     double bpm            { 120.0 };
     double sampleRate     { 44100.0 };
