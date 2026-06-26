@@ -507,21 +507,33 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         }
     }
 
-    // [ ] : ループ範囲を設定（再生のループは LOOP ボタンで切替）
-    if (key == juce::KeyPress('['))
+    // [ ] : 選択トラックの縦幅トグル ([ = 最大↔標準 / ] = 最小↔標準)。複数選択中は全選択トラックへ
+    // 同じ高さを適用する (ドラッグ追従と同じ作法)。ループ範囲設定はルーラー横ドラッグへ移管した。
+    if (key == juce::KeyPress('[') || key == juce::KeyPress(']'))
     {
-        loopStartSecs = audioEngine.getCurrentPositionSeconds();
-        if (loopEndSecs < loopStartSecs) loopEndSecs = loopStartSecs + 1.0;
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
-        audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
-        return true;
-    }
-    if (key == juce::KeyPress(']'))
-    {
-        loopEndSecs = audioEngine.getCurrentPositionSeconds();
-        if (loopEndSecs < loopStartSecs) std::swap(loopStartSecs, loopEndSecs);
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
-        audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+        // 対象: ヘッダで複数選択されていれば全選択、無ければ主選択トラック単体。
+        const auto& sel = trackHeaderPanel.getSelectedTrackIndices();
+        std::vector<int> scope(sel.begin(), sel.end());
+        if (scope.empty() && selectedTrackIndex >= 0)
+            scope.push_back(selectedTrackIndex);
+        if (scope.empty()) return false;  // 選択トラックが無ければ何もしない
+
+        // 目標高さは主選択 (無ければ先頭) の現在高さで決め、全対象を同じ高さへ揃える。
+        const int refIdx = (selectedTrackIndex >= 0 && sel.count(selectedTrackIndex))
+                           ? selectedTrackIndex : scope.front();
+        auto* refT = trackManager.getTrack(refIdx);
+        if (refT == nullptr) return false;
+        const int cur = refT->getMainHeight();
+        int target;
+        if (key == juce::KeyPress('['))
+            target = (cur >= Track::maxHeight) ? Track::defaultHeight : Track::maxHeight;
+        else
+            target = (cur <= Track::minHeight) ? Track::defaultHeight : Track::minHeight;
+
+        for (int i : scope)
+            if (auto* t = trackManager.getTrack(i)) t->setCustomHeight(target);
+        // ドラッグリサイズと同じ全更新 (markDirty + ヘッダ/タイムライン再レイアウト)
+        if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
         return true;
     }
 
