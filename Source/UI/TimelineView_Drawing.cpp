@@ -281,47 +281,76 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                 const int vx1 = juce::jmin(wfRect.getRight(), comp.getRight());
                 if (vx1 > vx0)
                 {
-                    const int vW = vx1 - vx0;
-                    const int sW = juce::jmax(1, juce::roundToInt(vW    * pixelScale));
-                    const int sH = juce::jmax(1, juce::roundToInt(needH * pixelScale));
+                    // 帯は scrollX を含まない絶対ピクセル座標 (= time_sec * pxPerSec) で扱う。
+                    // 可視絶対範囲 [visAbsL, visAbsR] に左右マージン (1 ビューポート幅) を足し、
+                    // クリップの絶対ピクセル範囲でクランプして帯を決める。スクロールが帯内に
+                    // 収まる限り再生成せず、blit の平行移動だけで描く (横スクロールのもたつき解消)。
+                    const double clipAbsL = wfRect.getX()     + scrollX;
+                    const double clipAbsR = wfRect.getRight() + scrollX;
+                    const double visAbsL  = vx0 + scrollX;
+                    const double visAbsR  = vx1 + scrollX;
+                    const double margin   = (double) (vx1 - vx0); // 片側 1 ビューポート幅
                     const juce::uint32 colourArgb = wfColour.getARGB();
                     const juce::int64  samplesDone = clip.getThumbnail().getNumSamplesFinished();
-                    const bool dirty =
-                           cache.bigVisX0 != vx0 || cache.bigVisX1 != vx1
-                        || cache.bigHeight != needH
-                        || cache.bigScrollX != scrollX
-                        || cache.bigPixelsPerBeat != pixelsPerBeat
-                        || cache.bigBpm != bpm
-                        || cache.bigFileOffset != fo
-                        || cache.bigGain != clip.getGain()
-                        || cache.bigVZoom != waveformZoom
-                        || cache.bigColourARGB != colourArgb
-                        || cache.bigSamplesFinished != samplesDone
-                        || cache.bigPixelScale != pixelScale
-                        || !cache.bigImage.isValid()
-                        || cache.bigImage.getWidth() != sW || cache.bigImage.getHeight() != sH;
-                    if (dirty)
+
+                    // 内容 (ズーム以外) が不変か。pixelsPerBeat / bpm は別扱いにする:
+                    // 連続ズーム中 (zoomActive) は ppb が変わっても再生成せず、下の時刻写像で
+                    // stale 帯を拡縮 blit し、止まった後にタイマーがシャープに再描画する。
+                    const bool contentSame =
+                           cache.bigImage.isValid()
+                        && cache.bigBandR > cache.bigBandL
+                        && cache.bigHeight == needH
+                        && cache.bigFileOffset == fo
+                        && cache.bigGain == clip.getGain()
+                        && cache.bigVZoom == waveformZoom
+                        && cache.bigColourARGB == colourArgb
+                        && cache.bigSamplesFinished == samplesDone
+                        && cache.bigPixelScale == pixelScale;
+                    const bool zoomSame = cache.bigPixelsPerBeat == pixelsPerBeat
+                                       && cache.bigBpm == bpm;
+                    // 可視範囲が帯に収まっているか (ppb 不変前提の絶対座標比較)
+                    const bool covered = contentSame && zoomSame
+                        && visAbsL >= cache.bigBandL - 0.5 && visAbsR <= cache.bigBandR + 0.5;
+                    // ズーム中は内容一致なら再生成を抑止 (stale 帯を時刻写像で拡縮 blit)
+                    const bool reuseForZoom = contentSame && zoomActive;
+
+                    if (!covered && !reuseForZoom)
                     {
-                        cache.bigVisX0 = vx0; cache.bigVisX1 = vx1; cache.bigHeight = needH;
-                        cache.bigScrollX = scrollX; cache.bigPixelsPerBeat = pixelsPerBeat; cache.bigBpm = bpm;
+                        const double bandL = juce::jmax(clipAbsL, visAbsL - margin);
+                        const double bandR = juce::jmin(clipAbsR, visAbsR + margin);
+                        const double bandW = juce::jmax(1.0, bandR - bandL);
+                        const int sW = juce::jmax(1, juce::roundToInt(bandW * pixelScale));
+                        const int sH = juce::jmax(1, juce::roundToInt(needH * pixelScale));
+                        cache.bigBandL = bandL; cache.bigBandR = bandR; cache.bigHeight = needH;
+                        cache.bigPixelsPerBeat = pixelsPerBeat; cache.bigBpm = bpm;
                         cache.bigFileOffset = fo; cache.bigGain = clip.getGain(); cache.bigVZoom = waveformZoom;
                         cache.bigColourARGB = colourArgb; cache.bigSamplesFinished = samplesDone;
                         cache.bigPixelScale = pixelScale;
                         cache.bigImage = juce::Image(juce::Image::ARGB, sW, sH, true);
                         juce::Graphics ig(cache.bigImage);
-                        // 可視範囲 [vx0, vx1) に対応するファイル時刻範囲を求めて Image 全体に描く
+                        // 帯 [bandL, bandR] (絶対 px) に対応するファイル時刻範囲を Image 全体に描く
                         const double pxPerSec     = pixelsPerBeat * (bpm / 60.0);
-                        const double fileStartVis = fo + ((vx0 + scrollX) / pxPerSec
+                        const double fileStartVis = fo + (bandL / juce::jmax(1e-9, pxPerSec)
                                                           - clip.getStartPosition());
-                        const double durVis       = (pxPerSec > 0.0) ? (vW / pxPerSec) : clip.getDuration();
+                        const double durVis       = (pxPerSec > 0.0) ? (bandW / pxPerSec) : clip.getDuration();
                         drawClipWaveform(ig, clip, { 0, 0, sW, sH },
                                          fileStartVis, durVis, verticalZoom, wfColour);
                     }
+                    // 帯が表す「タイムライン秒」範囲 (描画時 ppb 基準) を現在の ppb でコンポーネント
+                    // 座標へ写す。ppb 不変なら bandL - scrollX に一致し、ズーム中は stale 帯が拡縮される。
+                    const double cachedPxSec = juce::jmax(1e-9, cache.bigPixelsPerBeat * (cache.bigBpm / 60.0));
+                    const double secL    = cache.bigBandL / cachedPxSec;
+                    const double secR    = cache.bigBandR / cachedPxSec;
+                    const double curPxSec = juce::jmax(1e-9, pixelsPerBeat * beatsPerSec);
+                    const double compL   = secL * curPxSec - scrollX;
+                    const double compW   = juce::jmax(1.0, (secR - secL) * curPxSec);
+                    const int    imgW    = juce::jmax(1, cache.bigImage.getWidth());
+                    const int    imgH    = juce::jmax(1, cache.bigImage.getHeight());
                     g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
                     g.drawImageTransformed(cache.bigImage,
-                        juce::AffineTransform::scale((float) vW    / (float) sW,
-                                                     (float) needH / (float) sH)
-                            .translated((float) vx0, (float) wfRect.getY()));
+                        juce::AffineTransform::scale((float) (compW / imgW),
+                                                     (float) needH / (float) imgH)
+                            .translated((float) compL, (float) wfRect.getY()));
                 }
             }
         }

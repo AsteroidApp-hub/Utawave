@@ -218,18 +218,17 @@ public:
         // 物理ピクセル倍率 (Retina = 2.0)。倍率が変わったら作り直す (ディスプレイ間移動)
         float pixelScale { 0.0f };
 
-        // ── 巨大クリップ用 (キャッシュ上限超え scaledW>8192) の「ビューポート可視範囲スライス」キャッシュ ──
+        // ── 巨大クリップ用 (キャッシュ上限超え scaledW>8192) の「可視範囲+マージン帯」キャッシュ ──
         // 以前は useCache=false の clip を毎ペイント fillPath で描き直していたが、JUCE の CALayer は
         // drawsAsynchronously のため CA::Transaction::commit がその描画完了をメインスレッドで待ち、
-        // 重い波形 fillPath でメッセージスレッドが数百 ms 固まる (再生バー/UI のカクツキ)。可視範囲を
-        // ここに 1 枚キャッシュして blit にすれば、定常再生 (スクロール/ズーム不変) では再描画されない。
-        // 可視範囲はコンポーネント全幅でクランプする (プレイヘッド帯 g.getClipBounds() では無い) ので
-        // 再生バーが動いても毎フレーム同じキー = キャッシュヒット = blit のみ。
+        // 重い波形 fillPath でメッセージスレッドが数百 ms 固まる (再生バー/UI のカクツキ)。
+        // 可視範囲に左右マージンを付けた帯を 1 枚キャッシュし、blit の平行移動で描く。スクロールが
+        // マージン内に収まる限りは再生成せず blit のみ (横スクロールのもたつき解消)。帯は scrollX を
+        // 含まない「絶対ピクセル座標」(= time_sec * pxPerSec) で保持するので、再生バー移動でもキー不変。
         juce::Image  bigImage;
-        int          bigVisX0 { -1 };          // コンポーネント座標の可視左端 (px)
-        int          bigVisX1 { -1 };          // 可視右端 (px, exclusive)
+        double       bigBandL { 0.0 };         // 帯の左端 (絶対 px = time_sec * pxPerSec)
+        double       bigBandR { -1.0 };        // 帯の右端 (絶対 px)。R<L で無効
         int          bigHeight { 0 };
-        double       bigScrollX { -1.0 };
         double       bigPixelsPerBeat { -1.0 };
         double       bigBpm { -1.0 };
         double       bigFileOffset { -1.0 };
@@ -240,11 +239,11 @@ public:
         float        bigPixelScale { 0.0f };
     };
     WaveformCache& getWaveformCache() { return waveformCache; }
-    // width=-1 で useCache 経路を、bigVisX0=-1 + bigImage 解放で巨大クリップ経路を無効化する。
+    // width=-1 で useCache 経路を、bigBandR=-1 + bigImage 解放で巨大クリップ経路を無効化する。
     void invalidateWaveformCache()
     {
         waveformCache.width = -1;
-        waveformCache.bigVisX0 = -1;
+        waveformCache.bigBandR = -1.0;
         waveformCache.bigImage = juce::Image();
     }
 
