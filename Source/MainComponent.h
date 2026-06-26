@@ -118,6 +118,10 @@ private:
     void showAudioSettings();
     void showImportDialog();
     void showImportMidiDialog();
+    // ツールバーの IMPORT ボタン用: オーディオ / MIDI を 1 つのピッカーで選び拡張子で振り分ける
+    void showImportAnyDialog();
+    // 選択済みオーディオファイルを変換 (進捗付き) してプロジェクト先頭へ配置する (Cmd+I / IMPORT 共用)
+    void placeImportedAudioFiles(const juce::Array<juce::File>& audioFiles);
     // D&D 用: ファイルとドロップ位置を指定して MIDI 取り込みダイアログを表示
     void importMidiFromFile(const juce::File& midiFile, double dropTimeOverride);
     void showPreferences();

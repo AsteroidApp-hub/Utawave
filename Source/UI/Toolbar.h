@@ -20,6 +20,8 @@ public:
     std::function<void()>     onRewind;
     std::function<void()>     onAudioSettings;
     std::function<void()>     onPreferences;   // 歯車ボタン
+    std::function<void()>     onImport;        // 読み込み (オーディオ / MIDI を拡張子で判別)
+    std::function<void()>     onExport;        // 書き出し
     std::function<void(bool)> onClipGainChanged;
     std::function<void(int)>    onSnapModeSelected;
     std::function<void(bool)>   onLoopToggle;
@@ -52,6 +54,8 @@ private:
     juce::TextButton metronomeBtn;
     juce::TextButton audioSettingsBtn;
     juce::TextButton prefsBtn;
+    juce::TextButton importBtn;
+    juce::TextButton exportBtn;
     juce::TextButton gainBtn;
     juce::TextButton snapBtn;
     juce::TextButton loopBtn;

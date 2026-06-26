@@ -191,6 +191,21 @@ TransportBar::TransportBar()
     prefsBtn.onClick = [this] { if (onPreferences) onPreferences(); };
     addAndMakeVisible(prefsBtn);
 
+    // 読み込み / 書き出しボタン (AUDIO/SETTING の左に配置・操作を見つけやすく)
+    styleBtn(importBtn, AppColours::buttonBg, AppColours::text);
+    importBtn.setButtonText("IMPORT");
+    importBtn.setTooltip(platformShortcutText(tr(u8"オーディオ / MIDI ファイルを読み込みます (Cmd+I)")));
+    importBtn.setWantsKeyboardFocus(false);
+    importBtn.onClick = [this] { if (onImport) onImport(); };
+    addAndMakeVisible(importBtn);
+
+    styleBtn(exportBtn, AppColours::buttonBg, AppColours::text);
+    exportBtn.setButtonText("EXPORT");
+    exportBtn.setTooltip(platformShortcutText(tr(u8"ファイルの書き出しのウィンドウを表示します (Cmd+E)")));
+    exportBtn.setWantsKeyboardFocus(false);
+    exportBtn.onClick = [this] { if (onExport) onExport(); };
+    addAndMakeVisible(exportBtn);
+
     // CLICK（メトロノーム）ボタンをトグル化、右クリックで設定
     metronomeBtn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff44aa88));
     metronomeBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
@@ -397,6 +412,7 @@ TransportBar::TransportBar()
     for (auto* btn : std::initializer_list<juce::Component*>{
             &rewindBtn, &stopBtn, &playBtn, &recBtn,
             &tapTempoBtn, &metronomeBtn, &audioSettingsBtn,
+            &importBtn, &exportBtn,
             &gainBtn, &snapBtn, &loopBtn,
             &clickToolBtn, &linkToolBtn, &rangeToolBtn,
             &countInBtn, &preRollBtn,
@@ -479,11 +495,19 @@ void TransportBar::resized()
     const int y   = (getHeight() - h) / 2;
     const int pad = 4;
 
-    // ── Right: AUDIO + SETTING (固定右端) ──
-    const int settingW = 64;
-    audioBlockWidth = bw + settingW + 12 + 6;
-    audioSettingsBtn.setBounds(getWidth() - bw - settingW - 14, y, bw, h);
-    prefsBtn        .setBounds(getWidth() - settingW - 8,       y, settingW, h);
+    // ── Right: IMPORT + EXPORT | AUDIO + SETTING (固定右端) ──
+    const int settingW  = 64;
+    const int ioW       = 62;   // IMPORT / EXPORT 幅
+    const int ioGap     = 14;   // IO グループと AUDIO グループの区切り
+    const int audioLeft = getWidth() - bw - settingW - 14;
+    const int exportLeft = audioLeft  - ioGap - ioW;
+    const int importLeft = exportLeft - pad   - ioW;
+    importBtn       .setBounds(importLeft, y, ioW, h);
+    exportBtn       .setBounds(exportLeft, y, ioW, h);
+    audioSettingsBtn.setBounds(audioLeft,  y, bw, h);
+    prefsBtn        .setBounds(getWidth() - settingW - 8, y, settingW, h);
+    // 区切り線 (paint の sep) は IMPORT の左に来るよう右ブロック幅を更新
+    audioBlockWidth = getWidth() - importLeft + 6;
 
     // ── Left: 2x2 ブロック: Bar|Beat | BPM  /  Time | TAP(小) ──
     const int colW     = 100;

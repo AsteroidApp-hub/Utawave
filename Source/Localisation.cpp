@@ -137,6 +137,8 @@ static const char* const englishTranslations =
     "\"Utawave について...\" = \"About Utawave...\"\n"
     "\"環境設定\" = \"Preferences\"\n"
     "\"アプリ全体の設定です。録音・保存・表示などの動作を細かく変更できます (Cmd+,)\" = \"App-wide settings. Fine-tune recording, saving, display and more (Cmd+,).\"\n"
+    "\"オーディオ / MIDI ファイルを読み込みます (Cmd+I)\" = \"Import audio / MIDI files (Cmd+I).\"\n"
+    "\"ファイルの書き出しのウィンドウを表示します (Cmd+E)\" = \"Open the export window (Cmd+E).\"\n"
     // ── 起動画面 ──
     "\"プロジェクトを作成または開く\" = \"Create or open a project\"\n"
     "\"作成\" = \"Create\"\n"
@@ -398,6 +400,7 @@ static const char* const englishTranslations =
     // ── インポート / 配置 ──
     "\"オーディオを読み込む...\" = \"Import Audio...\"\n"
     "\"オーディオファイルを選択\" = \"Select an audio file\"\n"
+    "\"読み込むファイルを選択 (オーディオ / MIDI)\" = \"Select files to import (audio / MIDI)\"\n"
     "\"インポート失敗\" = \"Import failed\"\n"
     "\"インポート中...\" = \"Importing...\"\n"
     "\"インポート中: \" = \"Importing: \"\n"

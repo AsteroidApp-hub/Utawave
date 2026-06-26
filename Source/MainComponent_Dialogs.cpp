@@ -338,38 +338,82 @@ void MainComponent::showImportDialog()
               | juce::FileBrowserComponent::canSelectMultipleItems;
 
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc) {
+        placeImportedAudioFiles(fc.getResults());
+    });
+}
+
+// 選択済みオーディオファイルを変換 (進捗付き) してプロジェクト先頭へ配置する。
+// Cmd+I (showImportDialog) とツールバー IMPORT (showImportAnyDialog) で共用。
+void MainComponent::placeImportedAudioFiles(const juce::Array<juce::File>& audioFiles)
+{
+    if (audioFiles.isEmpty()) return;
+
+    // ── 変換フェーズ ── 複数選択は「インポート中...」を 1 つだけ出してまとめて変換する。
+    auto items = convertImportSourcesWithProgress(audioFiles);
+
+    // ── 配置フェーズ (メッセージスレッド) ──
+    // インポートしたクリップは常にプロジェクト先頭 (再生バー 0 秒) に配置する。
+    // 歌い手用途では「カラオケ音源を頭から並べる」が定番フローのため。
+    const double dropTime = 0.0;
+    bool added = false;
+    for (auto& it : items)
+    {
+        Track* t = (selectedTrackIndex >= 0
+                    && selectedTrackIndex < trackManager.getTrackCount())
+                   ? trackManager.getTrack(selectedTrackIndex) : nullptr;
+        if (!t || t->isClickTrack())
+            t = trackManager.addTrack(it.name, it.stereo);
+        if (t)
+        {
+            t->addClip(it.file, dropTime, it.dur);
+            if (it.hasVol) t->setVolume(it.volDb);   // ラウドネス調整 (変換時に測定済み)
+            added = true;
+        }
+    }
+    timelineView.refresh();
+    trackHeaderPanel.refresh();
+    audioEngine.preparePlayback(trackManager);
+    // AudioThumbnail はバックグラウンドで非同期にロードされるので、
+    // 完了するまで定期的に repaint をかけないと大きいファイルで波形が途中までしか描かれない。
+    if (added) scheduleWaveformRefresh();
+    if (added) markProjectDirty();
+}
+
+// ツールバー IMPORT ボタン: オーディオ + MIDI を 1 つのピッカーで選び、拡張子で振り分ける。
+// 音声は placeImportedAudioFiles へまとめて、MIDI は importMidiFromFile へ個別に渡す
+// (D&D の onImportAudioFiles / onImportMidi と同じ仕分け方)。
+void MainComponent::showImportAnyDialog()
+{
+    juce::String audioWildcard = "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg";
+   #if JUCE_MAC
+    audioWildcard += ";*.m4a;*.aac;*.caf";
+   #elif JUCE_WINDOWS
+    audioWildcard += ";*.wma";
+   #endif
+    const juce::String wildcard = audioWildcard + ";*.mid;*.midi";
+
+    fileChooser = std::make_unique<juce::FileChooser>(
+        tr(u8"読み込むファイルを選択 (オーディオ / MIDI)"),
+        juce::File::getSpecialLocation(juce::File::userMusicDirectory),
+        wildcard);
+
+    int flags = juce::FileBrowserComponent::openMode
+              | juce::FileBrowserComponent::canSelectFiles
+              | juce::FileBrowserComponent::canSelectMultipleItems;
+
+    fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc) {
         auto results = fc.getResults();
         if (results.isEmpty()) return;
 
-        // ── 変換フェーズ ── 複数選択は「インポート中...」を 1 つだけ出してまとめて変換する。
-        auto items = convertImportSourcesWithProgress(results);
-
-        // ── 配置フェーズ (メッセージスレッド) ──
-        // インポートしたクリップは常にプロジェクト先頭 (再生バー 0 秒) に配置する。
-        // 歌い手用途では「カラオケ音源を頭から並べる」が定番フローのため。
-        const double dropTime = 0.0;
-        bool added = false;
-        for (auto& it : items)
+        juce::Array<juce::File> audioFiles, midiFiles;
+        for (auto& f : results)
         {
-            Track* t = (selectedTrackIndex >= 0
-                        && selectedTrackIndex < trackManager.getTrackCount())
-                       ? trackManager.getTrack(selectedTrackIndex) : nullptr;
-            if (!t || t->isClickTrack())
-                t = trackManager.addTrack(it.name, it.stereo);
-            if (t)
-            {
-                t->addClip(it.file, dropTime, it.dur);
-                if (it.hasVol) t->setVolume(it.volDb);   // ラウドネス調整 (変換時に測定済み)
-                added = true;
-            }
+            const auto ext = f.getFileExtension().toLowerCase();
+            if (ext == ".mid" || ext == ".midi") midiFiles.add(f);
+            else                                 audioFiles.add(f);
         }
-        timelineView.refresh();
-        trackHeaderPanel.refresh();
-        audioEngine.preparePlayback(trackManager);
-        // AudioThumbnail はバックグラウンドで非同期にロードされるので、
-        // 完了するまで定期的に repaint をかけないと大きいファイルで波形が途中までしか描かれない。
-        if (added) scheduleWaveformRefresh();
-        if (added) markProjectDirty();
+        placeImportedAudioFiles(audioFiles);                 // 空なら no-op
+        for (auto& m : midiFiles) importMidiFromFile(m, -1.0);
     });
 }
 

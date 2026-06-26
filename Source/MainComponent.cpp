@@ -81,6 +81,8 @@ MainComponent::MainComponent()
                                        propagatePlayheadToPianoRolls(0.0); };
     toolbar.onAudioSettings = [this] { showAudioSettings(); };
     toolbar.onPreferences   = [this] { showPreferences(); };
+    toolbar.onImport        = [this] { showImportAnyDialog(); };
+    toolbar.onExport        = [this] { showExportDialog(); };
 
     toolbar.onClipGainChanged = [this](bool v)
     {
