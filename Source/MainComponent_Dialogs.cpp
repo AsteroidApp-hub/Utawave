@@ -315,23 +315,27 @@ void MainComponent::showImportMidiDialog()
     });
 }
 
+// 取り込みピッカーの音声ワイルドカード。対応拡張子は OS のデコーダで変わる (WAV/AIFF/MP3/
+// FLAC/Ogg は共通、m4a/aac/caf は macOS の CoreAudio、wma は Windows の Media Foundation)。
+// JUCE の各 AudioFormat が canHandleFile で受ける拡張子に合わせ、読めない形式をピッカーに
+// 出さない (「選べるのに失敗」を防ぐ)。showImportDialog / showImportAnyDialog で共用しドリフトを防ぐ。
+static juce::String audioImportWildcard()
+{
+    juce::String w = "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg";
+   #if JUCE_MAC
+    w += ";*.m4a;*.aac;*.caf";
+   #elif JUCE_WINDOWS
+    w += ";*.wma";
+   #endif
+    return w;
+}
+
 void MainComponent::showImportDialog()
 {
-    // 対応拡張子は OS のデコーダで変わる。WAV/AIFF/MP3/FLAC/Ogg は共通、
-    // m4a/aac/caf は macOS の CoreAudio のみ、wma は Windows の Media Foundation のみ
-    // (JUCE の各 AudioFormat が canHandleFile で受ける拡張子に合わせる。読めない形式を
-    //  ピッカーに出さないことで「選べるのに失敗」を防ぐ)。
-    juce::String audioWildcard = "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg";
-   #if JUCE_MAC
-    audioWildcard += ";*.m4a;*.aac;*.caf";
-   #elif JUCE_WINDOWS
-    audioWildcard += ";*.wma";
-   #endif
-
     fileChooser = std::make_unique<juce::FileChooser>(
         tr(u8"オーディオファイルを選択"),
         juce::File::getSpecialLocation(juce::File::userMusicDirectory),
-        audioWildcard);
+        audioImportWildcard());
 
     int flags = juce::FileBrowserComponent::openMode
               | juce::FileBrowserComponent::canSelectFiles
@@ -384,13 +388,7 @@ void MainComponent::placeImportedAudioFiles(const juce::Array<juce::File>& audio
 // (D&D の onImportAudioFiles / onImportMidi と同じ仕分け方)。
 void MainComponent::showImportAnyDialog()
 {
-    juce::String audioWildcard = "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg";
-   #if JUCE_MAC
-    audioWildcard += ";*.m4a;*.aac;*.caf";
-   #elif JUCE_WINDOWS
-    audioWildcard += ";*.wma";
-   #endif
-    const juce::String wildcard = audioWildcard + ";*.mid;*.midi";
+    const juce::String wildcard = audioImportWildcard() + ";*.mid;*.midi";
 
     fileChooser = std::make_unique<juce::FileChooser>(
         tr(u8"読み込むファイルを選択 (オーディオ / MIDI)"),
