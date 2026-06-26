@@ -512,15 +512,20 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
     if (key == juce::KeyPress('[') || key == juce::KeyPress(']'))
     {
         // 対象: ヘッダで複数選択されていれば全選択、無ければ主選択トラック単体。
+        // getTrack は std::vector の operator[] (境界チェック無し) なので、stale な選択 index
+        // (トラック削除後など) で範囲外を渡さないよう、ここで [0, trackCount) に絞る。
+        const int trackCount = trackManager.getTrackCount();
         const auto& sel = trackHeaderPanel.getSelectedTrackIndices();
-        std::vector<int> scope(sel.begin(), sel.end());
-        if (scope.empty() && selectedTrackIndex >= 0)
+        std::vector<int> scope;
+        for (int i : sel)
+            if (i >= 0 && i < trackCount) scope.push_back(i);
+        if (scope.empty() && selectedTrackIndex >= 0 && selectedTrackIndex < trackCount)
             scope.push_back(selectedTrackIndex);
-        if (scope.empty()) return false;  // 選択トラックが無ければ何もしない
+        if (scope.empty()) return false;  // 有効な選択トラックが無ければ何もしない
 
         // 目標高さは主選択 (無ければ先頭) の現在高さで決め、全対象を同じ高さへ揃える。
-        const int refIdx = (selectedTrackIndex >= 0 && sel.count(selectedTrackIndex))
-                           ? selectedTrackIndex : scope.front();
+        const int refIdx = (selectedTrackIndex >= 0 && selectedTrackIndex < trackCount
+                            && sel.count(selectedTrackIndex)) ? selectedTrackIndex : scope.front();
         auto* refT = trackManager.getTrack(refIdx);
         if (refT == nullptr) return false;
         const int cur = refT->getMainHeight();
