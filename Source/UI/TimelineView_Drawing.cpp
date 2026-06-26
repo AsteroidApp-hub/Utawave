@@ -1176,6 +1176,28 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
         }
     }
 
+    // ── 背景グリッド線 (全トラック共通・1 パスで全高描画) ──
+    // 以前は per-track に描いていたが、描画コストがトラック数倍になり高速スクロールで
+    // カクついた。下のトラック背景 fillRect (fillAll と同色で冗長) を除去したので、ここで
+    // fillAll の上に 1 回だけ全高描画する (クリップは後段で上書き = クリップのある所は従来どおり隠れる)。
+    // 縦範囲は可視コンテンツ上端〜最終トラック下端 (トラックの無い余白には引かない)。
+    if (!barLineXs.empty() || !gridLineXs.empty())
+    {
+        const int lastIdx = trackCount - 1;
+        const int tracksBottom = area.getY()
+                               + trackManager.getTrackY(lastIdx)
+                               + trackManager.getTrack(lastIdx)->getTotalHeight() - scrollY;
+        const float gy0 = (float) area.getY();
+        const float gy1 = (float) juce::jmin(area.getBottom(), tracksBottom);
+        if (gy1 > gy0)
+        {
+            g.setColour(AppColours::rulerLine.withAlpha(0.08f));
+            for (const float gx : gridLineXs) g.drawLine(gx, gy0, gx, gy1, 1.0f);
+            g.setColour(AppColours::rulerLineBright.withAlpha(0.15f));
+            for (const float gx : barLineXs)  g.drawLine(gx, gy0, gx, gy1, 1.0f);
+        }
+    }
+
     // ── 各トラック ──
     for (int ti = 0; ti < trackCount; ++ti)
     {
@@ -1190,32 +1212,12 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
 
         juce::Rectangle<int> trackBounds { area.getX(), trackTop, area.getWidth(), trackH };
 
-        // トラック背景
-        g.setColour(track->isMuted()
-                    ? AppColours::trackBg.withAlpha(0.4f)
-                    : AppColours::trackBg);
-        g.fillRect(trackBounds);
-
+        // トラック背景は paint() の fillAll(trackBg) で既に塗られているため per-track の不透明塗りは
+        // 不要 (冗長・per-track 塗りはグリッドを覆い隠す原因だった)。録音アーム中だけ赤みを重ねる。
         if (track->isRecArmed())
         {
             g.setColour(AppColours::recRed.withAlpha(0.06f));
             g.fillRect(trackBounds);
-        }
-
-        // ── 背景グリッド線 (トラック背景の上・クリップの下に描く) ──
-        // 不透明なトラック背景を塗った後にここで描くことで、全トラックの空き領域に確実に出る
-        // (クリップは後段で上書きするので、クリップのある所はグリッドが隠れて従来どおり)。
-        if (!barLineXs.empty() || !gridLineXs.empty())
-        {
-            const float gy0 = (float)juce::jmax(trackTop, area.getY());
-            const float gy1 = (float)juce::jmin(trackBot, area.getBottom());
-            if (gy1 > gy0)
-            {
-                g.setColour(AppColours::rulerLine.withAlpha(0.08f));
-                for (const float gx : gridLineXs) g.drawLine(gx, gy0, gx, gy1, 1.0f);
-                g.setColour(AppColours::rulerLineBright.withAlpha(0.15f));
-                for (const float gx : barLineXs)  g.drawLine(gx, gy0, gx, gy1, 1.0f);
-            }
         }
 
         // ── レーンごとに描画（非等分: Lane0=defaultHeight, Lane1以降=laneHeight）──
