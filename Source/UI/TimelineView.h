@@ -498,6 +498,9 @@ private:
     // アイドル (前回ホイールから一定時間経過) で端数をリセットし、ゆっくり時は厳密に 1:1 にする。
     double       wheelAccumY  { 0.0 };
     juce::uint32 lastWheelMs  { 0 };
+    // 横ズーム中フラグ: 連続ズーム中は波形キャッシュを再生成せず既存を拡縮 blit するだけにし、
+    // ズームが止まって (アイドルタイマー) から 1 度だけ綺麗に再描画する (もたつき防止)。
+    bool         zoomActive   { false };
     double playheadSecs   { 0.0 };
     double bpm            { 120.0 };
     double sampleRate     { 44100.0 };

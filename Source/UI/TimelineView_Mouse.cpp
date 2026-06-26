@@ -1867,6 +1867,11 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
         ruler.setScrollX(scrollX);
         hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
         resized();
+        // 連続ズーム中は波形キャッシュ再生成を抑止 (既存を拡縮 blit)。止まって少し後に
+        // タイマーが綺麗に再描画する。これでズームのもたつきを解消する。
+        // ディレイが短いほど停止後すぐシャープに戻るが、連続ズームの合間で再生成が走りやすくなる。
+        zoomActive = true;
+        startTimer(70);
     }
     else if (e.mods.isShiftDown() || std::abs(w.deltaX) > std::abs(w.deltaY))
     {

@@ -841,7 +841,16 @@ TimelineView::~TimelineView()
     vScrollBar.removeListener(this);
 }
 
-void TimelineView::timerCallback() { /* 廃止: 不要な常時 repaint で CPU を消費していた */ }
+void TimelineView::timerCallback()
+{
+    // 横ズームが止まったら、抑止していた波形キャッシュ再生成を解禁して 1 度だけ綺麗に再描画する
+    if (zoomActive)
+    {
+        zoomActive = false;
+        repaint();
+    }
+    stopTimer();
+}
 
 //==============================================================================
 // ヒットテスト

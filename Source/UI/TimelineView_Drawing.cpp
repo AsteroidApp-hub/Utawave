@@ -211,7 +211,12 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                 auto& cache = clip.getWaveformCache();
                 const juce::uint32 colourArgb = wfColour.getARGB();
                 const juce::int64 samplesDone = clip.getThumbnail().getNumSamplesFinished();
-                if (cache.width      != needW
+                // 連続ズーム中 (zoomActive) は再生成を抑止し、既存キャッシュを新しい幅へ拡縮 blit
+                // するだけにする (全クリップを毎イベント再描画するもたつきを防ぐ)。ズームが止まると
+                // タイマーが zoomActive を下げて綺麗に再描画する。有効キャッシュが無ければ通常生成。
+                const bool skipRegen = zoomActive && cache.image.isValid();
+                if (!skipRegen
+                    && (cache.width      != needW
                     || cache.height  != needH
                     || cache.fileOffset != fo
                     || cache.duration   != clip.getDuration()
@@ -220,7 +225,7 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                     || cache.colourARGB != colourArgb
                     || cache.samplesFinished != samplesDone
                     || cache.pixelScale != pixelScale
-                    || !cache.image.isValid())
+                    || !cache.image.isValid()))
                 {
                     cache.width      = needW;
                     cache.height     = needH;
@@ -252,9 +257,14 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                 // クリップして隣のクリップへにじまないようにする (本体のグリッド整合は不変)。
                 juce::Graphics::ScopedSaveState wfClip(g);
                 g.reduceClipRegion(wfRect);
+                // スケールは実際のキャッシュ画像サイズ基準にする。ズーム中に再生成を抑止すると
+                // cache.image は旧サイズ (scaledW と不一致) のことがあるため、画像幅で割って正しく
+                // 新しい幅 exactW へ引き伸ばす (位置は exactL で絶対グリッドに揃う)。
+                const int imgW = juce::jmax(1, cache.image.getWidth());
+                const int imgH = juce::jmax(1, cache.image.getHeight());
                 g.drawImageTransformed(cache.image,
-                    juce::AffineTransform::scale((float) (exactW / (double) scaledW),
-                                                 (float) needH / (float) scaledH)
+                    juce::AffineTransform::scale((float) (exactW / (double) imgW),
+                                                 (float) needH / (float) imgH)
                         .translated((float) exactL, (float) wfRect.getY()));
             }
             else
