@@ -63,6 +63,7 @@ public:
         testLegacyRootTag();
         testRelativePathAndMissingFile();
         testAtomicAndGuards();
+        testLyrics();
 
         dir.deleteRecursively();
     }
@@ -131,6 +132,10 @@ public:
         setA.rulerTimeRowVisible = false; setA.rulerBarsRowVisible = false;
         setA.autoSaveIntervalMinutes = 15; setA.stripImportedMetadata = false;
         setA.zoomToMousePosition = false; setA.returnToStartOnStop = false;
+        // 歌詞: 複数行 + XML 特殊文字 (< > &) + 日本語で escaping / 改行保持を網羅
+        const juce::String lyricsA = juce::String::fromUTF8(
+            u8"1行目 <verse>\n2行目 & ロック\n\n最後の行");
+        setA.lyrics = lyricsA.toStdString();
 
         std::vector<Marker> markersA = {
             { 2.0, "Verse",  juce::Colour(0xffcc0000) },
@@ -274,6 +279,8 @@ public:
         expect(setB.autoSaveIntervalMinutes == 15 && ! setB.stripImportedMetadata
                && ! setB.zoomToMousePosition && ! setB.returnToStartOnStop,
                "autoSaveInterval/stripMetadata/zoomMouse/returnToStart");
+        expect(juce::String::fromUTF8(setB.lyrics.c_str()) == lyricsA,
+               "lyrics round-trip (multiline + XML special chars)");
 
         // Transport / loop / markers
         expect(approxEq(bpmB, 128.0, 1e-9), "transport bpm");
@@ -425,6 +432,66 @@ public:
         auto badXml = dir.getChildFile("bad.uta");
         badXml.replaceWithText("<NotAUtawaveProject/>");
         expect(! ProjectManager::load(badXml, s), "load non-UtawaveProject XML -> false");
+    }
+
+    // ── 歌詞 (歌詞表示窓のテキスト永続化) ──
+    void testLyrics()
+    {
+        beginTest("save/load: lyrics persist; empty writes no <Lyrics>; absent element clears stale");
+        auto projDir = dir.getChildFile("ProjLyrics");
+        projDir.createDirectory();
+        auto projFile = projDir.getChildFile("ProjLyrics.uta");
+
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        tm.addTrack("T", false);
+
+        ProjectManager::State s;
+        s.trackManager = &tm;
+        s.pluginManager = nullptr; s.masterChain = nullptr;
+
+        // (1) 空の歌詞は <Lyrics> 要素を書き出さない (XML を肥大化させない)
+        AppSettings setEmpty;   // lyrics は既定の空
+        s.appSettings = &setEmpty;
+        expect(ProjectManager::save(projFile, s), "save with empty lyrics");
+        {
+            auto xml = juce::XmlDocument::parse(projFile);
+            expect(xml != nullptr, "saved XML parses");
+            expect(xml != nullptr && xml->getChildByName("Lyrics") == nullptr,
+                   "empty lyrics -> no <Lyrics> element written");
+        }
+
+        // (2) 非空の歌詞 (複数行 + 特殊文字) を保存すると <Lyrics> 要素ができ、読み戻せる
+        const juce::String lyrics = juce::String::fromUTF8(
+            u8"サビ <hook>\n  二行目 & 三行目\n\n空行のあと");
+        AppSettings setSave; setSave.lyrics = lyrics.toStdString();
+        s.appSettings = &setSave;
+        expect(ProjectManager::save(projFile, s), "save with lyrics");
+        {
+            auto xml = juce::XmlDocument::parse(projFile);
+            expect(xml != nullptr && xml->getChildByName("Lyrics") != nullptr,
+                   "non-empty lyrics -> <Lyrics> element present");
+        }
+
+        AppSettings setLoad;
+        s.appSettings = &setLoad;
+        expect(ProjectManager::load(projFile, s), "load lyrics project");
+        expect(juce::String::fromUTF8(setLoad.lyrics.c_str()) == lyrics,
+               "lyrics restored exactly (multiline + special chars preserved)");
+
+        // (3) <Lyrics> の無いプロジェクトを読むと、既存の歌詞は空にクリアされる
+        //     (別プロジェクトの歌詞が持ち越されないこと = carry-over 防止の回帰テスト)
+        AppSettings setStale; setStale.lyrics = std::string("古い歌詞が残っている");
+        auto noLyricsFile = projDir.getChildFile("NoLyrics.uta");
+        {
+            juce::XmlElement root("UtawaveProject");
+            root.setAttribute("version", "1.0");
+            root.createNewChildElement("Settings");   // Lyrics 子要素なし
+            root.writeTo(noLyricsFile);
+        }
+        s.appSettings = &setStale;
+        expect(ProjectManager::load(noLyricsFile, s), "load project without <Lyrics>");
+        expect(setStale.lyrics.empty(), "absent <Lyrics> clears pre-existing lyrics (no carry-over)");
     }
 };
 
