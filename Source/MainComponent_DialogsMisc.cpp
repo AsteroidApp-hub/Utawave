@@ -160,22 +160,43 @@ void MainComponent::showDocumentation()
     // 同梱した help.html を探す。macOS は .app/Contents/Resources、Windows は実行ファイル隣。
     // (CMake で MACOSX_PACKAGE_LOCATION / POST_BUILD コピーにより配置される)
     const auto appFile = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
-    juce::Array<juce::File> candidates;
-   #if JUCE_MAC
-    candidates.add(appFile.getChildFile("Contents/Resources/help.html"));
-   #endif
-    candidates.add(appFile.getParentDirectory().getChildFile("help.html")); // Windows: exe 隣
-    candidates.add(appFile.getChildFile("help.html"));
 
-    for (auto& c : candidates)
+    // 現在の言語のヘルプ (ja は基底 help.html)。無ければ ja へフォールバックする。
+    juce::String langFile = "help.html";
+    switch (Localisation::getSavedLanguage())
     {
-        if (c.existsAsFile())
-        {
-            // 既定の HTML ハンドラ (ブラウザ) で開く
-            c.startAsProcess();
-            return;
-        }
+        case Localisation::Language::English:            langFile = "help.en.html";      break;
+        case Localisation::Language::SimplifiedChinese:  langFile = "help.zh-Hans.html"; break;
+        case Localisation::Language::TraditionalChinese: langFile = "help.zh-Hant.html"; break;
+        case Localisation::Language::Korean:             langFile = "help.ko.html";      break;
+        case Localisation::Language::Japanese:
+        default:                                         langFile = "help.html";         break;
     }
+
+    // 検索ディレクトリ (mac=Resources / Win=exe隣 / 同階層フォールバック)。
+    juce::Array<juce::File> dirs;
+   #if JUCE_MAC
+    dirs.add(appFile.getChildFile("Contents/Resources"));
+   #endif
+    dirs.add(appFile.getParentDirectory()); // Windows: exe 隣
+    dirs.add(appFile);                       // 同階層フォールバック
+
+    // 各ディレクトリで「現在言語ファイル → ja の help.html」の順に探す。
+    juce::StringArray names;
+    names.add(langFile);
+    names.addIfNotAlreadyThere("help.html");
+
+    for (auto& d : dirs)
+        for (auto& nm : names)
+        {
+            auto c = d.getChildFile(nm);
+            if (c.existsAsFile())
+            {
+                // 既定の HTML ハンドラ (ブラウザ) で開く
+                c.startAsProcess();
+                return;
+            }
+        }
 
     juce::AlertWindow::showAsync(juce::MessageBoxOptions()
         .withIconType(juce::MessageBoxIconType::WarningIcon)

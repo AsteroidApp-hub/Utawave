@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Utawave 用户指南</title>
+<style>
+  :root{
+    --accent:#e06422;
+    --accent-ink:#b8480f;
+    --ink:#1b1e23;
+    --ink-2:#3c434c;
+    --ink-3:#697078;
+    --line:#d6dadf;
+    --line-soft:#e7eaee;
+    --bg:#ffffff;
+    --bg-soft:#f6f7f9;
+    --kbd-bg:#23272e;
+    --sidebar-bg:#fbfbfc;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",
+                "Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif;
+    color:var(--ink);
+    background:var(--bg);
+    line-height:1.85;
+    font-size:15.5px;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ── ヘッダ ───────────────────────────── */
+  header.masthead{
+    background:#15171c;
+    color:#fff;
+    border-bottom:2px solid var(--accent);
+  }
+  header.masthead .wrap{
+    max-width:1080px;margin:0 auto;padding:30px 32px 26px;
+  }
+  .eyebrow{
+    font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--accent);font-weight:700;margin:0 0 8px;
+  }
+  header.masthead h1{
+    margin:0;font-size:26px;font-weight:700;letter-spacing:.01em;color:#fff;
+  }
+  header.masthead p{margin:9px 0 0;color:#9aa1aa;font-size:14px;max-width:620px;}
+
+  /* ── レイアウト（サイドバー + 本文）──────── */
+  .page{
+    max-width:1080px;margin:0 auto;padding:0 32px;
+    display:grid;grid-template-columns:236px 1fr;gap:48px;
+    align-items:start;
+  }
+  aside.toc{
+    position:sticky;top:0;align-self:start;
+    max-height:100vh;overflow:auto;
+    padding:30px 0 40px;
+  }
+  aside.toc h2{
+    font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink-3);margin:0 0 12px;font-weight:700;
+  }
+  aside.toc ol{list-style:none;margin:0;padding:0;counter-reset:s;}
+  aside.toc li{margin:0;}
+  aside.toc a{
+    counter-increment:s;
+    display:block;padding:5px 12px 5px 0;
+    color:var(--ink-2);text-decoration:none;font-size:13.5px;
+    border-left:2px solid transparent;padding-left:14px;
+    transition:color .12s,border-color .12s;
+  }
+  aside.toc a::before{
+    content:counter(s,decimal-leading-zero);
+    color:var(--ink-3);font-variant-numeric:tabular-nums;
+    font-size:11.5px;margin-right:9px;
+  }
+  aside.toc a:hover{color:var(--accent-ink);border-left-color:var(--accent);}
+
+  main{padding:30px 0 80px;min-width:0;}
+
+  /* ── セクション ──────────────────────── */
+  section{margin:0 0 44px;scroll-margin-top:16px;}
+  section h2{
+    font-size:19px;font-weight:700;letter-spacing:.005em;
+    margin:0 0 14px;padding-bottom:11px;
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:baseline;gap:11px;
+  }
+  section h2 .num{
+    color:var(--accent);font-weight:700;font-size:13px;
+    font-variant-numeric:tabular-nums;letter-spacing:.04em;
+    flex:0 0 auto;padding-top:1px;
+  }
+  section h3{
+    font-size:15px;font-weight:700;margin:22px 0 6px;color:var(--ink);
+    padding-left:11px;border-left:3px solid var(--accent);
+  }
+  p{margin:9px 0;}
+  .lead{font-size:15.5px;color:var(--ink-2);}
+  ul,ol{margin:9px 0;padding-left:22px;}
+  li{margin:5px 0;}
+  a{color:var(--accent-ink);}
+  b{font-weight:700;}
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:var(--bg-soft);border:1px solid var(--line-soft);
+    border-radius:4px;padding:.5px 5px;font-size:13px;color:var(--ink-2);
+  }
+
+  kbd{
+    display:inline-block;background:var(--kbd-bg);color:#f2f3f5;
+    border-radius:5px;padding:1.5px 7px;font-size:12.5px;font-weight:600;
+    font-family:inherit;margin:0 1px;
+    border:1px solid #000;box-shadow:inset 0 -1px 0 rgba(0,0,0,.35);
+    white-space:nowrap;line-height:1.5;
+  }
+
+  /* ── 注記 ───────────────────────────── */
+  .tip,.note,.warn{
+    background:var(--bg-soft);
+    border:1px solid var(--line-soft);border-left-width:3px;
+    border-radius:6px;padding:11px 15px;margin:14px 0;font-size:14.5px;
+    color:var(--ink-2);
+  }
+  .tip{border-left-color:var(--accent);}
+  .note{border-left-color:#3f6fb0;}
+  .warn{border-left-color:#c0392b;}
+  .tip b,.note b,.warn b{color:var(--ink);}
+
+  /* ── 表 ─────────────────────────────── */
+  table{border-collapse:collapse;width:100%;margin:13px 0;font-size:14px;}
+  th,td{border:1px solid var(--line-soft);padding:8px 13px;text-align:left;vertical-align:top;}
+  th{background:var(--bg-soft);font-weight:700;width:44%;color:var(--ink);}
+  tr:nth-child(even) td{background:#fcfcfd;}
+  td kbd{margin-right:2px;}
+
+  /* ── 手順（番号つき）────────────────── */
+  ol.step{counter-reset:step;list-style:none;padding-left:0;margin:12px 0;}
+  ol.step>li{position:relative;padding-left:40px;margin:11px 0;}
+  ol.step>li::before{
+    counter-increment:step;content:counter(step,decimal-leading-zero);
+    position:absolute;left:0;top:1px;
+    width:26px;height:26px;line-height:23px;text-align:center;
+    border:1.5px solid var(--accent);color:var(--accent-ink);background:#fff;
+    border-radius:50%;font-size:11.5px;font-weight:700;
+    font-variant-numeric:tabular-nums;
+  }
+
+  footer{
+    border-top:1px solid var(--line-soft);
+    max-width:1080px;margin:0 auto;padding:22px 32px 56px;
+    color:var(--ink-3);font-size:12.5px;
+  }
+
+  /* ── 狭い画面 ───────────────────────── */
+  @media (max-width:840px){
+    .page{grid-template-columns:1fr;gap:0;}
+    aside.toc{
+      position:static;max-height:none;
+      border-bottom:1px solid var(--line-soft);
+      padding:22px 0 18px;margin-bottom:8px;
+    }
+    aside.toc ol{columns:2;column-gap:24px;}
+    main{padding-top:18px;}
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">User Guide</p>
+    <h1>Utawave 用户指南</h1>
+    <p>为翻唱歌手打造的专注录音的 DAW。本指南面向初次使用的用户，介绍从录音到导出的基本操作。</p>
+  </div>
+</header>
+
+<div class="page">
+  <aside class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#intro">开始之前·界面说明</a></li>
+      <li><a href="#project">项目基础</a></li>
+      <li><a href="#import">导入伴奏音源</a></li>
+      <li><a href="#prepare">准备录音</a></li>
+      <li><a href="#tempo">速度与节拍器</a></li>
+      <li><a href="#record">录音</a></li>
+      <li><a href="#takes">录音段（take）管理</a></li>
+      <li><a href="#edit">编辑波形</a></li>
+      <li><a href="#pitch">变调·速度检测</a></li>
+      <li><a href="#fx">效果器（FX）</a></li>
+      <li><a href="#midi">导入·手动输入 MIDI</a></li>
+      <li><a href="#export">导出（WAV / MP3）</a></li>
+      <li><a href="#gestures">右键·实用操作</a></li>
+      <li><a href="#shortcuts">快捷键速查表</a></li>
+      <li><a href="#trouble">遇到问题时</a></li>
+    </ol>
+  </aside>
+
+  <main>
+  <section id="intro">
+    <h2><span class="num">01</span>开始之前·界面说明</h2>
+    <p class="lead">Utawave 是一款专注于「录音」、面向翻唱·投稿用途的 DAW。它尽量省去复杂设置，让你以最短的流程完成<b>导入伴奏音源、录音、导出</b>这一套操作。</p>
+    <h3>界面构成</h3>
+    <ul>
+      <li><b>顶部（工具栏）</b>：播放 / 停止 / 录音按钮、播放位置的时间显示、速度（BPM）、节拍器与循环的切换。</li>
+      <li><b>左侧（TRACKS 面板）</b>：轨道列表。每条轨道的音量（Vol）·左右声相（Pan）·混响（Rev）·<kbd>M</kbd> 静音·<kbd>S</kbd> 独奏·<kbd>R</kbd> 录音预备·<kbd>I</kbd> 输入监听等。</li>
+      <li><b>中央（时间线）</b>：录下的歌声与导入的音源会以「波形」的形式横向排列。可在此进行剪切、移动等操作。</li>
+      <li><b>右侧（MASTER 面板）</b>：整首曲子的最终音量与电平表。可折叠收起。</li>
+    </ul>
+    <div class="tip"><b>提示：</b>大多数操作既可用按钮也可用键盘完成。建议先用按钮熟悉操作，熟练后再使用<a href="#shortcuts">快捷键</a>会让工作更快。</div>
+  </section>
+
+  <section id="project">
+    <h2><span class="num">02</span>项目基础</h2>
+    <p>你的工作内容以「项目」为单位保存（文件扩展名为 <code>.uta</code>）。可以理解为每首曲子建立一个项目。</p>
+    <h3>新建·打开·保存</h3>
+    <ul>
+      <li><b>新建</b>：「文件」→「新建项目...」</li>
+      <li><b>打开</b>：「文件」→「打开...」（<kbd>Ctrl+O</kbd>）。也可从启动画面的「最近使用的项目」中打开。</li>
+      <li><b>保存</b>：<kbd>Ctrl+S</kbd>。另存为是 <kbd>Ctrl+Shift+S</kbd>。</li>
+    </ul>
+    <h3>自动保存与备份</h3>
+    <p>程序会每隔一段时间自动保存，并额外保留带日期时间的<b>多代备份</b>。万一程序意外退出，下次打开同一项目时会询问你<b>是否恢复</b>。</p>
+    <div class="note"><b>音源文件会保存在项目内部：</b>导入的音频与录音会复制到项目文件夹内的 <code>Audio</code> 文件夹中。把项目交给他人时，请<b>连同整个文件夹</b>一起转交。</div>
+  </section>
+
+  <section id="import">
+    <h2><span class="num">03</span>导入伴奏音源</h2>
+    <p>首先导入伴奏（off vocal / 伴奏音源）。</p>
+    <ol class="step">
+      <li>点击界面右上角的 <kbd>IMPORT</kbd> 按钮，或选择「文件」→「导入音频...」（<kbd>Ctrl+I</kbd>）。也可以把音源文件<b>拖放到时间线上</b>。<kbd>IMPORT</kbd> 按钮可同时选择音频和 MIDI，会根据扩展名自动判别。</li>
+      <li>导入的音源会自动放置到<b>曲子开头（0 秒）</b>处。</li>
+    </ol>
+    <p><b>支持的格式：</b>支持 WAV / AIFF / MP3 / FLAC / Ogg 等常见格式（macOS 上还可使用 m4a / aac 等。支持的格式因操作系统略有不同）。采样率不同的文件会<b>自动转换</b>后导入。</p>
+    <div class="tip"><b>音量也会自动统一：</b>导入时会把音量（响度）自动调整到一个合适的目标大小（可在设置中关闭）。</div>
+  </section>
+
+  <section id="prepare">
+    <h2><span class="num">04</span>准备录音</h2>
+    <ol class="step">
+      <li><b>添加轨道</b>：通过 TRACKS 面板左下方的 <kbd>+</kbd> 按钮（或底部的「+ Add Track」），选择单声道／立体声。录歌通常用<b>单声道</b>即可。</li>
+      <li><b>选择输入</b>：在轨道的「In:」中选择要使用的麦克风（输入通道）。</li>
+      <li><b>录音预备</b>：点亮要录音的轨道上的 <kbd>R</kbd> 按钮。这样就进入了「录到该轨道」的状态。</li>
+      <li><b>检查声音</b>：点亮 <kbd>I</kbd>（输入监听）后，会听到自己的声音返回，电平表也会跟着动。出声确认电平表会摆动即可。</li>
+    </ol>
+    <div class="note"><b>多轨同时录音：</b>在多条轨道上点亮 <kbd>R</kbd>，并分别选择不同的输入，就能同时录到多条轨道。</div>
+    <div class="warn"><b>没有声音、或找不到输入时：</b>请在「文件」→「设置」的音频设置中，确认是否已选择要使用的音频设备（音频接口）。</div>
+  </section>
+
+  <section id="tempo">
+    <h2><span class="num">05</span>速度与节拍器</h2>
+    <ul>
+      <li><b>速度（BPM）</b>：<b>双击</b>工具栏的 BPM 显示，即可直接输入数值。</li>
+      <li><b>用敲击确定</b>：跟着曲子敲击 <kbd>TAP</kbd> 按钮，即可推算出速度。</li>
+      <li><b>自动检测</b>：右键点击导入的音源 →「检测速度」，即可从伴奏自动推算 BPM。</li>
+      <li><b>节拍器</b>：用 <kbd>CLICK</kbd> 按钮开关节拍声。还可在专用的节拍器轨道上调整音量等。</li>
+      <li><b>预备拍（count-in）</b>：可设置录音前先响几小节的预备拍（在设置中）。</li>
+    </ul>
+  </section>
+
+  <section id="record">
+    <h2><span class="num">06</span>录音</h2>
+    <ol class="step">
+      <li>确认要录音的轨道上 <kbd>R</kbd> 已点亮。</li>
+      <li>把播放位置对准到录音开始的位置（点击标尺，或用 <kbd>N</kbd> / <kbd>B</kbd> 每次移动一小节）。</li>
+      <li>按 <kbd>R</kbd> 键（或工具栏的录音按钮）开始录音。如设有预备拍，会先响完预备拍再开始。</li>
+      <li>再次按 <kbd>R</kbd>，或按 <kbd>Space</kbd> 停止。</li>
+    </ol>
+    <h3>实用的录音方式</h3>
+    <ul>
+      <li><b>补录（punch-in）</b>：在播放过程中，于想重录的位置按 <kbd>R</kbd>，即可只覆盖录制那一段（接缝处会自动平滑处理）。</li>
+      <li><b>循环录音</b>：用 <kbd>L</kbd> 让循环区间反复播放，可连续录制多个录音段。</li>
+      <li><b>回溯确定</b>：播放中的歌声会在后台持续被捕捉。当你觉得「刚才那次唱得好」时，可用 <kbd>Ctrl+Shift+R</kbd> 回溯并确定这段录音。</li>
+    </ul>
+  </section>
+
+  <section id="takes">
+    <h2><span class="num">07</span>录音段（take）管理</h2>
+    <p>在同一位置重录时，之前的录音段不会被删除，而是自动转存到<b>录音段轨道（take lane）</b>。你可以反复试听、挑选满意的录音段。</p>
+    <ul>
+      <li>用轨道的 <kbd>TList</kbd> 按钮切换录音段轨道的显示 / 隐藏。</li>
+      <li>用各录音段的 <kbd>S</kbd>（独奏）可只试听该录音段。</li>
+      <li>用想采用的录音段上的 <kbd>↑</kbd> 按钮（或 <kbd>Shift+↑</kbd>），可将该录音段提升为主轨。</li>
+    </ul>
+  </section>
+
+  <section id="edit">
+    <h2><span class="num">08</span>编辑波形</h2>
+    <p>时间线上的一段段声音称为「波形」。可以用鼠标直观地编辑。</p>
+    <table>
+      <tr><th>想做的事</th><th>操作</th></tr>
+      <tr><td>移动</td><td>拖动波形（<kbd>Ctrl</kbd>＋拖动可固定左右位置、只在上下轨道间移动）</td></tr>
+      <tr><td>改变长度（裁剪）</td><td>拖动波形左右两端（网格开启时端点会吸附到网格／按住 <kbd>Ctrl</kbd> 可临时自由调整）</td></tr>
+      <tr><td>分割（剪切）</td><td><kbd>Alt</kbd>＋点击（想分割的位置）</td></tr>
+      <tr><td>删除</td><td>选中后按 <kbd>Delete</kbd> / <kbd>Backspace</kbd></td></tr>
+      <tr><td>复制 / 粘贴 / 再制</td><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> / <kbd>Ctrl+D</kbd></td></tr>
+      <tr><td>微移一点</td><td><kbd>←</kbd> / <kbd>→</kbd></td></tr>
+      <tr><td>撤销 / 重做</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td></tr>
+    </table>
+    <h3>淡入淡出与交叉淡化</h3>
+    <ul>
+      <li><b>淡入／淡出</b>：选中范围后按 <kbd>F</kbd>。让开头和结尾更平滑。</li>
+      <li><b>交叉淡化</b>：选中两段波形重叠／相接的部分后按 <kbd>X</kbd>。可防止接缝处「啪」的杂音（也可右键 →「绘制交叉淡化」）。</li>
+    </ul>
+    <h3>调整音量</h3>
+    <ul>
+      <li><b>各段波形的音量</b>：用波形的推子升降音量。若想在波形内部局部改变音量，可在音量线上添加点（断点）来精细调整。</li>
+      <li><b>剪除静音</b>：右键 →「剪除静音」，可自动去除换气等安静的部分。</li>
+    </ul>
+    <div class="tip"><b>放大·缩小显示：</b>用 <kbd>Ctrl</kbd>＋鼠标滚轮可横向缩放，<kbd>Shift+F</kbd> 可让整首曲子刚好显示在画面内。</div>
+  </section>
+
+  <section id="pitch">
+    <h2><span class="num">09</span>变调·速度检测</h2>
+    <ul>
+      <li><b>变调（改变音高）</b>：右键点击波形 →「变调...」，可在 -6～+6 个半音之间选择。会以高品质处理在保持音质的同时移调。结果会保存为新文件，相同设置下次会立即套用。选择「0（原音高）」即可还原。</li>
+      <li><b>检测速度</b>：右键点击波形 →「检测速度」，可自动推算伴奏的 BPM。</li>
+    </ul>
+  </section>
+
+  <section id="fx">
+    <h2><span class="num">10</span>效果器（FX）</h2>
+    <p>可以为单条轨道或整体（母线 master）添加混响、压缩器等<b>插件</b>。</p>
+    <h3>打开 FX 插槽</h3>
+    <p>按下 TRACKS 面板左下方的 <kbd>FX</kbd> 按钮，每条轨道的右侧就会显示<b>效果器插槽（INS）</b>。再按一次即可隐藏。</p>
+    <ul>
+      <li>点击空插槽 → 选择要用的插件并添加。</li>
+      <li>点击已添加插件的标签，即可打开其设置界面。</li>
+      <li><kbd>Ctrl</kbd>＋点击可临时关闭（旁通 bypass）。拖动可重新排序或移到其他轨道（<kbd>Alt</kbd>＋拖动为复制）。</li>
+    </ul>
+    <div class="note"><b>插件没有出现时：</b>打开「文件」→「管理插件...」，执行扫描。已安装的插件就会显示在列表中。</div>
+    <h3>添加混响（残响）</h3>
+    <p>用每条轨道的 <kbd>Rev</kbd> 滑块，可为该轨道添加混响（残响）。也可只对录音时的「返送（监听）」生效，即便如此也<b>不会写入录音文件</b>。</p>
+  </section>
+
+  <section id="midi">
+    <h2><span class="num">11</span>导入·手动输入 MIDI</h2>
+    <p>可以导入 MIDI 数据（<code>.mid</code> 文件），用作引导旋律、和声或伴奏。也可以手动输入。</p>
+
+    <h3>导入 MIDI 文件</h3>
+    <ol class="step">
+      <li>选择「文件」→「导入 MIDI...」，打开 <code>.mid</code> 文件（也可拖放到时间线上）。</li>
+      <li>在「导入 MIDI」对话框中，<b>勾选想导入的轨道</b>（会显示各轨道的通道与音符数量）。</li>
+      <li>放置方式可从「<b>放置到开头</b>」或「<b>放置到当前播放位置</b>」中选择。需要时可勾选「同时导入速度·拍号」「同时导入标记」。</li>
+      <li>按下「<b>导入</b>」，所选轨道便会作为 MIDI 轨道添加进来。</li>
+    </ol>
+    <div class="note"><b>要发出声音的话：</b>导入的 MIDI 轨道会以内置音色播放。若插入你喜欢的音源插件，就能用该音色发声（添加方式与<a href="#fx">效果器（FX）</a>相同）。</div>
+
+    <h3>手动输入（制作和声·引导）</h3>
+    <ul>
+      <li>从添加轨道菜单中选择「添加 MIDI 轨道」。</li>
+      <li><b>双击</b>时间线会创建一个用于输入的区段，<b>双击</b>该区段即可打开钢琴卷帘（键盘编辑界面）。</li>
+      <li>在钢琴卷帘中，双击空白处可添加音符，拖动可移动／改变长度，按 <kbd>Delete</kbd> 删除。用 <kbd>↑</kbd> / <kbd>↓</kbd> 升降半音。</li>
+    </ul>
+  </section>
+
+  <section id="export">
+    <h2><span class="num">12</span>导出（WAV / MP3）</h2>
+    <p>完成后导出为音频文件。</p>
+    <ol class="step">
+      <li>点击界面右上角的 <kbd>EXPORT</kbd> 按钮，或打开「文件」→「导出...」（<kbd>Ctrl+E</kbd>）。</li>
+      <li>选择格式（<b>WAV</b> / <b>AIFF</b> / <b>MP3</b>）与范围（整首曲子／选定范围／小节范围）。</li>
+      <li>选择把整个混音导出为 1 个文件，还是按轨道（分轨 stem）分别导出。</li>
+    </ol>
+    <div class="tip"><b>防止破音：</b>导出时若声音过大，会自动稍微降低以防破音（可在设置中关闭）。</div>
+  </section>
+
+  <section id="gestures">
+    <h2><span class="num">13</span>右键·实用操作</h2>
+    <p class="lead">Utawave 中有许多按钮上没有显示、需要通过<b>右键菜单</b>或<b>双击</b>才能完成的操作。这里整理了一些知道后能让工作轻松许多的内容。</p>
+
+    <h3>右键能做的事</h3>
+    <table>
+      <tr><th>在哪里右键？</th><th>能做什么</th></tr>
+      <tr><td>波形（音频片段）</td><td>变调 ／ 检测速度 ／ 调整响度（音量）／ 剪除静音 ／ 绘制交叉淡化</td></tr>
+      <tr><td>录音段轨道上的波形</td><td>用「使用这个录音段」把该录音段采用为主轨（Lane 0）</td></tr>
+      <tr><td>轨道头部（轨道名附近）</td><td>更改轨道颜色 ／ 再制轨道 ／ 删除轨道 ／ 调整响度</td></tr>
+      <tr><td>波形按钮（MIDI 轨道）</td><td>切换内置合成器的开／关</td></tr>
+      <tr><td><kbd>CLICK</kbd> 按钮</td><td>设置节拍器的音量·音色·重音</td></tr>
+      <tr><td>「TRACKS」「MASTER」标题</td><td>统一切换效果器插槽（INS）的显示／隐藏</td></tr>
+    </table>
+    <div class="note"><b>删除可以撤销：</b>即使删除了轨道或片段，也可用 <kbd>Ctrl+Z</kbd>（Mac 为 <kbd>⌘Z</kbd>）撤销。请放心尝试。</div>
+
+    <h3>双击能做的事</h3>
+    <table>
+      <tr><th>双击哪里？</th><th>能做什么</th></tr>
+      <tr><td>音量·Pan·Rev 滑块</td><td>恢复为初始值（音量为 0dB，Pan 为居中，Rev 为 0）</td></tr>
+      <tr><td>母线的音量推子</td><td>恢复为 0dB</td></tr>
+      <tr><td>工具栏的 BPM 显示</td><td>直接输入速度数值</td></tr>
+      <tr><td>轨道列表下方的空白处</td><td>添加单声道轨道</td></tr>
+      <tr><td>时间线的空白处（MIDI 轨道）</td><td>创建用于输入的 MIDI 片段 ／ 再次双击打开钢琴卷帘</td></tr>
+    </table>
+
+    <h3>记住会很方便的键位操作</h3>
+    <table>
+      <tr><th>操作</th><th>作用</th></tr>
+      <tr><td><kbd>Alt</kbd>＋点击（波形上）</td><td>在该位置分割波形（剪切）</td></tr>
+      <tr><td><kbd>Ctrl</kbd>＋点击（FX 标签）</td><td>临时关闭该效果器（旁通 bypass）</td></tr>
+      <tr><td><kbd>Alt</kbd>＋拖动（FX 标签）</td><td>复制效果器并移到其他轨道</td></tr>
+      <tr><td><kbd>Shift</kbd>＋点击（轨道头部）</td><td>一次选中多条轨道</td></tr>
+      <tr><td><kbd>Shift+↑</kbd></td><td>把所选录音段采用为主轨</td></tr>
+    </table>
+    <div class="note">在 Mac 上请将 <kbd>Ctrl</kbd>→<kbd>⌘</kbd>、<kbd>Alt</kbd>→<kbd>Option</kbd> 对应替换。</div>
+  </section>
+
+  <section id="shortcuts">
+    <h2><span class="num">14</span>快捷键速查表</h2>
+    <p>这里只摘录了主要项目。完整列表可从「帮助」→「快捷键列表...」（<kbd>Ctrl+/</kbd> / Mac 为 <kbd>⌘/</kbd>）查看。</p>
+    <table class="keys">
+      <tr><th style="width:46%">作用</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
+      <tr><td>播放 / 停止</td><td><kbd>Space</kbd></td><td><kbd>Space</kbd></td></tr>
+      <tr><td>录音 开始 / 停止</td><td><kbd>R</kbd></td><td><kbd>R</kbd></td></tr>
+      <tr><td>循环播放 开 / 关</td><td><kbd>L</kbd></td><td><kbd>L</kbd></td></tr>
+      <tr><td>前进 / 后退一小节</td><td><kbd>N</kbd> / <kbd>B</kbd></td><td><kbd>N</kbd> / <kbd>B</kbd></td></tr>
+      <tr><td>播放条前进 / 后退</td><td><kbd>+</kbd> / <kbd>-</kbd></td><td><kbd>+</kbd> / <kbd>-</kbd></td></tr>
+      <tr><td>撤销 / 重做</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td></tr>
+      <tr><td>保存</td><td><kbd>Ctrl+S</kbd></td><td><kbd>⌘S</kbd></td></tr>
+      <tr><td>导入音频</td><td><kbd>Ctrl+I</kbd></td><td><kbd>⌘I</kbd></td></tr>
+      <tr><td>导出</td><td><kbd>Ctrl+E</kbd></td><td><kbd>⌘E</kbd></td></tr>
+      <tr><td>分割波形（剪切）</td><td><kbd>Alt</kbd>＋点击</td><td><kbd>Option</kbd>＋点击</td></tr>
+      <tr><td>旁通插件</td><td><kbd>Ctrl</kbd>＋点击</td><td><kbd>⌘</kbd>＋点击</td></tr>
+      <tr><td>淡化 / 交叉淡化</td><td><kbd>F</kbd> / <kbd>X</kbd></td><td><kbd>F</kbd> / <kbd>X</kbd></td></tr>
+      <tr><td>让整首曲子适应画面</td><td><kbd>Shift+F</kbd></td><td><kbd>⇧F</kbd></td></tr>
+      <tr><td>横向缩放</td><td><kbd>Ctrl</kbd>＋滚轮</td><td><kbd>⌘</kbd>＋滚轮</td></tr>
+      <tr><td>所选轨道的高度（最大↔标准 / 最小↔标准）</td><td><kbd>[</kbd> / <kbd>]</kbd></td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
+    </table>
+    <div class="note">本指南正文中的快捷键采用 Windows 写法。在 Mac 上请将 <kbd>Ctrl</kbd>→<kbd>⌘</kbd>、<kbd>Alt</kbd>→<kbd>Option</kbd> 对应替换。</div>
+  </section>
+
+  <section id="trouble">
+    <h2><span class="num">15</span>遇到问题时</h2>
+    <h3>提示「找不到音频文件」</h3>
+    <p>项目所引用的音源可能已被移动／删除。把原文件放回项目内的 <code>Audio</code> 文件夹后会自动恢复。</p>
+    <h3>上次的工作丢失了／程序退出了</h3>
+    <p>重新打开已保存的项目时，如果存在更新的备份，会询问你是否<b>恢复</b>。选择「恢复」即可回到退出前的状态。</p>
+    <h3>麦克风的声音录不进去</h3>
+    <ul>
+      <li>确认操作系统的麦克风使用权限中已允许 Utawave。</li>
+      <li>确认设置的音频设置中已选择正确的输入设备和通道。</li>
+      <li>确认轨道的 <kbd>R</kbd>（录音预备）已点亮。</li>
+    </ul>
+    <h3>自己的声音听起来有延迟（监听延迟）</h3>
+    <p>在 Windows 上使用音频接口时，若在音频设置中将驱动类型选为 <b>ASIO</b>（接口附带的驱动），会有大幅改善。同时把缓冲区大小调小也能减少延迟（如果调得太小导致声音断续，请往回调一档）。</p>
+    <h3>录下的歌声听起来比伴奏慢</h3>
+    <p>Utawave 在录音时会自动补偿设备的延迟（latency）。如果仍有偏差，请在设置的「录音流程」中，把<b>附加录音补偿 (ms)</b> 一点点增大来调整（增大会使其向前移动）。</p>
+    <h3>插件不出现在列表中</h3>
+    <p>请在「文件」→「管理插件...」中执行「全部重新扫描」。刚安装的插件也会被识别。有问题的插件会在扫描时被自动排除（程序不会崩溃）。</p>
+  </section>
+  </main>
+</div>
+
+<footer>
+  Utawave — 为翻唱歌手打造的专注录音的 DAW / 开源（AGPL v3）。<br>
+  支持开发: <a href="https://donate.stripe.com/8x29ATdTI6g07vo49S38404">捐赠页面</a><br>
+  本指南随程序一同附带。最新信息请查看发布页面。
+</footer>
+</body>
+</html>

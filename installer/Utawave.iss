@@ -69,8 +69,8 @@ Name: "utaassoc"; Description: ".uta ファイルを Utawave で開く (関連�
 
 [Files]
 Source: "{#SrcDir}\{#AppExe}";              DestDir: "{app}"; Flags: ignoreversion
-; アプリ内「使い方ドキュメント」が exe 隣の help.html を開く
-Source: "{#DocDir}\help.html";              DestDir: "{app}"; Flags: ignoreversion
+; アプリ内「使い方ドキュメント」が exe 隣の help*.html を開く (言語別ヘルプを全て同梱)
+Source: "{#DocDir}\help*.html";             DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DocDir}\MANUAL.html";            DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DocDir}\README.txt";             DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion

@@ -197,8 +197,9 @@ jobs:
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
           Copy-Item LICENSE Utawave-Windows/LICENSE.txt
-          # アプリ内「使い方ドキュメント」が exe 隣の help.html を開くため zip にも同梱する
-          Copy-Item Docs/help.html Utawave-Windows/help.html
+          # アプリ内「使い方ドキュメント」が exe 隣の help*.html を開くため、言語別ヘルプを全て同梱する
+          # (help.html=ja / help.en.html / help.zh-Hans.html / help.zh-Hant.html / help.ko.html)
+          Copy-Item Docs/help*.html Utawave-Windows/
           Compress-Archive -Path Utawave-Windows -DestinationPath "Utawave-${{ inputs.version }}-Windows-x64.zip" -Force
 
       - name: Upload Windows zip

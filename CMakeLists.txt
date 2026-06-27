@@ -282,15 +282,25 @@ target_link_libraries(Utawave PRIVATE
 # ヘルプメニュー「使い方ドキュメント...」が既定ブラウザで開く単一 HTML ファイル。
 # macOS: .app/Contents/Resources/help.html に配置 (Xcode の Copy Bundle Resources)。
 # Windows: 実行ファイル隣へ POST_BUILD でコピー。
-set(UTAWAVE_HELP_DOC "${CMAKE_CURRENT_SOURCE_DIR}/Docs/help.html")
-target_sources(Utawave PRIVATE "${UTAWAVE_HELP_DOC}")
-set_source_files_properties("${UTAWAVE_HELP_DOC}" PROPERTIES
+# 言語別ヘルプ (ja=基底 help.html / 英・簡体・繁体・韓国)。showDocumentation() が現在の
+# 言語のファイルを開き、無ければ help.html へフォールバックする。
+set(UTAWAVE_HELP_DOCS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Docs/help.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Docs/help.en.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Docs/help.zh-Hans.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Docs/help.zh-Hant.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Docs/help.ko.html")
+target_sources(Utawave PRIVATE ${UTAWAVE_HELP_DOCS})
+set_source_files_properties(${UTAWAVE_HELP_DOCS} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources)
 if(WIN32)
-    add_custom_command(TARGET Utawave POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${UTAWAVE_HELP_DOC}" "$<TARGET_FILE_DIR:Utawave>/help.html"
-        VERBATIM)
+    foreach(_helpdoc ${UTAWAVE_HELP_DOCS})
+        get_filename_component(_helpname "${_helpdoc}" NAME)
+        add_custom_command(TARGET Utawave POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_helpdoc}" "$<TARGET_FILE_DIR:Utawave>/${_helpname}"
+            VERBATIM)
+    endforeach()
 endif()
 
 # ── ユニットテスト (コンソールアプリ UtawaveTests) ──

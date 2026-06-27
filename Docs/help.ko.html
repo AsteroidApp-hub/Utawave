@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Utawave 사용 설명서</title>
+<style>
+  :root{
+    --accent:#e06422;
+    --accent-ink:#b8480f;
+    --ink:#1b1e23;
+    --ink-2:#3c434c;
+    --ink-3:#697078;
+    --line:#d6dadf;
+    --line-soft:#e7eaee;
+    --bg:#ffffff;
+    --bg-soft:#f6f7f9;
+    --kbd-bg:#23272e;
+    --sidebar-bg:#fbfbfc;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",
+                "Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif;
+    color:var(--ink);
+    background:var(--bg);
+    line-height:1.85;
+    font-size:15.5px;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ── ヘッダ ───────────────────────────── */
+  header.masthead{
+    background:#15171c;
+    color:#fff;
+    border-bottom:2px solid var(--accent);
+  }
+  header.masthead .wrap{
+    max-width:1080px;margin:0 auto;padding:30px 32px 26px;
+  }
+  .eyebrow{
+    font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--accent);font-weight:700;margin:0 0 8px;
+  }
+  header.masthead h1{
+    margin:0;font-size:26px;font-weight:700;letter-spacing:.01em;color:#fff;
+  }
+  header.masthead p{margin:9px 0 0;color:#9aa1aa;font-size:14px;max-width:620px;}
+
+  /* ── レイアウト（サイドバー + 本文）──────── */
+  .page{
+    max-width:1080px;margin:0 auto;padding:0 32px;
+    display:grid;grid-template-columns:236px 1fr;gap:48px;
+    align-items:start;
+  }
+  aside.toc{
+    position:sticky;top:0;align-self:start;
+    max-height:100vh;overflow:auto;
+    padding:30px 0 40px;
+  }
+  aside.toc h2{
+    font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink-3);margin:0 0 12px;font-weight:700;
+  }
+  aside.toc ol{list-style:none;margin:0;padding:0;counter-reset:s;}
+  aside.toc li{margin:0;}
+  aside.toc a{
+    counter-increment:s;
+    display:block;padding:5px 12px 5px 0;
+    color:var(--ink-2);text-decoration:none;font-size:13.5px;
+    border-left:2px solid transparent;padding-left:14px;
+    transition:color .12s,border-color .12s;
+  }
+  aside.toc a::before{
+    content:counter(s,decimal-leading-zero);
+    color:var(--ink-3);font-variant-numeric:tabular-nums;
+    font-size:11.5px;margin-right:9px;
+  }
+  aside.toc a:hover{color:var(--accent-ink);border-left-color:var(--accent);}
+
+  main{padding:30px 0 80px;min-width:0;}
+
+  /* ── セクション ──────────────────────── */
+  section{margin:0 0 44px;scroll-margin-top:16px;}
+  section h2{
+    font-size:19px;font-weight:700;letter-spacing:.005em;
+    margin:0 0 14px;padding-bottom:11px;
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:baseline;gap:11px;
+  }
+  section h2 .num{
+    color:var(--accent);font-weight:700;font-size:13px;
+    font-variant-numeric:tabular-nums;letter-spacing:.04em;
+    flex:0 0 auto;padding-top:1px;
+  }
+  section h3{
+    font-size:15px;font-weight:700;margin:22px 0 6px;color:var(--ink);
+    padding-left:11px;border-left:3px solid var(--accent);
+  }
+  p{margin:9px 0;}
+  .lead{font-size:15.5px;color:var(--ink-2);}
+  ul,ol{margin:9px 0;padding-left:22px;}
+  li{margin:5px 0;}
+  a{color:var(--accent-ink);}
+  b{font-weight:700;}
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:var(--bg-soft);border:1px solid var(--line-soft);
+    border-radius:4px;padding:.5px 5px;font-size:13px;color:var(--ink-2);
+  }
+
+  kbd{
+    display:inline-block;background:var(--kbd-bg);color:#f2f3f5;
+    border-radius:5px;padding:1.5px 7px;font-size:12.5px;font-weight:600;
+    font-family:inherit;margin:0 1px;
+    border:1px solid #000;box-shadow:inset 0 -1px 0 rgba(0,0,0,.35);
+    white-space:nowrap;line-height:1.5;
+  }
+
+  /* ── 注記 ───────────────────────────── */
+  .tip,.note,.warn{
+    background:var(--bg-soft);
+    border:1px solid var(--line-soft);border-left-width:3px;
+    border-radius:6px;padding:11px 15px;margin:14px 0;font-size:14.5px;
+    color:var(--ink-2);
+  }
+  .tip{border-left-color:var(--accent);}
+  .note{border-left-color:#3f6fb0;}
+  .warn{border-left-color:#c0392b;}
+  .tip b,.note b,.warn b{color:var(--ink);}
+
+  /* ── 表 ─────────────────────────────── */
+  table{border-collapse:collapse;width:100%;margin:13px 0;font-size:14px;}
+  th,td{border:1px solid var(--line-soft);padding:8px 13px;text-align:left;vertical-align:top;}
+  th{background:var(--bg-soft);font-weight:700;width:44%;color:var(--ink);}
+  tr:nth-child(even) td{background:#fcfcfd;}
+  td kbd{margin-right:2px;}
+
+  /* ── 手順（番号つき）────────────────── */
+  ol.step{counter-reset:step;list-style:none;padding-left:0;margin:12px 0;}
+  ol.step>li{position:relative;padding-left:40px;margin:11px 0;}
+  ol.step>li::before{
+    counter-increment:step;content:counter(step,decimal-leading-zero);
+    position:absolute;left:0;top:1px;
+    width:26px;height:26px;line-height:23px;text-align:center;
+    border:1.5px solid var(--accent);color:var(--accent-ink);background:#fff;
+    border-radius:50%;font-size:11.5px;font-weight:700;
+    font-variant-numeric:tabular-nums;
+  }
+
+  footer{
+    border-top:1px solid var(--line-soft);
+    max-width:1080px;margin:0 auto;padding:22px 32px 56px;
+    color:var(--ink-3);font-size:12.5px;
+  }
+
+  /* ── 狭い画面 ───────────────────────── */
+  @media (max-width:840px){
+    .page{grid-template-columns:1fr;gap:0;}
+    aside.toc{
+      position:static;max-height:none;
+      border-bottom:1px solid var(--line-soft);
+      padding:22px 0 18px;margin-bottom:8px;
+    }
+    aside.toc ol{columns:2;column-gap:24px;}
+    main{padding-top:18px;}
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">User Guide</p>
+    <h1>Utawave 사용 설명서</h1>
+    <p>커버 보컬을 위한 녹음 특화 DAW. 녹음부터 내보내기까지의 기본 조작을 처음 사용하는 분을 위해 정리했습니다.</p>
+  </div>
+</header>
+
+<div class="page">
+  <aside class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#intro">시작하기·화면 보는 법</a></li>
+      <li><a href="#project">프로젝트의 기본</a></li>
+      <li><a href="#import">반주 음원 가져오기</a></li>
+      <li><a href="#prepare">녹음 준비하기</a></li>
+      <li><a href="#tempo">템포와 메트로놈</a></li>
+      <li><a href="#record">녹음하기</a></li>
+      <li><a href="#takes">테이크 관리</a></li>
+      <li><a href="#edit">파형 편집하기</a></li>
+      <li><a href="#pitch">키 변경·템포 검출</a></li>
+      <li><a href="#fx">이펙트(FX)</a></li>
+      <li><a href="#midi">MIDI 불러오기·입력하기</a></li>
+      <li><a href="#export">내보내기(WAV / MP3)</a></li>
+      <li><a href="#gestures">우클릭·편리한 조작</a></li>
+      <li><a href="#shortcuts">단축키 한눈에 보기</a></li>
+      <li><a href="#trouble">문제가 생겼을 때</a></li>
+    </ol>
+  </aside>
+
+  <main>
+  <section id="intro">
+    <h2><span class="num">01</span>시작하기·화면 보는 법</h2>
+    <p class="lead">Utawave는 커버 영상·노래 투고를 위한 「녹음」에 특화된 DAW입니다. 어려운 설정은 최대한 줄이고, <b>반주 음원을 넣고, 녹음하고, 내보내는</b> 흐름을 가장 빠르게 진행할 수 있도록 설계했습니다.</p>
+    <h3>화면 구성</h3>
+    <ul>
+      <li><b>상단(툴바)</b>：재생 / 정지 / 녹음 버튼, 재생 위치의 시간 표시, 템포(BPM), 메트로놈과 루프 전환.</li>
+      <li><b>왼쪽(TRACKS 패널)</b>：트랙 목록. 각 트랙의 음량(Vol)·좌우(Pan)·잔향(Rev)·<kbd>M</kbd> 뮤트·<kbd>S</kbd> 솔로·<kbd>R</kbd> 녹음 암(arm)·<kbd>I</kbd> 입력 모니터링 등.</li>
+      <li><b>중앙(타임라인)</b>：녹음한 목소리나 가져온 음원이 「파형」으로 가로로 나열됩니다. 여기서 자르거나 옮길 수 있습니다.</li>
+      <li><b>오른쪽(MASTER 패널)</b>：곡 전체의 최종 음량과 미터. 접을 수 있습니다.</li>
+    </ul>
+    <div class="tip"><b>팁：</b>대부분의 조작은 버튼과 키보드 양쪽에서 할 수 있습니다. 먼저 버튼으로 익숙해지고, 익숙해지면 <a href="#shortcuts">단축키</a>를 사용하면 작업이 빨라집니다.</div>
+  </section>
+
+  <section id="project">
+    <h2><span class="num">02</span>프로젝트의 기본</h2>
+    <p>작업 내용은 「프로젝트」라는 단위로 저장합니다(파일 확장자는 <code>.uta</code>). 곡마다 프로젝트를 하나씩 만드는 식입니다.</p>
+    <h3>새로 만들기·열기·저장</h3>
+    <ul>
+      <li><b>새로 만들기</b>：「파일」→「새 프로젝트...」</li>
+      <li><b>열기</b>：「파일」→「열기...」(<kbd>Ctrl+O</kbd>). 시작 화면의 「최근 사용한 프로젝트」에서도 열 수 있습니다.</li>
+      <li><b>저장</b>：<kbd>Ctrl+S</kbd>. 다른 이름으로 저장은 <kbd>Ctrl+Shift+S</kbd>.</li>
+    </ul>
+    <h3>자동 저장과 백업</h3>
+    <p>일정 시간마다 자동으로 저장되고, 추가로 날짜·시간이 붙은 <b>세대별 백업</b>이 남습니다. 만약 앱이 종료되더라도, 다음에 같은 프로젝트를 열었을 때 <b>복구할지</b> 물어봅니다.</p>
+    <div class="note"><b>음원 파일은 프로젝트 안에 들어갑니다：</b>가져온 음원이나 녹음은 프로젝트 폴더 내의 <code>Audio</code> 폴더에 복사됩니다. 프로젝트를 다른 사람에게 전달할 때는 <b>폴더째로</b> 전달하세요.</div>
+  </section>
+
+  <section id="import">
+    <h2><span class="num">03</span>반주 음원 가져오기</h2>
+    <p>먼저 반주(오프보컬 / 반주 음원)를 불러옵니다.</p>
+    <ol class="step">
+      <li>화면 오른쪽 위의 <kbd>IMPORT</kbd> 버튼, 또는 「파일」→「오디오 불러오기...」(<kbd>Ctrl+I</kbd>)를 선택합니다. 또는 음원 파일을 <b>타임라인에 드래그 앤 드롭</b>. <kbd>IMPORT</kbd> 버튼은 오디오와 MIDI 둘 다 선택할 수 있으며, 확장자로 자동 판별합니다.</li>
+      <li>가져온 음원은 자동으로 <b>곡의 맨 앞(0초)</b>에 배치됩니다.</li>
+    </ol>
+    <p><b>지원 형식：</b>WAV / AIFF / MP3 / FLAC / Ogg 등 일반적인 형식을 지원합니다(macOS에서는 m4a / aac 등도 가능. 지원 형식은 OS에 따라 일부 다릅니다). 샘플레이트가 다른 파일은 <b>자동으로 변환</b>하여 불러옵니다.</p>
+    <div class="tip"><b>음량도 자동으로 맞춥니다：</b>가져올 때 음량(라우드니스)을 적정한 크기로 자동 조정합니다(설정에서 끌 수 있습니다).</div>
+  </section>
+
+  <section id="prepare">
+    <h2><span class="num">04</span>녹음 준비하기</h2>
+    <ol class="step">
+      <li><b>트랙 추가</b>：TRACKS 패널 왼쪽 아래의 <kbd>+</kbd> 버튼(또는 하단의 「+ Add Track」)에서 모노 / 스테레오를 선택합니다. 노래 녹음은 보통 <b>모노</b>로 충분합니다.</li>
+      <li><b>입력 선택</b>：트랙의 「In:」에서 사용할 마이크(입력 채널)를 선택합니다.</li>
+      <li><b>녹음 암</b>：녹음하려는 트랙의 <kbd>R</kbd> 버튼을 켭니다. 이렇게 하면 「이 트랙에 녹음한다」는 상태가 됩니다.</li>
+      <li><b>목소리 확인</b>：<kbd>I</kbd>(입력 모니터)를 켜면 자신의 목소리가 돌아오고 미터도 움직입니다. 소리를 내서 미터가 흔들리는지 확인해 봅시다.</li>
+    </ol>
+    <div class="note"><b>여러 트랙 동시 녹음：</b><kbd>R</kbd>을 여러 트랙에서 켜고 각각 다른 입력을 선택하면 동시에 여러 트랙에 녹음할 수 있습니다.</div>
+    <div class="warn"><b>소리가 나지 않거나 입력이 나오지 않을 때는：</b>「파일」→「환경설정」의 오디오 설정에서, 사용할 오디오 기기(오디오 인터페이스)가 선택되어 있는지 확인하세요.</div>
+  </section>
+
+  <section id="tempo">
+    <h2><span class="num">05</span>템포와 메트로놈</h2>
+    <ul>
+      <li><b>템포(BPM)</b>：툴바의 BPM 표시를 <b>더블클릭</b>하면 수치를 직접 입력할 수 있습니다.</li>
+      <li><b>탭으로 정하기</b>：<kbd>TAP</kbd> 버튼을 곡에 맞춰 두드리면 템포를 추정할 수 있습니다.</li>
+      <li><b>자동으로 맞추기</b>：가져온 음원을 우클릭 →「템포 검출」로 반주에서 BPM을 자동 추정할 수 있습니다.</li>
+      <li><b>메트로놈</b>：<kbd>CLICK</kbd> 버튼으로 클릭음 켜기 / 끄기. 클릭 전용 트랙에서 음량 등도 조정할 수 있습니다.</li>
+      <li><b>카운트인</b>：녹음 전에 몇 마디 카운트를 울릴지 설정할 수 있습니다(환경설정).</li>
+    </ul>
+  </section>
+
+  <section id="record">
+    <h2><span class="num">06</span>녹음하기</h2>
+    <ol class="step">
+      <li>녹음하려는 트랙의 <kbd>R</kbd>이 켜져 있는지 확인합니다.</li>
+      <li>재생 위치를 녹음 시작 위치에 맞춥니다(룰러를 클릭, 또는 <kbd>N</kbd> / <kbd>B</kbd>로 한 마디씩 이동).</li>
+      <li><kbd>R</kbd> 키(또는 툴바의 녹음 버튼)로 녹음을 시작합니다. 카운트인 설정이 있으면 울린 뒤에 시작됩니다.</li>
+      <li>다시 한 번 <kbd>R</kbd>, 또는 <kbd>Space</kbd>로 정지합니다.</li>
+    </ol>
+    <h3>편리한 녹음 방법</h3>
+    <ul>
+      <li><b>펀치인(punch-in)</b>：재생하면서 다시 녹음하고 싶은 부분에서 <kbd>R</kbd>을 누르면 그 부분만 덮어쓰기 녹음할 수 있습니다(이음매는 자동으로 매끄럽게 처리됩니다).</li>
+      <li><b>루프 녹음</b>：<kbd>L</kbd>로 루프 구간을 반복 재생하면서 여러 테이크를 녹음할 수 있습니다.</li>
+      <li><b>거슬러 올라가 확정</b>：재생 중인 노래는 뒤에서 항상 캡처되고 있습니다. 「방금 게 좋았다」고 생각되면 <kbd>Ctrl+Shift+R</kbd>로 거슬러 올라가 녹음을 확정할 수 있습니다.</li>
+    </ul>
+  </section>
+
+  <section id="takes">
+    <h2><span class="num">07</span>테이크 관리</h2>
+    <p>같은 위치에 다시 녹음하면 이전 테이크는 사라지지 않고 <b>테이크 레인</b>으로 자동으로 보관됩니다. 들어 비교하면서 좋은 테이크를 선택할 수 있습니다.</p>
+    <ul>
+      <li>트랙의 <kbd>TList</kbd> 버튼으로 테이크 레인의 표시 / 숨김을 전환합니다.</li>
+      <li>각 테이크의 <kbd>S</kbd>(솔로)로 그 테이크만 들을 수 있습니다.</li>
+      <li>채택하고 싶은 테이크의 <kbd>↑</kbd> 버튼(또는 <kbd>Shift+↑</kbd>)으로 그 테이크를 메인으로 올릴 수 있습니다.</li>
+    </ul>
+  </section>
+
+  <section id="edit">
+    <h2><span class="num">08</span>파형 편집하기</h2>
+    <p>타임라인 위의 소리 덩어리를 「파형」이라고 부릅니다. 마우스로 직관적으로 편집할 수 있습니다.</p>
+    <table>
+      <tr><th>하고 싶은 것</th><th>조작</th></tr>
+      <tr><td>옮기기</td><td>파형을 드래그(<kbd>Ctrl</kbd>＋드래그로 좌우를 고정하고 위아래 트랙 이동만)</td></tr>
+      <tr><td>길이 바꾸기(트림)</td><td>파형의 좌우 끝을 드래그(그리드 ON이면 끝이 그리드에 흡착／<kbd>Ctrl</kbd>을 누른 채로는 일시적으로 자유)</td></tr>
+      <tr><td>분할하기(컷)</td><td><kbd>Alt</kbd>＋클릭(분할하려는 위치)</td></tr>
+      <tr><td>지우기</td><td>선택 후 <kbd>Delete</kbd> / <kbd>Backspace</kbd></td></tr>
+      <tr><td>복사 / 붙여넣기 / 복제</td><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> / <kbd>Ctrl+D</kbd></td></tr>
+      <tr><td>조금만 옮기기</td><td><kbd>←</kbd> / <kbd>→</kbd></td></tr>
+      <tr><td>실행 취소 / 다시 실행</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td></tr>
+    </table>
+    <h3>페이드와 크로스페이드</h3>
+    <ul>
+      <li><b>페이드인／아웃</b>：범위를 선택하고 <kbd>F</kbd>. 시작과 끝을 매끄럽게 합니다.</li>
+      <li><b>크로스페이드</b>：두 파형의 겹치는／맞닿은 부분을 선택하고 <kbd>X</kbd>. 이음매의 「틱」하는 노이즈를 방지할 수 있습니다(우클릭 →「크로스페이드 그리기」로도 가능).</li>
+    </ul>
+    <h3>음량 조정</h3>
+    <ul>
+      <li><b>파형별 음량</b>：파형의 페이더로 올리고 내립니다. 파형 안에서 부분적으로 음량을 바꾸고 싶을 때는 음량 라인에 점을 찍어(브레이크포인트) 세밀하게 조정할 수 있습니다.</li>
+      <li><b>무음 잘라내기</b>：우클릭 →「무음 잘라내기」로 숨 쉬는 부분 등의 조용한 부분을 자동으로 제거할 수 있습니다.</li>
+    </ul>
+    <div class="tip"><b>표시 확대·축소：</b><kbd>Ctrl</kbd>＋마우스 휠로 가로 방향으로 줌, <kbd>Shift+F</kbd>로 곡 전체가 화면에 들어맞습니다.</div>
+  </section>
+
+  <section id="pitch">
+    <h2><span class="num">09</span>키 변경·템포 검출</h2>
+    <ul>
+      <li><b>키(음정) 바꾸기</b>：파형을 우클릭 →「키 변경...」으로 -6〜+6 반음 중에서 선택할 수 있습니다. 고품질 처리로 음질을 유지한 채 이조합니다. 결과는 새 파일로 저장되며, 같은 설정이면 다음번에는 바로 반영됩니다. 「0(원래 음정)」으로 원래대로 돌아갑니다.</li>
+      <li><b>템포 알아보기</b>：파형을 우클릭 →「템포 검출」로 반주의 BPM을 자동 추정합니다.</li>
+    </ul>
+  </section>
+
+  <section id="fx">
+    <h2><span class="num">10</span>이펙트(FX)</h2>
+    <p>리버브나 컴프레서 등의 <b>플러그인</b>을 트랙이나 전체(마스터)에 추가할 수 있습니다.</p>
+    <h3>FX 슬롯 열기</h3>
+    <p>TRACKS 패널 왼쪽 아래의 <kbd>FX</kbd> 버튼을 누르면 각 트랙의 오른쪽에 <b>이펙트용 슬롯(INS)</b>이 표시됩니다. 다시 한 번 누르면 숨겨집니다.</p>
+    <ul>
+      <li>빈 슬롯을 클릭 → 사용하고 싶은 플러그인을 선택해 추가합니다.</li>
+      <li>추가한 플러그인의 칩을 클릭하면 설정 화면이 열립니다.</li>
+      <li><kbd>Ctrl</kbd>＋클릭으로 일시적으로 끄기(바이패스). 드래그로 순서 변경이나 다른 트랙으로 이동(<kbd>Alt</kbd>＋드래그로 복사).</li>
+    </ul>
+    <div class="note"><b>플러그인이 나오지 않을 때는：</b>「파일」→「플러그인 관리...」를 열고 스캔을 실행하세요. 설치된 플러그인이 목록에 표시됩니다.</div>
+    <h3>리버브(잔향) 더하기</h3>
+    <p>각 트랙의 <kbd>Rev</kbd> 슬라이더로 그 트랙에 잔향(리버브)을 더할 수 있습니다. 녹음 중의 「모니터링」에만 적용할 수도 있으며, 그 경우에도 <b>녹음 파일에는 기록되지 않습니다</b>.</p>
+  </section>
+
+  <section id="midi">
+    <h2><span class="num">11</span>MIDI 불러오기·입력하기</h2>
+    <p>MIDI 데이터(<code>.mid</code> 파일)를 불러와 가이드 멜로디나 화음, 반주로 활용할 수 있습니다. 손으로 직접 입력할 수도 있습니다.</p>
+
+    <h3>MIDI 파일 불러오기</h3>
+    <ol class="step">
+      <li>「파일」→「MIDI 불러오기...」를 선택하고 <code>.mid</code> 파일을 엽니다(타임라인으로의 드래그 앤 드롭도 가능).</li>
+      <li>「MIDI 불러오기」 대화상자에서 <b>불러오고 싶은 트랙에 체크</b>를 합니다(각 트랙의 채널이나 노트 수가 표시됩니다).</li>
+      <li>배치를 「<b>맨 앞에 배치</b>」 또는 「<b>현재 재생 위치에 배치</b>」 중에서 선택합니다. 필요에 따라 「템포·박자도 가져오기」, 「마커도 가져오기」에 체크합니다.</li>
+      <li>「<b>불러오기</b>」를 누르면 선택한 트랙이 MIDI 트랙으로 추가됩니다.</li>
+    </ol>
+    <div class="note"><b>소리를 내려면：</b>불러온 MIDI 트랙은 내장 음색으로 재생됩니다. 원하는 음원 플러그인을 끼우면 그 음색으로 울릴 수 있습니다(<a href="#fx">이펙트(FX)</a>와 같은 방식으로 추가합니다).</div>
+
+    <h3>손으로 입력하기(화음·가이드 만들기)</h3>
+    <ul>
+      <li>트랙 추가 메뉴에서 「MIDI 트랙 추가」를 선택합니다.</li>
+      <li>타임라인을 <b>더블클릭</b>하면 입력용 구간이 만들어지고, 그 구간을 <b>더블클릭</b>하면 피아노롤(건반 편집 화면)이 열립니다.</li>
+      <li>피아노롤에서는 빈 부분을 더블클릭하면 음표 추가, 드래그로 이동／길이 변경, <kbd>Delete</kbd>로 삭제. <kbd>↑</kbd> / <kbd>↓</kbd>로 반음 위아래.</li>
+    </ul>
+  </section>
+
+  <section id="export">
+    <h2><span class="num">12</span>내보내기(WAV / MP3)</h2>
+    <p>완성되면 음성 파일로 내보냅니다.</p>
+    <ol class="step">
+      <li>화면 오른쪽 위의 <kbd>EXPORT</kbd> 버튼, 또는 「파일」→「내보내기...」(<kbd>Ctrl+E</kbd>)를 엽니다.</li>
+      <li>형식(<b>WAV</b> / <b>AIFF</b> / <b>MP3</b>)과 범위(곡 전체／선택 범위／마디 범위)를 선택합니다.</li>
+      <li>믹스 전체를 한 파일로 할지, 트랙별(스템)로 나눌지를 선택해 내보냅니다.</li>
+    </ol>
+    <div class="tip"><b>음 깨짐 방지：</b>내보낼 때 소리가 너무 크면 자동으로 조금 낮춰 깨짐을 방지합니다(설정에서 끌 수 있습니다).</div>
+  </section>
+
+  <section id="gestures">
+    <h2><span class="num">13</span>우클릭·편리한 조작</h2>
+    <p class="lead">Utawave에는 버튼에 나와 있지 않은 <b>우클릭 메뉴</b>나 <b>더블클릭</b>으로 할 수 있는 조작이 많이 있습니다. 알아두면 작업이 한결 편해지는 것들을 정리했습니다.</p>
+
+    <h3>우클릭으로 할 수 있는 것</h3>
+    <table>
+      <tr><th>어디를 우클릭?</th><th>할 수 있는 것</th></tr>
+      <tr><td>파형(오디오 클립)</td><td>키 변경 ／ 템포 검출 ／ 라우드니스(음량) 조정 ／ 무음 잘라내기 ／ 크로스페이드 그리기</td></tr>
+      <tr><td>테이크 레인의 파형</td><td>「이 테이크 사용」으로 그 테이크를 메인(Lane 0)으로 채택</td></tr>
+      <tr><td>트랙 헤더(트랙 이름 근처)</td><td>트랙 컬러 변경 ／ 트랙 복제 ／ 트랙 삭제 ／ 라우드니스 조정</td></tr>
+      <tr><td>파형 버튼(MIDI 트랙)</td><td>내장 신스 켜기／끄기 전환</td></tr>
+      <tr><td><kbd>CLICK</kbd> 버튼</td><td>메트로놈의 음량·음색·악센트 설정</td></tr>
+      <tr><td>「TRACKS」「MASTER」 제목</td><td>이펙트용 슬롯(INS)의 표시／숨김을 한꺼번에 전환</td></tr>
+    </table>
+    <div class="note"><b>삭제는 되돌릴 수 있습니다：</b>트랙이나 클립을 지워도 <kbd>Ctrl+Z</kbd>(Mac은 <kbd>⌘Z</kbd>)로 되돌릴 수 있습니다. 안심하고 시도해 보세요.</div>
+
+    <h3>더블클릭으로 할 수 있는 것</h3>
+    <table>
+      <tr><th>어디를 더블클릭?</th><th>할 수 있는 것</th></tr>
+      <tr><td>음량·Pan·Rev 슬라이더</td><td>초기값으로 되돌리기(음량은 0dB, Pan은 중앙, Rev는 0)</td></tr>
+      <tr><td>마스터의 음량 페이더</td><td>0dB로 되돌리기</td></tr>
+      <tr><td>툴바의 BPM 표시</td><td>템포를 수치로 직접 입력</td></tr>
+      <tr><td>트랙 목록 아래의 빈 곳</td><td>모노 트랙 추가</td></tr>
+      <tr><td>타임라인의 빈 곳(MIDI 트랙)</td><td>입력용 MIDI 클립 생성 ／ 다시 더블클릭으로 피아노롤 열기</td></tr>
+    </table>
+
+    <h3>알아두면 편리한 키 조작</h3>
+    <table>
+      <tr><th>조작</th><th>기능</th></tr>
+      <tr><td><kbd>Alt</kbd>＋클릭(파형 위)</td><td>그 위치에서 파형 분할(컷)</td></tr>
+      <tr><td><kbd>Ctrl</kbd>＋클릭(FX 칩)</td><td>그 이펙트를 일시적으로 끄기(바이패스)</td></tr>
+      <tr><td><kbd>Alt</kbd>＋드래그(FX 칩)</td><td>이펙트를 복사해 다른 트랙으로</td></tr>
+      <tr><td><kbd>Shift</kbd>＋클릭(트랙 헤더)</td><td>여러 트랙을 한꺼번에 선택</td></tr>
+      <tr><td><kbd>Shift+↑</kbd></td><td>선택한 테이크를 메인으로 채택</td></tr>
+    </table>
+    <div class="note">Mac에서는 <kbd>Ctrl</kbd>→<kbd>⌘</kbd>, <kbd>Alt</kbd>→<kbd>Option</kbd>으로 바꿔 읽으세요.</div>
+  </section>
+
+  <section id="shortcuts">
+    <h2><span class="num">14</span>단축키 한눈에 보기</h2>
+    <p>주요한 것만 발췌했습니다. 전체 목록은 「도움말」→「단축키 목록...」(<kbd>Ctrl+/</kbd> / Mac은 <kbd>⌘/</kbd>)에서 확인할 수 있습니다.</p>
+    <table class="keys">
+      <tr><th style="width:46%">기능</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
+      <tr><td>재생 / 정지</td><td><kbd>Space</kbd></td><td><kbd>Space</kbd></td></tr>
+      <tr><td>녹음 시작 / 정지</td><td><kbd>R</kbd></td><td><kbd>R</kbd></td></tr>
+      <tr><td>루프 재생 켜기 / 끄기</td><td><kbd>L</kbd></td><td><kbd>L</kbd></td></tr>
+      <tr><td>한 마디 앞으로 / 뒤로</td><td><kbd>N</kbd> / <kbd>B</kbd></td><td><kbd>N</kbd> / <kbd>B</kbd></td></tr>
+      <tr><td>재생 바를 앞으로 / 뒤로</td><td><kbd>+</kbd> / <kbd>-</kbd></td><td><kbd>+</kbd> / <kbd>-</kbd></td></tr>
+      <tr><td>실행 취소 / 다시 실행</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td></tr>
+      <tr><td>저장</td><td><kbd>Ctrl+S</kbd></td><td><kbd>⌘S</kbd></td></tr>
+      <tr><td>오디오 불러오기</td><td><kbd>Ctrl+I</kbd></td><td><kbd>⌘I</kbd></td></tr>
+      <tr><td>내보내기</td><td><kbd>Ctrl+E</kbd></td><td><kbd>⌘E</kbd></td></tr>
+      <tr><td>파형 분할(컷)</td><td><kbd>Alt</kbd>＋클릭</td><td><kbd>Option</kbd>＋클릭</td></tr>
+      <tr><td>플러그인 바이패스</td><td><kbd>Ctrl</kbd>＋클릭</td><td><kbd>⌘</kbd>＋클릭</td></tr>
+      <tr><td>페이드 / 크로스페이드</td><td><kbd>F</kbd> / <kbd>X</kbd></td><td><kbd>F</kbd> / <kbd>X</kbd></td></tr>
+      <tr><td>곡 전체를 화면에 맞추기</td><td><kbd>Shift+F</kbd></td><td><kbd>⇧F</kbd></td></tr>
+      <tr><td>가로 줌</td><td><kbd>Ctrl</kbd>＋휠</td><td><kbd>⌘</kbd>＋휠</td></tr>
+      <tr><td>선택 트랙의 세로 폭(최대↔표준 / 최소↔표준)</td><td><kbd>[</kbd> / <kbd>]</kbd></td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
+    </table>
+    <div class="note">본 가이드 본문 중의 단축키는 Windows 표기입니다. Mac에서는 <kbd>Ctrl</kbd>→<kbd>⌘</kbd>, <kbd>Alt</kbd>→<kbd>Option</kbd>으로 바꿔 읽으세요.</div>
+  </section>
+
+  <section id="trouble">
+    <h2><span class="num">15</span>문제가 생겼을 때</h2>
+    <h3>「음성 파일을 찾을 수 없습니다」라고 표시된다</h3>
+    <p>프로젝트가 참조하는 음원이 이동／삭제되었을 가능성이 있습니다. 원래 파일을 프로젝트 내의 <code>Audio</code> 폴더에 되돌려 놓으면 자동으로 복원됩니다.</p>
+    <h3>이전 작업이 사라졌다／앱이 종료되었다</h3>
+    <p>저장된 프로젝트를 다시 열면 더 새로운 백업이 있을 경우 <b>복구</b>를 물어봅니다. 「복구」를 선택하면 직전 상태로 되돌릴 수 있습니다.</p>
+    <h3>마이크 소리가 녹음되지 않는다</h3>
+    <ul>
+      <li>OS의 마이크 사용 권한에서 Utawave가 허용되어 있는지 확인합니다.</li>
+      <li>환경설정의 오디오 설정에서 올바른 입력 기기와 채널이 선택되어 있는지 확인합니다.</li>
+      <li>트랙의 <kbd>R</kbd>(녹음 암)이 켜져 있는지 확인합니다.</li>
+    </ul>
+    <h3>자신의 목소리가 늦게 들린다(모니터링 지연)</h3>
+    <p>Windows에서 오디오 인터페이스를 사용하는 경우, 오디오 설정에서 드라이버 종류로 <b>ASIO</b>(인터페이스에 딸린 드라이버)를 선택하면 크게 개선됩니다. 함께 버퍼 크기를 작게 하면 지연이 줄어듭니다(너무 작게 해서 소리가 끊기는 경우에는 한 단계 되돌리세요).</p>
+    <h3>녹음한 노래가 반주보다 늦게 들린다</h3>
+    <p>Utawave는 녹음 시 기기의 지연(레이턴시)을 자동으로 보정합니다. 그래도 어긋나는 경우에는 환경설정의 「녹음 플로우」에 있는 <b>추가 녹음 보정 (ms)</b>을 조금씩 늘려 조정하세요(+로 앞쪽으로 이동합니다).</p>
+    <h3>플러그인이 목록에 나오지 않는다</h3>
+    <p>「파일」→「플러그인 관리...」에서 「전체 다시 스캔」을 실행하세요. 설치 직후의 플러그인도 인식됩니다. 동작에 문제가 있는 플러그인은 스캔 시 자동으로 제외됩니다(앱은 멈추지 않습니다).</p>
+  </section>
+  </main>
+</div>
+
+<footer>
+  Utawave — 커버 보컬을 위한 녹음 특화 DAW / 오픈소스 (AGPL v3).<br>
+  개발 지원: <a href="https://donate.stripe.com/8x29ATdTI6g07vo49S38404">후원 페이지</a><br>
+  이 가이드는 앱에 동봉되어 있습니다. 최신 정보는 배포 페이지를 확인하세요.
+</footer>
+</body>
+</html>

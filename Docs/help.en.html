@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Utawave User Guide</title>
+<style>
+  :root{
+    --accent:#e06422;
+    --accent-ink:#b8480f;
+    --ink:#1b1e23;
+    --ink-2:#3c434c;
+    --ink-3:#697078;
+    --line:#d6dadf;
+    --line-soft:#e7eaee;
+    --bg:#ffffff;
+    --bg-soft:#f6f7f9;
+    --kbd-bg:#23272e;
+    --sidebar-bg:#fbfbfc;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",
+                "Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif;
+    color:var(--ink);
+    background:var(--bg);
+    line-height:1.85;
+    font-size:15.5px;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ── ヘッダ ───────────────────────────── */
+  header.masthead{
+    background:#15171c;
+    color:#fff;
+    border-bottom:2px solid var(--accent);
+  }
+  header.masthead .wrap{
+    max-width:1080px;margin:0 auto;padding:30px 32px 26px;
+  }
+  .eyebrow{
+    font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--accent);font-weight:700;margin:0 0 8px;
+  }
+  header.masthead h1{
+    margin:0;font-size:26px;font-weight:700;letter-spacing:.01em;color:#fff;
+  }
+  header.masthead p{margin:9px 0 0;color:#9aa1aa;font-size:14px;max-width:620px;}
+
+  /* ── レイアウト（サイドバー + 本文）──────── */
+  .page{
+    max-width:1080px;margin:0 auto;padding:0 32px;
+    display:grid;grid-template-columns:236px 1fr;gap:48px;
+    align-items:start;
+  }
+  aside.toc{
+    position:sticky;top:0;align-self:start;
+    max-height:100vh;overflow:auto;
+    padding:30px 0 40px;
+  }
+  aside.toc h2{
+    font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink-3);margin:0 0 12px;font-weight:700;
+  }
+  aside.toc ol{list-style:none;margin:0;padding:0;counter-reset:s;}
+  aside.toc li{margin:0;}
+  aside.toc a{
+    counter-increment:s;
+    display:block;padding:5px 12px 5px 0;
+    color:var(--ink-2);text-decoration:none;font-size:13.5px;
+    border-left:2px solid transparent;padding-left:14px;
+    transition:color .12s,border-color .12s;
+  }
+  aside.toc a::before{
+    content:counter(s,decimal-leading-zero);
+    color:var(--ink-3);font-variant-numeric:tabular-nums;
+    font-size:11.5px;margin-right:9px;
+  }
+  aside.toc a:hover{color:var(--accent-ink);border-left-color:var(--accent);}
+
+  main{padding:30px 0 80px;min-width:0;}
+
+  /* ── セクション ──────────────────────── */
+  section{margin:0 0 44px;scroll-margin-top:16px;}
+  section h2{
+    font-size:19px;font-weight:700;letter-spacing:.005em;
+    margin:0 0 14px;padding-bottom:11px;
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:baseline;gap:11px;
+  }
+  section h2 .num{
+    color:var(--accent);font-weight:700;font-size:13px;
+    font-variant-numeric:tabular-nums;letter-spacing:.04em;
+    flex:0 0 auto;padding-top:1px;
+  }
+  section h3{
+    font-size:15px;font-weight:700;margin:22px 0 6px;color:var(--ink);
+    padding-left:11px;border-left:3px solid var(--accent);
+  }
+  p{margin:9px 0;}
+  .lead{font-size:15.5px;color:var(--ink-2);}
+  ul,ol{margin:9px 0;padding-left:22px;}
+  li{margin:5px 0;}
+  a{color:var(--accent-ink);}
+  b{font-weight:700;}
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:var(--bg-soft);border:1px solid var(--line-soft);
+    border-radius:4px;padding:.5px 5px;font-size:13px;color:var(--ink-2);
+  }
+
+  kbd{
+    display:inline-block;background:var(--kbd-bg);color:#f2f3f5;
+    border-radius:5px;padding:1.5px 7px;font-size:12.5px;font-weight:600;
+    font-family:inherit;margin:0 1px;
+    border:1px solid #000;box-shadow:inset 0 -1px 0 rgba(0,0,0,.35);
+    white-space:nowrap;line-height:1.5;
+  }
+
+  /* ── 注記 ───────────────────────────── */
+  .tip,.note,.warn{
+    background:var(--bg-soft);
+    border:1px solid var(--line-soft);border-left-width:3px;
+    border-radius:6px;padding:11px 15px;margin:14px 0;font-size:14.5px;
+    color:var(--ink-2);
+  }
+  .tip{border-left-color:var(--accent);}
+  .note{border-left-color:#3f6fb0;}
+  .warn{border-left-color:#c0392b;}
+  .tip b,.note b,.warn b{color:var(--ink);}
+
+  /* ── 表 ─────────────────────────────── */
+  table{border-collapse:collapse;width:100%;margin:13px 0;font-size:14px;}
+  th,td{border:1px solid var(--line-soft);padding:8px 13px;text-align:left;vertical-align:top;}
+  th{background:var(--bg-soft);font-weight:700;width:44%;color:var(--ink);}
+  tr:nth-child(even) td{background:#fcfcfd;}
+  td kbd{margin-right:2px;}
+
+  /* ── 手順（番号つき）────────────────── */
+  ol.step{counter-reset:step;list-style:none;padding-left:0;margin:12px 0;}
+  ol.step>li{position:relative;padding-left:40px;margin:11px 0;}
+  ol.step>li::before{
+    counter-increment:step;content:counter(step,decimal-leading-zero);
+    position:absolute;left:0;top:1px;
+    width:26px;height:26px;line-height:23px;text-align:center;
+    border:1.5px solid var(--accent);color:var(--accent-ink);background:#fff;
+    border-radius:50%;font-size:11.5px;font-weight:700;
+    font-variant-numeric:tabular-nums;
+  }
+
+  footer{
+    border-top:1px solid var(--line-soft);
+    max-width:1080px;margin:0 auto;padding:22px 32px 56px;
+    color:var(--ink-3);font-size:12.5px;
+  }
+
+  /* ── 狭い画面 ───────────────────────── */
+  @media (max-width:840px){
+    .page{grid-template-columns:1fr;gap:0;}
+    aside.toc{
+      position:static;max-height:none;
+      border-bottom:1px solid var(--line-soft);
+      padding:22px 0 18px;margin-bottom:8px;
+    }
+    aside.toc ol{columns:2;column-gap:24px;}
+    main{padding-top:18px;}
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">User Guide</p>
+    <h1>Utawave User Guide</h1>
+    <p>A recording-focused DAW for cover singers. This guide walks beginners through the basics, from recording all the way to exporting.</p>
+  </div>
+</header>
+
+<div class="page">
+  <aside class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#intro">Getting Started &amp; The Interface</a></li>
+      <li><a href="#project">Project Basics</a></li>
+      <li><a href="#import">Importing a Backing Track</a></li>
+      <li><a href="#prepare">Setting Up to Record</a></li>
+      <li><a href="#tempo">Tempo &amp; Metronome</a></li>
+      <li><a href="#record">Recording</a></li>
+      <li><a href="#takes">Managing Takes</a></li>
+      <li><a href="#edit">Editing Waveforms</a></li>
+      <li><a href="#pitch">Key Change &amp; Tempo Detection</a></li>
+      <li><a href="#fx">Effects (FX)</a></li>
+      <li><a href="#midi">Importing &amp; Entering MIDI</a></li>
+      <li><a href="#export">Exporting (WAV / MP3)</a></li>
+      <li><a href="#gestures">Right-Click &amp; Handy Actions</a></li>
+      <li><a href="#shortcuts">Shortcut Quick Reference</a></li>
+      <li><a href="#trouble">Troubleshooting</a></li>
+    </ol>
+  </aside>
+
+  <main>
+  <section id="intro">
+    <h2><span class="num">01</span>Getting Started &amp; The Interface</h2>
+    <p class="lead">Utawave is a DAW built specifically for recording vocal covers. It cuts out as much complex setup as possible, so you can get through the core flow as quickly as possible: <b>load a backing track, record, and export</b>.</p>
+    <h3>Layout of the Screen</h3>
+    <ul>
+      <li><b>Top (Toolbar)</b>: Play / Stop / Record buttons, the playback time display, tempo (BPM), and toggles for the metronome and looping.</li>
+      <li><b>Left (TRACKS panel)</b>: The list of tracks. For each track you get volume (Vol), left/right balance (Pan), reverb (Rev), <kbd>M</kbd> Mute, <kbd>S</kbd> Solo, <kbd>R</kbd> record arm, <kbd>I</kbd> input monitor, and more.</li>
+      <li><b>Center (Timeline)</b>: Your recorded vocals and imported tracks appear here as "waveforms" laid out left to right. This is where you cut and move things around.</li>
+      <li><b>Right (MASTER panel)</b>: The final volume and meters for the whole song. It can be collapsed.</li>
+    </ul>
+    <div class="tip"><b>Tip:</b> Most actions can be done with either a button or the keyboard. Start with the buttons, and once you're comfortable, switch to <a href="#shortcuts">shortcuts</a> to work faster.</div>
+  </section>
+
+  <section id="project">
+    <h2><span class="num">02</span>Project Basics</h2>
+    <p>Your work is saved as a "project" (the file extension is <code>.uta</code>). Think of it as one project per song.</p>
+    <h3>New, Open, and Save</h3>
+    <ul>
+      <li><b>New</b>: "File" → "New Project..."</li>
+      <li><b>Open</b>: "File" → "Open..." (<kbd>Ctrl+O</kbd>). You can also open from "Recent Projects" on the startup screen.</li>
+      <li><b>Save</b>: <kbd>Ctrl+S</kbd>. Save As is <kbd>Ctrl+Shift+S</kbd>.</li>
+    </ul>
+    <h3>Auto-Save and Backups</h3>
+    <p>Your work is saved automatically at regular intervals, and timestamped <b>generational backups</b> are kept as well. Even if the app closes unexpectedly, you'll be asked <b>whether to recover</b> the next time you open the same project.</p>
+    <div class="note"><b>Audio files live inside the project:</b> Imported and recorded audio is copied into the <code>Audio</code> folder within the project folder. When handing a project off to someone else, share <b>the entire folder</b>.</div>
+  </section>
+
+  <section id="import">
+    <h2><span class="num">03</span>Importing a Backing Track</h2>
+    <p>Start by loading your accompaniment (off-vocal / instrumental track).</p>
+    <ol class="step">
+      <li>Click the <kbd>IMPORT</kbd> button at the top right, or choose "File" → "Import Audio..." (<kbd>Ctrl+I</kbd>). You can also <b>drag and drop</b> an audio file onto the timeline. The <kbd>IMPORT</kbd> button accepts both audio and MIDI, automatically detecting which by the file extension.</li>
+      <li>The imported track is automatically placed at <b>the start of the song (0 seconds)</b>.</li>
+    </ol>
+    <p><b>Supported formats:</b> WAV / AIFF / MP3 / FLAC / Ogg and other common formats (on macOS, m4a / aac and more are also supported; the exact set varies slightly by OS). Files with a different sample rate are <b>converted automatically</b> on import.</p>
+    <div class="tip"><b>Volume is matched automatically:</b> On import, the volume (loudness) is automatically adjusted to a target level (you can turn this off in the settings).</div>
+  </section>
+
+  <section id="prepare">
+    <h2><span class="num">04</span>Setting Up to Record</h2>
+    <ol class="step">
+      <li><b>Add a track</b>: Use the <kbd>+</kbd> button at the bottom left of the TRACKS panel (or "+ Add Track" along the bottom) to choose mono or stereo. Vocal recording is usually fine in <b>mono</b>.</li>
+      <li><b>Choose the input</b>: In the track's "In:" menu, select the mic (input channel) you'll use.</li>
+      <li><b>Record arm</b>: Light up the <kbd>R</kbd> button on the track you want to record to. This puts it in the "record to this track" state.</li>
+      <li><b>Check your voice</b>: Turn on <kbd>I</kbd> (input monitor) to hear yourself back and watch the meter move. Sing and confirm the meter responds.</li>
+    </ol>
+    <div class="note"><b>Recording multiple tracks at once:</b> Light up <kbd>R</kbd> on several tracks and assign each a different input, and you can record to multiple tracks simultaneously.</div>
+    <div class="warn"><b>If you get no sound or no input:</b> Open "File" → "Preferences" and, in the audio settings, make sure your audio device (audio interface) is selected.</div>
+  </section>
+
+  <section id="tempo">
+    <h2><span class="num">05</span>Tempo &amp; Metronome</h2>
+    <ul>
+      <li><b>Tempo (BPM)</b>: <b>Double-click</b> the BPM display in the toolbar to type a value directly.</li>
+      <li><b>Set it by tapping</b>: Tap the <kbd>TAP</kbd> button along with the song to estimate the tempo.</li>
+      <li><b>Detect it automatically</b>: Right-click an imported track and choose "Detect Tempo" to automatically estimate the BPM from the accompaniment.</li>
+      <li><b>Metronome</b>: Use the <kbd>CLICK</kbd> button to turn the click sound on / off. You can also adjust its volume and more on the dedicated click track.</li>
+      <li><b>Count-in</b>: You can set how many bars of count-in play before recording starts (in Preferences).</li>
+    </ul>
+  </section>
+
+  <section id="record">
+    <h2><span class="num">06</span>Recording</h2>
+    <ol class="step">
+      <li>Confirm that <kbd>R</kbd> is lit on the track you want to record to.</li>
+      <li>Move the playback position to where you want recording to start (click the ruler, or move bar by bar with <kbd>N</kbd> / <kbd>B</kbd>).</li>
+      <li>Press the <kbd>R</kbd> key (or the toolbar's record button) to start recording. If a count-in is set, it plays first before recording begins.</li>
+      <li>Press <kbd>R</kbd> again, or <kbd>Space</kbd>, to stop.</li>
+    </ol>
+    <h3>Handy Ways to Record</h3>
+    <ul>
+      <li><b>Punch-in</b>: While playing back, press <kbd>R</kbd> at the spot you want to redo, and only that part is overwritten (the seams are smoothed automatically).</li>
+      <li><b>Loop recording</b>: Press <kbd>L</kbd> to play a loop range over and over while recording take after take.</li>
+      <li><b>Capture retroactively</b>: While playing back, your singing is always being captured in the background. If you think "that one was good," press <kbd>Ctrl+Shift+R</kbd> to retroactively commit the recording.</li>
+    </ul>
+  </section>
+
+  <section id="takes">
+    <h2><span class="num">07</span>Managing Takes</h2>
+    <p>When you re-record over the same spot, the previous take isn't deleted; it's automatically moved aside to a <b>take lane</b>. You can compare them and pick the best one.</p>
+    <ul>
+      <li>Use the track's <kbd>TList</kbd> button to show / hide the take lanes.</li>
+      <li>Use <kbd>S</kbd> (Solo) on a take to listen to just that take.</li>
+      <li>Use the <kbd>↑</kbd> button on the take you want (or <kbd>Shift+↑</kbd>) to promote that take to the main lane.</li>
+    </ul>
+  </section>
+
+  <section id="edit">
+    <h2><span class="num">08</span>Editing Waveforms</h2>
+    <p>Each chunk of audio on the timeline is called a "waveform." You can edit them intuitively with the mouse.</p>
+    <table>
+      <tr><th>What you want to do</th><th>How</th></tr>
+      <tr><td>Move it</td><td>Drag the waveform (<kbd>Ctrl</kbd>+drag to lock it left/right and move it between tracks only)</td></tr>
+      <tr><td>Change its length (trim)</td><td>Drag the left or right edge of the waveform (with the grid on, the edge snaps to the grid; hold <kbd>Ctrl</kbd> to move freely for a moment)</td></tr>
+      <tr><td>Split it (cut)</td><td><kbd>Alt</kbd>+click (at the split point)</td></tr>
+      <tr><td>Delete it</td><td>Select it and press <kbd>Delete</kbd> / <kbd>Backspace</kbd></td></tr>
+      <tr><td>Copy / Paste / Duplicate</td><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> / <kbd>Ctrl+D</kbd></td></tr>
+      <tr><td>Nudge it slightly</td><td><kbd>←</kbd> / <kbd>→</kbd></td></tr>
+      <tr><td>Undo / Redo</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td></tr>
+    </table>
+    <h3>Fades and Crossfades</h3>
+    <ul>
+      <li><b>Fade in / out</b>: Select a range and press <kbd>F</kbd>. This smooths the start and end.</li>
+      <li><b>Crossfade</b>: Select the overlapping or touching part of two waveforms and press <kbd>X</kbd>. This prevents the clicking noise at the seam (you can also right-click → "Draw Crossfade").</li>
+    </ul>
+    <h3>Adjusting Volume</h3>
+    <ul>
+      <li><b>Per-waveform volume</b>: Use the waveform's fader to raise or lower it. To vary the volume within a single waveform, place points on the volume line (breakpoints) for fine control.</li>
+      <li><b>Cut silence</b>: Right-click → "Cut Silence" to automatically remove quiet parts such as breaths.</li>
+    </ul>
+    <div class="tip"><b>Zooming in and out:</b> Use <kbd>Ctrl</kbd>+mouse wheel to zoom horizontally, and <kbd>Shift+F</kbd> to fit the whole song on screen.</div>
+  </section>
+
+  <section id="pitch">
+    <h2><span class="num">09</span>Key Change &amp; Tempo Detection</h2>
+    <ul>
+      <li><b>Change the key (pitch)</b>: Right-click a waveform → "Change Key..." to choose from -6 to +6 semitones. High-quality processing transposes it while preserving sound quality. The result is saved as a new file, so with the same setting it applies instantly next time. Choose "0 (original pitch)" to return to the original.</li>
+      <li><b>Find the tempo</b>: Right-click a waveform → "Detect Tempo" to automatically estimate the accompaniment's BPM.</li>
+    </ul>
+  </section>
+
+  <section id="fx">
+    <h2><span class="num">10</span>Effects (FX)</h2>
+    <p>You can add <b>plugins</b> such as reverb and compressors to individual tracks or to the whole mix (master).</p>
+    <h3>Opening the FX Slots</h3>
+    <p>Press the <kbd>FX</kbd> button at the bottom left of the TRACKS panel to show the <b>effect slots (INS)</b> on the right side of each track. Press it again to hide them.</p>
+    <ul>
+      <li>Click an empty slot → choose the plugin you want to add it.</li>
+      <li>Click the chip for an added plugin to open its settings window.</li>
+      <li><kbd>Ctrl</kbd>+click to temporarily turn it off (bypass). Drag to reorder it or move it to another track (<kbd>Alt</kbd>+drag to copy).</li>
+    </ul>
+    <div class="note"><b>If your plugins don't show up:</b> Open "File" → "Manage Plugins..." and run a scan. Your installed plugins will appear in the list.</div>
+    <h3>Adding Reverb</h3>
+    <p>Use each track's <kbd>Rev</kbd> slider to add reverb to that track. You can also apply it only to the live monitor ("foldback") while recording, and even then <b>it is not written into the recorded file</b>.</p>
+  </section>
+
+  <section id="midi">
+    <h2><span class="num">11</span>Importing &amp; Entering MIDI</h2>
+    <p>You can import MIDI data (<code>.mid</code> files) to use as a guide melody, harmony, or accompaniment. You can also enter notes by hand.</p>
+
+    <h3>Importing a MIDI File</h3>
+    <ol class="step">
+      <li>Choose "File" → "Import MIDI..." and open a <code>.mid</code> file (you can also drag and drop it onto the timeline).</li>
+      <li>In the "Import MIDI" dialog, <b>check the tracks you want to import</b> (each track's channel and note count are shown).</li>
+      <li>Choose the placement: "<b>Place at start</b>" or "<b>Place at current playback position</b>." If needed, check "Import tempo &amp; time signature" and "Import markers."</li>
+      <li>Press "<b>Import</b>" and the selected tracks are added as MIDI tracks.</li>
+    </ol>
+    <div class="note"><b>To make them sound:</b> Imported MIDI tracks play with a built-in tone. Insert a sound-source plugin of your choice to play them with that tone (add it the same way as in <a href="#fx">Effects (FX)</a>).</div>
+
+    <h3>Entering Notes by Hand (Creating Harmonies &amp; Guides)</h3>
+    <ul>
+      <li>From the add-track menu, choose "Add MIDI Track."</li>
+      <li><b>Double-click</b> the timeline to create a region for note entry, then <b>double-click</b> that region to open the piano roll (the keyboard editing view).</li>
+      <li>In the piano roll, double-click an empty area to add a note, drag to move or resize, and press <kbd>Delete</kbd> to delete. Use <kbd>↑</kbd> / <kbd>↓</kbd> to move up or down a semitone.</li>
+    </ul>
+  </section>
+
+  <section id="export">
+    <h2><span class="num">12</span>Exporting (WAV / MP3)</h2>
+    <p>When you're done, export to an audio file.</p>
+    <ol class="step">
+      <li>Open the <kbd>EXPORT</kbd> button at the top right, or "File" → "Export..." (<kbd>Ctrl+E</kbd>).</li>
+      <li>Choose the format (<b>WAV</b> / <b>AIFF</b> / <b>MP3</b>) and the range (whole song / selected range / bar range).</li>
+      <li>Choose whether to render the whole mix to one file or split it per track (stems), then export.</li>
+    </ol>
+    <div class="tip"><b>Clipping protection:</b> On export, if the audio is too loud, it's automatically turned down a little to prevent clipping (you can turn this off in the settings).</div>
+  </section>
+
+  <section id="gestures">
+    <h2><span class="num">13</span>Right-Click &amp; Handy Actions</h2>
+    <p class="lead">Utawave has plenty of actions that aren't shown as buttons, available through <b>right-click menus</b> and <b>double-clicks</b>. Here are the ones worth knowing that make work much easier.</p>
+
+    <h3>What You Can Do with a Right-Click</h3>
+    <table>
+      <tr><th>Where you right-click</th><th>What you can do</th></tr>
+      <tr><td>Waveform (audio clip)</td><td>Change Key / Detect Tempo / Adjust Loudness (volume) / Cut Silence / Draw Crossfade</td></tr>
+      <tr><td>Waveform on a take lane</td><td>"Use This Take" promotes that take to the main lane (Lane 0)</td></tr>
+      <tr><td>Track header (around the track name)</td><td>Change track color / Duplicate track / Delete track / Adjust loudness</td></tr>
+      <tr><td>Waveform button (MIDI track)</td><td>Toggle the built-in synth on / off</td></tr>
+      <tr><td><kbd>CLICK</kbd> button</td><td>Set the metronome's volume, tone, and accent</td></tr>
+      <tr><td>The "TRACKS" / "MASTER" headings</td><td>Show / hide the effect slots (INS) for everything at once</td></tr>
+    </table>
+    <div class="note"><b>Deletions can be undone:</b> Even if you delete a track or clip, you can undo it with <kbd>Ctrl+Z</kbd> (<kbd>⌘Z</kbd> on Mac). Feel free to experiment.</div>
+
+    <h3>What You Can Do with a Double-Click</h3>
+    <table>
+      <tr><th>Where you double-click</th><th>What you can do</th></tr>
+      <tr><td>Vol / Pan / Rev slider</td><td>Reset to default (Vol to 0dB, Pan to center, Rev to 0)</td></tr>
+      <tr><td>The master volume fader</td><td>Reset to 0dB</td></tr>
+      <tr><td>The toolbar's BPM display</td><td>Type the tempo directly</td></tr>
+      <tr><td>Empty space below the track list</td><td>Add a mono track</td></tr>
+      <tr><td>Empty timeline area (MIDI track)</td><td>Create a MIDI clip for note entry / double-click again to open the piano roll</td></tr>
+    </table>
+
+    <h3>Handy Key Actions Worth Learning</h3>
+    <table>
+      <tr><th>Action</th><th>What it does</th></tr>
+      <tr><td><kbd>Alt</kbd>+click (on a waveform)</td><td>Split (cut) the waveform at that point</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+click (FX chip)</td><td>Temporarily turn that effect off (bypass)</td></tr>
+      <tr><td><kbd>Alt</kbd>+drag (FX chip)</td><td>Copy the effect to another track</td></tr>
+      <tr><td><kbd>Shift</kbd>+click (track header)</td><td>Select multiple tracks at once</td></tr>
+      <tr><td><kbd>Shift+↑</kbd></td><td>Promote the selected take to the main lane</td></tr>
+    </table>
+    <div class="note">On Mac, read <kbd>Ctrl</kbd> as <kbd>⌘</kbd> and <kbd>Alt</kbd> as <kbd>Option</kbd>.</div>
+  </section>
+
+  <section id="shortcuts">
+    <h2><span class="num">14</span>Shortcut Quick Reference</h2>
+    <p>Only the main ones are listed here. You can see the full list from "Help" → "Shortcut List..." (<kbd>Ctrl+/</kbd> / <kbd>⌘/</kbd> on Mac).</p>
+    <table class="keys">
+      <tr><th style="width:46%">What it does</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
+      <tr><td>Play / Stop</td><td><kbd>Space</kbd></td><td><kbd>Space</kbd></td></tr>
+      <tr><td>Start / Stop recording</td><td><kbd>R</kbd></td><td><kbd>R</kbd></td></tr>
+      <tr><td>Loop playback on / off</td><td><kbd>L</kbd></td><td><kbd>L</kbd></td></tr>
+      <tr><td>Move forward / back one bar</td><td><kbd>N</kbd> / <kbd>B</kbd></td><td><kbd>N</kbd> / <kbd>B</kbd></td></tr>
+      <tr><td>Move the playhead forward / back</td><td><kbd>+</kbd> / <kbd>-</kbd></td><td><kbd>+</kbd> / <kbd>-</kbd></td></tr>
+      <tr><td>Undo / Redo</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td></tr>
+      <tr><td>Save</td><td><kbd>Ctrl+S</kbd></td><td><kbd>⌘S</kbd></td></tr>
+      <tr><td>Import audio</td><td><kbd>Ctrl+I</kbd></td><td><kbd>⌘I</kbd></td></tr>
+      <tr><td>Export</td><td><kbd>Ctrl+E</kbd></td><td><kbd>⌘E</kbd></td></tr>
+      <tr><td>Split (cut) a waveform</td><td><kbd>Alt</kbd>+click</td><td><kbd>Option</kbd>+click</td></tr>
+      <tr><td>Bypass a plugin</td><td><kbd>Ctrl</kbd>+click</td><td><kbd>⌘</kbd>+click</td></tr>
+      <tr><td>Fade / Crossfade</td><td><kbd>F</kbd> / <kbd>X</kbd></td><td><kbd>F</kbd> / <kbd>X</kbd></td></tr>
+      <tr><td>Fit the whole song on screen</td><td><kbd>Shift+F</kbd></td><td><kbd>⇧F</kbd></td></tr>
+      <tr><td>Horizontal zoom</td><td><kbd>Ctrl</kbd>+wheel</td><td><kbd>⌘</kbd>+wheel</td></tr>
+      <tr><td>Selected track height (max↔standard / min↔standard)</td><td><kbd>[</kbd> / <kbd>]</kbd></td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
+    </table>
+    <div class="note">Shortcuts in the body of this guide use Windows notation. On Mac, read <kbd>Ctrl</kbd> as <kbd>⌘</kbd> and <kbd>Alt</kbd> as <kbd>Option</kbd>.</div>
+  </section>
+
+  <section id="trouble">
+    <h2><span class="num">15</span>Troubleshooting</h2>
+    <h3>"Audio file not found" appears</h3>
+    <p>The audio the project references may have been moved or deleted. Put the original file back into the project's <code>Audio</code> folder and it will be restored automatically.</p>
+    <h3>My last session is gone / the app quit</h3>
+    <p>When you reopen a saved project, if a newer backup exists you'll be asked whether to <b>recover</b>. Choosing "Recover" restores the most recent state.</p>
+    <h3>My mic isn't recording</h3>
+    <ul>
+      <li>Check that Utawave is allowed to use the mic in your OS's microphone permissions.</li>
+      <li>In the audio settings under Preferences, check that the correct input device and channel are selected.</li>
+      <li>Check that the track's <kbd>R</kbd> (record arm) is lit.</li>
+    </ul>
+    <h3>I hear my voice with a delay (monitoring latency)</h3>
+    <p>On Windows with an audio interface, selecting <b>ASIO</b> (the driver bundled with your interface) as the driver type in the audio settings improves this dramatically. Lowering the buffer size also reduces the delay (if you go too small and the sound drops out, step it back up one notch).</p>
+    <h3>My recorded vocal sounds behind the backing track</h3>
+    <p>Utawave automatically compensates for your device's latency when recording. If it still drifts, gradually increase the <b>Additional Recording Offset (ms)</b> under "Recording Flow" in Preferences (a positive value moves it earlier).</p>
+    <h3>A plugin isn't in the list</h3>
+    <p>Open "File" → "Manage Plugins..." and run "Rescan All." Plugins installed just now will be recognized too. Plugins that misbehave are automatically excluded during the scan (the app won't crash).</p>
+  </section>
+  </main>
+</div>
+
+<footer>
+  Utawave — a recording-focused DAW for cover singers / open source (AGPL v3).<br>
+  Support development: <a href="https://donate.stripe.com/8x29ATdTI6g07vo49S38404">Donation page</a><br>
+  This guide is bundled with the app. For the latest information, please check the distribution page.
+</footer>
+</body>
+</html>
