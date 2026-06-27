@@ -33,6 +33,8 @@ public:
 
     // 右端ヒント (ショートカット一覧) クリック時のコールバック
     std::function<void()> onHelpClicked;
+    // ショートカットの左「歌詞パッド」クリック時のコールバック
+    std::function<void()> onLyricsClicked;
 
 private:
     void timerCallback() override;
@@ -40,6 +42,9 @@ private:
     // 右端の「ショートカット一覧」ヒント領域 (paint で更新、当たり判定に使用)
     juce::Rectangle<int> helpHintBounds;
     bool helpHover { false };
+    // その左の「歌詞パッド」ヒント領域
+    juce::Rectangle<int> lyricsHintBounds;
+    bool lyricsHover { false };
 
     double cpuUsage   { 0.0 };
     double memoryMB   { 0.0 };

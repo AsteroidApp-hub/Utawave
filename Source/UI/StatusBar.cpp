@@ -118,9 +118,24 @@ void StatusBar::paint(juce::Graphics& g)
         g.drawText(hint, helpHintBounds.reduced(8, 0), juce::Justification::centred);
     }
 
-    // メッセージ域は左の固定項目とヒントの間。極端に狭い幅でも負にならないようクランプ。
+    // ── ショートカットの左: 歌詞パッドを開くヒント (クリックで開く) ──
+    {
+        const int lw = 92;
+        lyricsHintBounds = juce::Rectangle<int>(helpHintBounds.getX() - lw, 0, lw, getHeight());
+
+        // 左に区切り線
+        g.setColour(AppColours::separator);
+        g.drawLine((float) lyricsHintBounds.getX(), 2.0f,
+                   (float) lyricsHintBounds.getX(), (float) (getHeight() - 2), 1.0f);
+
+        g.setColour(lyricsHover ? AppColours::textBright : AppColours::textDim);
+        g.setFont(juce::FontOptions(11.0f));
+        g.drawText(tr(u8"歌詞パッド"), lyricsHintBounds.reduced(8, 0), juce::Justification::centred);
+    }
+
+    // メッセージ域は左の固定項目と右端ヒント群の間。極端に狭い幅でも負にならないようクランプ。
     const int msgX = x + 8;
-    const int msgW = juce::jmax(0, (helpHintBounds.getX() - 8) - msgX);
+    const int msgW = juce::jmax(0, (lyricsHintBounds.getX() - 8) - msgX);
 
     // 波形ロード中は進捗を優先表示。完了 (remaining==0) 後は通常メッセージを表示。
     if (wfRemaining > 0)
@@ -149,17 +164,25 @@ void StatusBar::mouseDown(const juce::MouseEvent& e)
 {
     if (helpHintBounds.contains(e.getPosition()) && onHelpClicked)
         onHelpClicked();
+    else if (lyricsHintBounds.contains(e.getPosition()) && onLyricsClicked)
+        onLyricsClicked();
 }
 
 void StatusBar::mouseMove(const juce::MouseEvent& e)
 {
-    const bool over = helpHintBounds.contains(e.getPosition());
-    setMouseCursor(over ? juce::MouseCursor::PointingHandCursor
-                        : juce::MouseCursor::NormalCursor);
-    if (over != helpHover)
+    const bool overHelp   = helpHintBounds.contains(e.getPosition());
+    const bool overLyrics = lyricsHintBounds.contains(e.getPosition());
+    setMouseCursor((overHelp || overLyrics) ? juce::MouseCursor::PointingHandCursor
+                                            : juce::MouseCursor::NormalCursor);
+    if (overHelp != helpHover)
     {
-        helpHover = over;
+        helpHover = overHelp;
         repaint(helpHintBounds);
+    }
+    if (overLyrics != lyricsHover)
+    {
+        lyricsHover = overLyrics;
+        repaint(lyricsHintBounds);
     }
 }
 
@@ -169,5 +192,10 @@ void StatusBar::mouseExit(const juce::MouseEvent&)
     {
         helpHover = false;
         repaint(helpHintBounds);
+    }
+    if (lyricsHover)
+    {
+        lyricsHover = false;
+        repaint(lyricsHintBounds);
     }
 }

@@ -62,6 +62,7 @@ MainComponent::MainComponent()
         return audioEngine.getDeviceManager().getCpuUsage() * 100.0;
     };
     statusBar.onHelpClicked = [this] { showShortcutsDialog(); };
+    statusBar.onLyricsClicked = [this] { openLyricsWindow(); };
     fileImporter.getCacheFolderCb = [this] { return getProjectCacheFolder(); };
 
     addAndMakeVisible(toolbar);
@@ -83,7 +84,6 @@ MainComponent::MainComponent()
     toolbar.onPreferences   = [this] { showPreferences(); };
     toolbar.onImport        = [this] { showImportAnyDialog(); };
     toolbar.onExport        = [this] { showExportDialog(); };
-    toolbar.onLyrics        = [this] { openLyricsWindow(); };
 
     toolbar.onClipGainChanged = [this](bool v)
     {
