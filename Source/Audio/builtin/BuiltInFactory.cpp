@@ -5,6 +5,7 @@
 #include "BuiltInEQ.h"
 #include "BuiltInCompressor.h"
 #include "BuiltInDeEsser.h"
+#include "BuiltInGate.h"
 #include "BuiltInReverb.h"
 #include "../../Localisation.h"
 
@@ -26,6 +27,7 @@ namespace
         { "utawave.eq",      u8"内蔵EQ",         [] { return std::unique_ptr<BuiltInEffect>(new BuiltInEQ()); } },
         { "utawave.comp",    u8"内蔵コンプ",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInCompressor()); } },
         { "utawave.deesser", u8"内蔵ディエッサー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDeEsser()); } },
+        { "utawave.gate",    u8"内蔵ゲート",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInGate()); } },
         { "utawave.reverb",  u8"内蔵リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
     };
     constexpr int kNumEntries = (int) (sizeof(kEntries) / sizeof(kEntries[0]));

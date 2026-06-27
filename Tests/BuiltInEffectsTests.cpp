@@ -15,6 +15,7 @@
 #include "../Source/Audio/builtin/BuiltInEQ.h"
 #include "../Source/Audio/builtin/BuiltInCompressor.h"
 #include "../Source/Audio/builtin/BuiltInDeEsser.h"
+#include "../Source/Audio/builtin/BuiltInGate.h"
 #include "../Source/Audio/builtin/BuiltInReverb.h"
 #include "../Source/Audio/builtin/BuiltInFactory.h"
 
@@ -61,6 +62,7 @@ public:
         testEQ();
         testCompressor();
         testDeEsser();
+        testGate();
         testReverb();
         testFactory();
     }
@@ -216,6 +218,78 @@ private:
             juce::MemoryBlock mb;
             a.getStateInformation(mb);
             BuiltInDeEsser b;
+            b.setStateInformation(mb.getData(), (int) mb.getSize());
+            for (int i = 0; i < a.getParamCount(); ++i)
+                expect(std::abs(a.getP(i) - b.getP(i)) < 1.0e-3f, "param should round-trip");
+        }
+    }
+
+    void testGate()
+    {
+        beginTest("Gate passes signal above threshold");
+        {
+            BuiltInGate gt;
+            gt.prepareToPlay(kSr, 4096);
+            gt.setP(BuiltInGate::ThresholdDb, -40.0f);
+            gt.setP(BuiltInGate::RangeDb, 60.0f);
+            gt.setP(BuiltInGate::AttackMs, 1.0f);
+            gt.setP(BuiltInGate::HoldMs, 200.0f);
+            gt.setP(BuiltInGate::ReleaseMs, 250.0f);
+
+            auto loud = makeSine(440.0, 0.5, 12000);   // ~ -6 dB, well above threshold
+            const double inRms = rmsTail(loud, 3000);
+            gt.processBlock(loud, emptyMidi);
+            const double outRms = rmsTail(loud, 3000);
+            expect(std::abs(outRms - inRms) < inRms * 0.05, "loud signal should pass an open gate unchanged");
+            expect(gt.getReductionDb() < 0.5f, "no reduction while the gate is open");
+            expect(gt.isOpen(), "gate should report open for a loud signal");
+        }
+
+        beginTest("Gate attenuates signal below threshold");
+        {
+            BuiltInGate gt;
+            gt.prepareToPlay(kSr, 4096);
+            gt.setP(BuiltInGate::ThresholdDb, -40.0f);
+            gt.setP(BuiltInGate::RangeDb, 60.0f);
+            gt.setP(BuiltInGate::AttackMs, 1.0f);
+            gt.setP(BuiltInGate::HoldMs, 0.0f);
+            gt.setP(BuiltInGate::ReleaseMs, 10.0f);
+
+            auto quiet = makeSine(440.0, 0.003, 12000);   // ~ -50 dB, below threshold
+            const double inRms = rmsTail(quiet, 3000);
+            gt.processBlock(quiet, emptyMidi);
+            const double outRms = rmsTail(quiet, 3000);
+            expect(outRms < inRms * 0.1, "below-threshold signal should be gated down");
+            expect(gt.getReductionDb() > 20.0f, "gain reduction meter should show heavy attenuation");
+            expect(! gt.isOpen(), "gate should report closed for a quiet signal");
+        }
+
+        beginTest("Gate range 0 is passthrough");
+        {
+            BuiltInGate gt;
+            gt.prepareToPlay(kSr, 4096);
+            gt.setP(BuiltInGate::ThresholdDb, -10.0f);   // 信号より上 = ゲートは閉じ判定
+            gt.setP(BuiltInGate::RangeDb, 0.0f);         // レンジ 0 = 絞らない (素通り)
+
+            auto sig = makeSine(440.0, 0.5, 8000);
+            const double inRms = rmsTail(sig, 2000);
+            gt.processBlock(sig, emptyMidi);
+            const double outRms = rmsTail(sig, 2000);
+            expect(std::abs(outRms - inRms) < inRms * 0.01, "range 0 must pass through even when closed");
+            expect(gt.getReductionDb() < 0.5f, "range 0 means no reduction");
+        }
+
+        beginTest("Gate state round-trips");
+        {
+            BuiltInGate a;
+            a.setP(BuiltInGate::ThresholdDb, -33.0f);
+            a.setP(BuiltInGate::RangeDb, 45.0f);
+            a.setP(BuiltInGate::AttackMs, 7.0f);
+            a.setP(BuiltInGate::HoldMs, 333.0f);
+            a.setP(BuiltInGate::ReleaseMs, 222.0f);
+            juce::MemoryBlock mb;
+            a.getStateInformation(mb);
+            BuiltInGate b;
             b.setStateInformation(mb.getData(), (int) mb.getSize());
             for (int i = 0; i < a.getParamCount(); ++i)
                 expect(std::abs(a.getP(i) - b.getP(i)) < 1.0e-3f, "param should round-trip");
