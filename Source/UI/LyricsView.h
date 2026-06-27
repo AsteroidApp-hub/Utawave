@@ -6,9 +6,8 @@
 #include "../Localisation.h"
 
 // 歌詞表示ビュー: テキストをコピペで貼り付け、歌唱中に最前面の窓で読む用途。
-// 編集モード (貼り付け / 編集) ↔ 表示モード (読み取り専用・大きな文字) を上部ボタンで
-// 切り替え、文字サイズを − / ＋ で調整する。テキストはプロジェクト (.uta) に保存され、
-// 文字サイズはアプリ全体設定 (AppPreferences) に保存される。
+// 常に編集可能 (読み取り専用の表示モードへの切替は廃止)。文字サイズを − / ＋ で調整する。
+// テキストはプロジェクト (.uta) に保存され、文字サイズはアプリ全体設定 (AppPreferences) に保存される。
 class LyricsView : public juce::Component
 {
 public:
@@ -39,7 +38,6 @@ public:
         editor.onTextChange = [this] { if (onTextChanged) onTextChanged(editor.getText()); };
         addAndMakeVisible(editor);
 
-        modeButton.onClick    = [this] { setEditMode(!editing); };
         loadButton.setButtonText(tr(u8"読み込み"));
         loadButton.setTooltip(tr(u8"テキストファイルから歌詞を読み込む"));
         loadButton.onClick    = [this] { openFileToLoad(); };
@@ -49,14 +47,11 @@ public:
         fontUpButton.onClick   = [this] { changeFont(+kFontStep); };
         fontDownButton.setTooltip(tr(u8"文字を小さく"));
         fontUpButton.setTooltip(tr(u8"文字を大きく"));
-        addAndMakeVisible(modeButton);
         addAndMakeVisible(loadButton);
         addAndMakeVisible(fontDownButton);
         addAndMakeVisible(fontUpButton);
 
         applyFont();
-        // 内容があれば読みやすい表示モードで、空なら貼り付けやすい編集モードで開始
-        setEditMode(initialText.isEmpty());
     }
 
     juce::String getText() const { return editor.getText(); }
@@ -72,8 +67,6 @@ public:
     void resized() override
     {
         auto bar = getLocalBounds().removeFromTop(kBarHeight).reduced(6, 4);
-        modeButton.setBounds(bar.removeFromLeft(104));
-        bar.removeFromLeft(6);
         loadButton.setBounds(bar.removeFromLeft(88));
         fontUpButton.setBounds(bar.removeFromRight(44));
         bar.removeFromRight(4);
@@ -85,19 +78,6 @@ public:
     }
 
 private:
-    void setEditMode(bool shouldEdit)
-    {
-        editing = shouldEdit;
-        editor.setReadOnly(!editing);
-        editor.setCaretVisible(editing);
-        // 表示モードでは編集できないが、選択・スクロールは可能なまま
-        modeButton.setButtonText(editing ? tr(u8"表示モード") : tr(u8"編集モード"));
-        modeButton.setTooltip(editing ? tr(u8"大きな文字で読む表示に切り替える")
-                                      : tr(u8"歌詞を貼り付け / 編集する"));
-        if (editing)
-            editor.grabKeyboardFocus();
-    }
-
     void changeFont(int delta)
     {
         const int next = juce::jlimit(kMinFont, kMaxFont, fontSize_ + delta);
@@ -131,18 +111,14 @@ private:
                 const auto text = file.loadFileAsString();
                 editor.setText(text, true);         // sendNotification=true で onTextChanged を発火 (保存される)
                 editor.moveCaretToTop(false);
-                // 読み込んだ歌詞はそのまま読む用途が多いので表示モードへ
-                setEditMode(false);
             });
     }
 
     juce::TextEditor editor;
-    juce::TextButton modeButton;
     juce::TextButton loadButton;
     juce::TextButton fontDownButton, fontUpButton;
     std::unique_ptr<juce::FileChooser> chooser;
     int  fontSize_ { 16 };
-    bool editing { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LyricsView)
 };
