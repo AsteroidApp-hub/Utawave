@@ -155,7 +155,7 @@ void AudioEngine::sweepRetiredMonConfigs()
         retiredMonConfigs.end());
 }
 
-void AudioEngine::setMonitorChain(PluginChain* chain)
+void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo)
 {
     // 停止中モニタでも audio thread が processBlock できるよう、現 SR/blockSize で prepare しておく
     // (未 prepare のプラグインを叩くとクラッシュしうる)。既に同設定なら何もしない (再 prepare で
@@ -167,7 +167,9 @@ void AudioEngine::setMonitorChain(PluginChain* chain)
         chain->prepareToPlay(currentSampleRate, currentBufferSize);
 
     auto next = std::make_shared<MonitorConfig>();
-    next->chain = chain;
+    next->chain   = chain;
+    next->inputCh = inputCh;
+    next->stereo  = stereo;
     // チェーンの破棄は伴わない (Track 所有・削除時は clearPlayback が drain する)。drain 不要。
     publishMonConfig(std::move(next), /*drain=*/ false);
 }
@@ -1345,7 +1347,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 
 void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
                                      float* const* outputChannelData, int numOutputChannels,
-                                     int numSamples, PluginChain* monChain)
+                                     int numSamples, PluginChain* monChain,
+                                     int monInputCh, bool monStereo)
 {
     const bool monitoring = inputMonitoringActive.load()
                             && numInputChannels  > 0
@@ -1360,6 +1363,15 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
 
     if (!monitoring) return;
 
+    // ── 返しの入力 → L/R マッピング (トラックの入力選択に合わせる) ──
+    // mono トラックは選択 ch を L/R 両方へ (= センター)、stereo は inputCh→L / inputCh+1→R。
+    // これにより「録音する入力」と同じ音がセンター/正しい定位で返る。device ch0→L/ch1→R 固定だと
+    // mono でも別チャンネルが R に乗って L/R 分離して聞こえる不具合の修正。
+    const int   srcL = juce::jlimit(0, numInputChannels - 1, monInputCh);
+    const int   srcR = monStereo ? juce::jlimit(0, numInputChannels - 1, monInputCh + 1) : srcL;
+    const float* inL = inputChannelData[srcL];
+    const float* inR = inputChannelData[srcR];
+
     // 主モニタトラックに INS があれば、返し音をそのチェーンに通す (EQ/Comp/VST をライブに掛ける)。
     // 空 / 未設定なら従来のドライ返し。monitorChainBuf が未確保 (デバイス未開始) のときは安全側で
     // ドライにフォールバックし、audio thread でのヒープ確保を避ける。
@@ -1369,12 +1381,10 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
 
     if (useChain)
     {
-        // 入力選択はドライ経路と同じ (ch0 → L, ch1 → R / mono は複製)。FX の有無で「聞こえる入力」が
+        // 入力選択はドライ経路と同じ (srcL/srcR・mono はセンター複製)。FX の有無で「聞こえる入力」が
         // 変わらないようにする。input を in-place で触らず monitorChainBuf のコピーを処理するので、
         // 下流の録音 (生入力書き込み) には FX が一切焼き込まれない。
         monitorChainBuf.setSize(2, numSamples, false, false, true);
-        const float* inL = inputChannelData[0];
-        const float* inR = inputChannelData[juce::jmin(1, numInputChannels - 1)];
         if (inL != nullptr) monitorChainBuf.copyFrom(0, 0, inL, numSamples);
         else                monitorChainBuf.clear(0, 0, numSamples);
         if (inR != nullptr) monitorChainBuf.copyFrom(1, 0, inR, numSamples);
@@ -1406,22 +1416,18 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
     }
 
     // ── ドライ返し: 入力をそのまま出力へ (INS 無し・従来通り) ──
-    for (int ch = 0; ch < numOutputChannels; ++ch)
-    {
-        const int inCh = juce::jmin(ch, numInputChannels - 1);
-        if (inputChannelData[inCh] != nullptr)
-            juce::FloatVectorOperations::add(outputChannelData[ch],
-                                             inputChannelData[inCh], numSamples);
-    }
+    // mono は srcL を L/R 両方へ (センター)、stereo は L=srcL / R=srcR。
+    if (numOutputChannels >= 1 && inL != nullptr)
+        juce::FloatVectorOperations::add(outputChannelData[0], inL, numSamples);
+    if (numOutputChannels >= 2 && inR != nullptr)
+        juce::FloatVectorOperations::add(outputChannelData[1], inR, numSamples);
 
     // ── モニターリバーブ: 返し音にだけウェットを足す (録音ファイルには焼き込まない) ──
-    // ドライ返しと同じ入力 (ch0 / ch1) を送り、Rev 量でスケールしてプレートで処理。
+    // ドライ返しと同じ入力 (srcL / srcR) を送り、Rev 量でスケールしてプレートで処理。
     // 出力にだけ加算するので、下流の録音 (生入力書き込み) には一切影響しない。
     if (rs > 0.0001f)
     {
         monitorReverbBuf.setSize(2, numSamples, false, false, true);
-        const float* inL = inputChannelData[0];
-        const float* inR = inputChannelData[juce::jmin(1, numInputChannels - 1)];
         if (inL != nullptr) monitorReverbBuf.copyFrom(0, 0, inL, numSamples, rs);
         else                monitorReverbBuf.clear(0, 0, numSamples);
         if (inR != nullptr) monitorReverbBuf.copyFrom(1, 0, inR, numSamples, rs);
@@ -1466,8 +1472,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // チェーン (= Track) が破棄されない (clearPlayback の drain がこの shared_ptr 解放を待つ)。
     std::shared_ptr<const MonitorConfig> monCfg;
     { const juce::SpinLock::ScopedLockType l(monConfigLock); monCfg = activeMonConfig; }
-    PluginChain* const monChain  = (monCfg ? monCfg->chain : nullptr);
-    const bool         monActive = inputMonitoringActive.load();
+    PluginChain* const monChain    = (monCfg ? monCfg->chain : nullptr);
+    const int          monInputCh  = (monCfg ? monCfg->inputCh : 0);
+    const bool         monStereo   = (monCfg ? monCfg->stereo  : false);
+    const bool         monActive   = inputMonitoringActive.load();
 
     // VU メータ平滑化係数: SR とブロック長から算出し、buffer size を変えても応答を一定に保つ。
     // numSamples (と SR) が変わらない限り std::exp を再計算しないようキャッシュする。
@@ -1644,7 +1652,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
 
         // 停止中も入力モニタリングは通す (ドライ返し + モニターリバーブ、INS があれば FX も)
         mixInputMonitoring(inputChannelData, numInputChannels,
-                           outputChannelData, numOutputChannels, numSamples, monChain);
+                           outputChannelData, numOutputChannels, numSamples, monChain,
+                           monInputCh, monStereo);
 
         // 停止中は再生デクリックの直前出力値を 0 に戻す。次の再生開始で再構築 (preparePlayback)
         // が走って playbackGen が増える場合は 0 起点のクロスフェード (= 短いフェードイン) になり、
@@ -2200,7 +2209,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // ドライ返し + モニターリバーブ (INS があれば返し音に FX も通す)。録音は下の
     // recCfg->targets で生入力を書く (FX を通さない別経路) ため、FX は焼き込まれない。
     mixInputMonitoring(inputChannelData, numInputChannels,
-                       outputChannelData, numOutputChannels, numSamples, monChain);
+                       outputChannelData, numOutputChannels, numSamples, monChain,
+                       monInputCh, monStereo);
 
     // recording from input (録音設定はブロック先頭で取得した recCfg を使う)
     {

@@ -1219,6 +1219,9 @@ void MainComponent::syncInputMonitorStateToEngine()
     bool  anyRecArmed   = false;
     float monRev        = 0.0f;   // モニター中トラックの Rev (複数なら最大)
     PluginChain* monChain = nullptr;   // 主モニタトラック (先頭の input-monitor) の INS チェーン
+    int   monInputCh    = 0;      // 主モニタトラックの入力チャンネル / mono・stereo (返しの L/R 定位用)
+    bool  monStereo     = false;
+    bool  havePrimary   = false;
     for (int i = 0; i < trackManager.getTrackCount(); ++i)
     {
         auto* t = trackManager.getTrack(i);
@@ -1227,8 +1230,13 @@ void MainComponent::syncInputMonitorStateToEngine()
         {
             anyMonitoring = true;
             monRev = juce::jmax(monRev, t->getReverbSend());
-            if (monChain == nullptr)   // 先頭の input-monitor トラックを FX の主対象にする
-                monChain = &t->getPluginChain();
+            if (!havePrimary)   // 先頭の input-monitor トラックを FX / 入力定位の主対象にする
+            {
+                monChain   = &t->getPluginChain();
+                monInputCh = t->getInputChannel();
+                monStereo  = t->isStereo();
+                havePrimary = true;
+            }
         }
         if (t->isRecArmed()) anyRecArmed = true;
     }
@@ -1236,7 +1244,9 @@ void MainComponent::syncInputMonitorStateToEngine()
     audioEngine.setAnyTrackRecArmed(anyRecArmed);
     audioEngine.setMonitorReverbSend(monRev);
     // 返し音に INS を通すか (アプリ全体設定)。OFF のときはドライ返しのまま (nullptr を渡す)。
-    audioEngine.setMonitorChain(appPrefs.monitorThroughInserts ? monChain : nullptr);
+    // 入力チャンネル / mono・stereo は chain の有無に依らず常に渡す (ドライ返しの L/R 定位用)。
+    audioEngine.setMonitorChain(appPrefs.monitorThroughInserts ? monChain : nullptr,
+                                monInputCh, monStereo);
 }
 
 void MainComponent::syncClickTrackToEngine()

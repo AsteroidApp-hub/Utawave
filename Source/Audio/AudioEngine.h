@@ -229,7 +229,9 @@ public:
     // なら従来のドライ返しのまま (空チェーンは audio thread でスキップ)。チェーンの所有は Track 側で、
     // Track 破棄 (= clearPlayback) 時に空 config を drain 公開して audio が手放すまで待つ
     // (チェーンのダングリング防止バリア)。停止中モニタでも叩けるよう現 SR/blockSize で prepare する。
-    void setMonitorChain(class PluginChain* chain);
+    // inputCh / stereo = 主モニタトラックの入力選択。返しの L/R マッピングをこれに合わせる
+    // (mono はセンター、stereo は inputCh/inputCh+1)。chain が nullptr (ドライ返し) でも渡す。
+    void setMonitorChain(class PluginChain* chain, int inputCh, bool stereo);
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -358,7 +360,8 @@ private:
     // monChain が非 null かつ非空なら、返し音をそのチェーンに通す (INS をライブに掛ける)。
     void mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
                             float* const* outputChannelData, int numOutputChannels,
-                            int numSamples, class PluginChain* monChain);
+                            int numSamples, class PluginChain* monChain,
+                            int monInputCh, bool monStereo);
     // UI スレッド読み出し用 (preparePlayback の autoCrossfade / zeroCrossingFade)。
     AppSettings               appSettings;
     // audio スレッド読み出し用スナップショット (メトロノーム区間が bpmChanges/meterChanges の vector を
@@ -501,6 +504,12 @@ private:
     struct MonitorConfig
     {
         class PluginChain* chain { nullptr };
+        // 主モニタトラックの入力チャンネル選択。モニター返しの L/R マッピングをこれに合わせる
+        // (録音と同じ入力を聞かせる)。mono は inputCh を L/R 両方へ = センター、stereo は
+        // inputCh→L / inputCh+1→R。これが無いと device ch0→L / ch1→R 固定で、mono 入力でも
+        // 別チャンネルが R に乗って L/R 分離して聞こえてしまう。
+        int  inputCh { 0 };
+        bool stereo  { false };
     };
     std::shared_ptr<const MonitorConfig>              activeMonConfig;
     juce::SpinLock                                    monConfigLock;
