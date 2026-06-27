@@ -60,6 +60,39 @@ public:
     void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
 };
 
+// prepareToPlay されたときだけゲインを掛けるスタブ (未 prepare では素通り)。
+// 「モニター返しのチェーンが確実に prepare される」保証を検証するため。
+class PrepareGatedFakePlugin : public juce::AudioPluginInstance
+{
+public:
+    explicit PrepareGatedFakePlugin(float g)
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())),
+          gain(g) {}
+    float gain { 1.0f };
+    bool  prepared { false };
+    const juce::String getName() const override            { return "PrepGate"; }
+    void prepareToPlay(double, int) override               { prepared = true; }
+    void releaseResources() override                       { prepared = false; }
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override
+        { if (prepared) b.applyGain(gain); }   // 未 prepare なら何もしない
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override           { return 0.0; }
+    bool acceptsMidi() const override                      { return false; }
+    bool producesMidi() const override                     { return false; }
+    juce::AudioProcessorEditor* createEditor() override    { return nullptr; }
+    bool hasEditor() const override                        { return false; }
+    int getNumPrograms() override                          { return 1; }
+    int getCurrentProgram() override                       { return 0; }
+    void setCurrentProgram(int) override                   {}
+    const juce::String getProgramName(int) override        { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override  {}
+    void setStateInformation(const void*, int) override    {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
+
 // audioDeviceAboutToStart に渡す最小スタブ。SR / buffer size / チャンネル構成だけを返す。
 struct FakeAudioIODevice : public juce::AudioIODevice
 {
@@ -707,6 +740,27 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
 
             t->setVolume(-6.0206f);                  // gain ~0.5
             expect(std::abs(monitorPeak(t) - 0.2f) < 0.01f, "fader -6dB: monitor return halved (~0.2)");
+        }
+
+        // ── (9) setMonitorChain は未 prepare のチェーンを prepare する ──
+        // 停止中に追加したトラック等、preparePlayback を経ていないチェーンに挿したプラグインが
+        // モニター返しで効くことの保証 (UI 側で onChainChanged → sync → setMonitorChain を呼ぶ前提)。
+        // PrepareGatedFakePlugin は prepareToPlay されないとゲインを掛けない。
+        {
+            Scene s;
+            s.start();                               // device 開始 (この時点で tm にトラックは無い)
+            auto* t = s.tm->addTrack({}, false);     // start 後に追加 = チェーンは未 prepare
+            t->setVolume(0.0f); t->setPan(0.0f); t->setInputChannel(0);
+            t->getPluginChain().addPlugin(std::make_unique<PrepareGatedFakePlugin>(2.0f));
+
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+            // setMonitorChain が未 prepare を検出して prepareToPlay する → ゲインが効く
+            s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(),
+                                     t->getPan(), t->getVolume());
+            const float peak = runWithInput(s.engine, 4, 0.25f);
+            expect(std::abs(peak - 0.5f) < 0.01f,
+                   "setMonitorChain prepares an unprepared chain so the plugin works (~0.5)");
         }
     }
 };

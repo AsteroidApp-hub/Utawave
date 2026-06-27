@@ -218,6 +218,10 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
                 self->rebuildInsertChips();
                 self->resized();
                 self->repaint();
+                // チェーンが変わったらエンジンへ通知する。入力モニターの返し (setMonitorChain)
+                // を再公開 + 再 prepare させるため (これが無いと、停止中に追加したトラック等の
+                // 未 prepare チェーンに挿したプラグインがモニター返しで効かない/メーターが反応しない)。
+                if (self->onChanged) self->onChanged();
             }
         });
     };
