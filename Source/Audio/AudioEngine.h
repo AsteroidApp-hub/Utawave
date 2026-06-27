@@ -417,6 +417,8 @@ private:
     // 簡易リバーブ送りバス (各トラックの reverbSend を合算し、ウェットだけマスターへ加算)
     juce::Reverb              masterReverbBus;
     juce::AudioBuffer<float>  reverbSendBuf;
+    // メトロノーム合成音を CLICK トラックの INS チェーンへ通すためのスクラッチ (audio thread 専用)。
+    juce::AudioBuffer<float>  clickSynthBuf;
     double                    reverbPreparedSr { 0.0 };
     // リバーブのテールが内部に残っているか (audio thread 専用)。停止に入った最初の
     // ブロックで一度だけ reset するためのフラグ。これが無いと前回のテールが凍結保持され、
@@ -582,6 +584,10 @@ private:
         // スナップショットへ載せ、そのスナップショットが退役・回収される時に解放される (audio thread は
         // 触らない)。AudioClip* を生参照する PlaybackClip より後に解放されるよう、ここで所有を握る。
         std::vector<std::unique_ptr<AudioClip>>     graveyard;
+        // CLICK トラック (あれば) の生ポインタ。メトロノーム合成音をこのトラックの INS
+        // チェーン (EQ 等) に通すために保持する。clipTracks の Track* と同じく clearPlayback()
+        // の drain バリアで保護される (トラック削除時に空スナップショットへ遷移してから破棄)。
+        Track*                                      clickTrack { nullptr };
     };
     double lastBlockPosStart { -1.0 };  // 不連続検知用
 

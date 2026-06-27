@@ -416,11 +416,13 @@ void AudioEngine::preparePlayback(TrackManager& tm)
 
     // Click Track を検出: 音量・ミュートをメトロノームに連動
     bool clickTrackFound = false;
+    Track* foundClickTrack = nullptr;  // 合成音を INS チェーンに通すため snap へ載せる
     for (int ti = 0; ti < tm.getTrackCount(); ++ti)
     {
         auto* track = tm.getTrack(ti);
         if (!track->isClickTrack()) continue;
         clickTrackFound = true;
+        foundClickTrack = track;
         float trackGainLin = juce::Decibels::decibelsToGain(track->getVolume());
         metronomeVolume.store(trackGainLin * 0.5f);  // dB → linear * 0.5（クリックの基本音量）
         metronomeEnabled.store(!track->isMuted());
@@ -636,6 +638,7 @@ void AudioEngine::preparePlayback(TrackManager& tm)
 
     // ── スナップショットを構築 (すべてロック外で実行) ──
     auto snap = std::make_shared<PlaybackSnapshot>();
+    snap->clickTrack = foundClickTrack;
     snap->clips = std::move(newClips);
 
     // トラック別インデックスを構築 (audio thread の毎ブロック全 clips 走査を排除)
@@ -1124,6 +1127,9 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     masterReverbBus.setParameters(makePlateReverbParams());
     reverbPreparedSr = currentSampleRate;
     reverbSendBuf.setSize(2, currentBufferSize, false, true, true);
+
+    // メトロノーム合成 → CLICK トラック INS チェーン用スクラッチ (audio thread でのヒープ確保回避)。
+    clickSynthBuf.setSize(2, currentBufferSize, false, true, true);
 
     // audio callback のアクティブトラック収集スクラッチを事前確保 (毎ブロックの再確保回避)。
     // clear() で長さ 0 に戻しても容量は保たれるため、以後 push_back で再確保が起きない。
@@ -2071,6 +2077,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         float lGain = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
         float rGain = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
 
+        // 合成音はまずドライ (vol/pan 前) でスクラッチ ch0 に書き、CLICK トラックの INS
+        // チェーン (EQ 等) を通してから vol/pan を掛けて出力へ加算する。これにより
+        // 「メトロノームを EQ で削る」等が効く。チェーンは preparePlayback / aboutToStart で
+        // 全トラック分 prepare 済み (Click も含む)。プラグインが無ければ従来どおりの直加算。
+        clickSynthBuf.setSize(2, numSamples, false, false, true);
+        clickSynthBuf.clear();
+        float* cs = clickSynthBuf.getWritePointer(0);
+
         for (int i = 0; i < numSamples; ++i)
         {
             double pos = posStart + (double)i / currentSampleRate;
@@ -2141,24 +2155,44 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 }
 
                 float strengthMul = accent ? (clickIsDownbeat ? 1.3f : 0.85f) : 1.0f;
-                s *= vol * strengthMul;
-
-                // ステレオ出力にパン適用
-                if (numOutputChannels >= 2)
-                {
-                    outputChannelData[0][i] += s * lGain;
-                    outputChannelData[1][i] += s * rGain;
-                }
-                else if (numOutputChannels >= 1)
-                {
-                    outputChannelData[0][i] += s;
-                }
+                s *= strengthMul;            // vol / pan はチェーン通過後に適用する
+                cs[i] = s;                   // ドライ (モノ) でスクラッチへ
 
                 // エンベロープ減衰（音色ごとに異なる）
                 double decay = (sound == 1 || sound == 4) ? 0.997 : 0.9985;  // Stick/Tick は速い減衰
                 clickEnvelope *= decay;
                 if (clickEnvelope < 0.001) clickEnvelope = 0.0;
             }
+        }
+
+        // CLICK トラックの INS チェーンを通す (EQ 等)。プラグインがあるときだけステレオ化して
+        // 処理する (空チェーンは getActivePluginCountAtomic()==0 で素通り = 従来と同コスト)。
+        // ライブモニタ同様 PDC はかけない (ルックアヘッド系は遅延が聞こえるが EQ は無遅延)。
+        Track* clickTr = snap ? snap->clickTrack : nullptr;
+        bool   chainStereo = false;
+        if (clickTr != nullptr && clickTr->getPluginChain().getActivePluginCountAtomic() > 0)
+        {
+            clickSynthBuf.copyFrom(1, 0, clickSynthBuf, 0, 0, numSamples);  // dual-mono 化
+            chainMidiScratch.clear();
+            clickTr->getPluginChain().processBlock(clickSynthBuf, chainMidiScratch, &playHead);
+            chainStereo = true;
+        }
+
+        // vol / pan を掛けて出力へ加算 (通常トラックと同じく fader/pan はチェーン後段)
+        const float* outL = clickSynthBuf.getReadPointer(0);
+        const float* outR = chainStereo ? clickSynthBuf.getReadPointer(1) : outL;
+        if (numOutputChannels >= 2)
+        {
+            for (int i = 0; i < numSamples; ++i)
+            {
+                outputChannelData[0][i] += outL[i] * vol * lGain;
+                outputChannelData[1][i] += outR[i] * vol * rGain;
+            }
+        }
+        else if (numOutputChannels >= 1)
+        {
+            for (int i = 0; i < numSamples; ++i)
+                outputChannelData[0][i] += outL[i] * vol;
         }
     }
 

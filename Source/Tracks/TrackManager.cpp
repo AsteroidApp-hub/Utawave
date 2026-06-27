@@ -48,6 +48,12 @@ Track* TrackManager::addClickTrack()
     if (hasClickTrack()) return nullptr;
     auto* t = new Track("Click", formatManager, thumbnailCache);
     t->setClickTrack(true);
+    // 既存トラックの INS スロット表示状態を引き継ぐ (addTrack と同じ。CLICK にも EQ 等を
+    // 挿せるよう INS スロットを出す。表示中に追加した CLICK だけ INS が隠れる不整合を防ぐ)
+    bool insVisible = false;
+    for (auto& tr : tracks)
+        if (tr->isInsertSlotsVisible()) { insVisible = true; break; }
+    t->setInsertSlotsVisible(insVisible);
     tracks.push_back(std::unique_ptr<Track>(t));
     if (onChanged) onChanged();
     return t;
