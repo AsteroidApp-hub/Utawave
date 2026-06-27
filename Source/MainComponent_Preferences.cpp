@@ -160,7 +160,7 @@ void MainComponent::showPreferences()
             addAndMakeVisible(zoomMouseBtn);
 
             zeroCrossBtn.setButtonText(
-                tr(u8"クロスフェードをゼロクロス点でつなぐ (プチッ音を防ぐ)"));
+                tr(u8"クロスフェードをゼロクロス点でつなぐ"));
             zeroCrossBtn.setToggleState(curZeroCross, juce::dontSendNotification);
             zeroCrossBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
             zeroCrossBtn.onClick = [this] {

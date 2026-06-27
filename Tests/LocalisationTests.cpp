@@ -60,6 +60,8 @@ public:
         expect(tr(u8"録音") == juce::String::fromUTF8(u8"녹음"), "ko record");
         expect(tr(u8"書き出し") == juce::String::fromUTF8(u8"내보내기"), "ko export");
         expect(tr(u8"テンポ: ") == juce::String::fromUTF8(u8"템포: "), "ko trailing-space fragment");
+        expect(tr(u8"クロスフェードをゼロクロス点でつなぐ")
+                   == juce::String::fromUTF8(u8"크로스페이드를 제로 크로싱에서 연결"), "ko preferences toggle");
 
         // 未訳キーは日本語キーへフォールバック (英語と同じ契約)
         const char* missing = u8"このキーは翻訳テーブルに存在しない98765";
@@ -76,6 +78,9 @@ public:
         expect(tr(u8"プラグイン管理") == "Plugin Manager", "menu key");
         expect(tr(u8"クロスフェードを描く") == "Create Crossfade", "edit menu key");
         expect(tr(u8"トラックを複製") == "Duplicate Track", "track menu key");
+        // 環境設定トグル (一度訳抜けしていた回帰防止)
+        expect(tr(u8"クロスフェードをゼロクロス点でつなぐ") == "Connect crossfades at zero crossings",
+               "preferences toggle key");
         // 末尾スペースまで一致が要る連結断片
         expect(tr(u8"テンポ: ") == "Tempo: ", "key with a trailing space");
         // 先頭スペースの断片 (複製サフィックス)
