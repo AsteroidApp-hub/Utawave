@@ -505,7 +505,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();                              // 停止中 (play しない)
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.25f) < 0.01f, "dry monitor returns input unchanged (~0.25)");
         }
@@ -519,7 +519,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan());
+            s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.5f) < 0.01f, "INS (gain x2) is applied to the monitor return (~0.5)");
         }
@@ -534,7 +534,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.25f) < 0.01f,
                    "monitor chain off: dry return even with a plugin present (~0.25)");
@@ -568,7 +568,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
                 s.start();
                 s.engine.setInputMonitoringActive(true);
                 s.engine.setMonitorReverbSend(0.0f);
-                s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan());
+                s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
                 s.engine.play();
                 const float peak = runWithInput(s.engine, 12, 0.0f);
                 expect(std::abs(peak - 0.25f) < 0.01f,
@@ -588,7 +588,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
 
             juce::AudioBuffer<float> out(2, kBlock), in(2, kBlock);
             juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.3f, kBlock);
@@ -616,7 +616,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
 
             juce::AudioBuffer<float> out(2, kBlock), in(2, kBlock);
             juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.3f, kBlock);
@@ -641,7 +641,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         {
             auto* t = s.tm->getTrack(0);
             t->setPan(pan);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
             juce::AudioBuffer<float> out(2, kBlock), in(1, kBlock);
             juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.3f, kBlock);
             const float* ins[1] = { in.getReadPointer(0) };
@@ -671,6 +671,42 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             runPanned(s, +1.0f, &pL, &pR);           // ハードR
             expect(pL < 0.01f,                   "pan hard R: monitor L silent (~0)");
             expect(std::abs(pR - 0.3f) < 0.01f, "pan hard R: monitor R = input (~0.3)");
+        }
+
+        // ── (8) フェーダー音量が返しに反映される (mono, -6dB ≒ ゲイン 0.5) ──
+        // mono 入力 0.4 を -6.02dB のトラックでモニタ → 返しは ~0.2 (= 0.4 * 0.5)。
+        // 0dB (gain 1.0) は従来どおり素通り (~0.4)。
+        {
+            Scene s;
+            auto* t = s.tm->addTrack({}, false);     // mono
+            t->setPan(0.0f); t->setInputChannel(0);
+            s.start();
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+
+            auto monitorPeak = [&s](Track* tr) -> float
+            {
+                s.engine.setMonitorChain(nullptr, tr->getInputChannel(), tr->isStereo(),
+                                         tr->getPan(), tr->getVolume());
+                juce::AudioBuffer<float> out(2, kBlock), in(1, kBlock);
+                juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.4f, kBlock);
+                const float* ins[1] = { in.getReadPointer(0) };
+                float peak = 0.0f;
+                for (int i = 0; i < 4; ++i)
+                {
+                    out.clear();
+                    float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+                    s.engine.audioDeviceIOCallbackWithContext(ins, 1, chans, 2, kBlock, {});
+                    peak = juce::jmax(peak, out.getMagnitude(0, 0, kBlock));
+                }
+                return peak;
+            };
+
+            t->setVolume(0.0f);
+            expect(std::abs(monitorPeak(t) - 0.4f) < 0.01f, "fader 0dB: monitor return unchanged (~0.4)");
+
+            t->setVolume(-6.0206f);                  // gain ~0.5
+            expect(std::abs(monitorPeak(t) - 0.2f) < 0.01f, "fader -6dB: monitor return halved (~0.2)");
         }
     }
 };

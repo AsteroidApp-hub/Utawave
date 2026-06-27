@@ -231,8 +231,9 @@ public:
     // (チェーンのダングリング防止バリア)。停止中モニタでも叩けるよう現 SR/blockSize で prepare する。
     // inputCh / stereo = 主モニタトラックの入力選択。返しの L/R マッピングをこれに合わせる
     // (mono はセンター、stereo は inputCh/inputCh+1)。pan = 返しに反映するパン (-1..+1)。
+    // volumeDb = 返しに反映するフェーダー音量 (dB、内部で linear へ変換)。
     // chain が nullptr (ドライ返し) でも渡す。
-    void setMonitorChain(class PluginChain* chain, int inputCh, bool stereo, float pan);
+    void setMonitorChain(class PluginChain* chain, int inputCh, bool stereo, float pan, float volumeDb);
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -362,7 +363,7 @@ private:
     void mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
                             float* const* outputChannelData, int numOutputChannels,
                             int numSamples, class PluginChain* monChain,
-                            int monInputCh, bool monStereo, float monPan);
+                            int monInputCh, bool monStereo, float monPan, float monGain);
     // UI スレッド読み出し用 (preparePlayback の autoCrossfade / zeroCrossingFade)。
     AppSettings               appSettings;
     // audio スレッド読み出し用スナップショット (メトロノーム区間が bpmChanges/meterChanges の vector を
@@ -514,6 +515,9 @@ private:
         // 主モニタトラックのパン (-1..+1)。返しにも反映する (再生時と同じく FX 後段で適用)。
         // pan=0 は L/R 等倍 = センター (従来挙動)。
         float pan    { 0.0f };
+        // 主モニタトラックのフェーダー音量 (リニアゲイン)。返しにも反映する (再生時と同じく
+        // FX 後段で pan と一緒に適用)。1.0 = 0dB (従来挙動)。setMonitorChain で dB→linear 変換。
+        float gain   { 1.0f };
     };
     std::shared_ptr<const MonitorConfig>              activeMonConfig;
     juce::SpinLock                                    monConfigLock;

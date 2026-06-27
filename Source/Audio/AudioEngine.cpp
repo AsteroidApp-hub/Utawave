@@ -155,7 +155,7 @@ void AudioEngine::sweepRetiredMonConfigs()
         retiredMonConfigs.end());
 }
 
-void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo, float pan)
+void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo, float pan, float volumeDb)
 {
     // 停止中モニタでも audio thread が processBlock できるよう、現 SR/blockSize で prepare しておく
     // (未 prepare のプラグインを叩くとクラッシュしうる)。既に同設定なら何もしない (再 prepare で
@@ -171,6 +171,7 @@ void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo, 
     next->inputCh = inputCh;
     next->stereo  = stereo;
     next->pan     = pan;
+    next->gain    = juce::Decibels::decibelsToGain(volumeDb);
     // チェーンの破棄は伴わない (Track 所有・削除時は clearPlayback が drain する)。drain 不要。
     publishMonConfig(std::move(next), /*drain=*/ false);
 }
@@ -1349,7 +1350,7 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
                                      float* const* outputChannelData, int numOutputChannels,
                                      int numSamples, PluginChain* monChain,
-                                     int monInputCh, bool monStereo, float monPan)
+                                     int monInputCh, bool monStereo, float monPan, float monGain)
 {
     const bool monitoring = inputMonitoringActive.load()
                             && numInputChannels  > 0
@@ -1373,11 +1374,13 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
     const float* inL = inputChannelData[srcL];
     const float* inR = inputChannelData[srcR];
 
-    // パン: 返しにもトラックのパンを反映する (再生時と同じリニアバランス則・FX 後段で適用)。
-    // pan=0 なら panL=panR=1 = センター (従来挙動)。mono は L/R 同信号 + このゲインで定位、
-    // stereo は L=srcL/R=srcR にバランスを掛ける。
+    // パン + フェーダー音量: 返しにトラックのパンとフェーダーを反映する (再生時と同じリニア
+    // バランス則・FX 後段で適用)。pan=0/gain=1 (0dB) なら gL=gR=1 = センター等倍 (従来挙動)。
+    // mono は L/R 同信号 + このゲインで定位、stereo は L=srcL/R=srcR にバランスを掛ける。
     const float panL = (monPan <= 0.0f) ? 1.0f : (1.0f - monPan);
     const float panR = (monPan >= 0.0f) ? 1.0f : (1.0f + monPan);
+    const float gL   = monGain * panL;
+    const float gR   = monGain * panR;
 
     // 主モニタトラックに INS があれば、返し音をそのチェーンに通す (EQ/Comp/VST をライブに掛ける)。
     // 空 / 未設定なら従来のドライ返し。monitorChainBuf が未確保 (デバイス未開始) のときは安全側で
@@ -1400,20 +1403,22 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
         monitorMidiScratch.clear();
         monChain->processBlock(monitorChainBuf, monitorMidiScratch, nullptr);
 
-        // 処理済み (FX 後) の返しを出力へ加算 (= ドライ返しの置き換え)。パンを後段で適用。
+        // 処理済み (FX 後) の返しを出力へ加算 (= ドライ返しの置き換え)。フェーダー+パンを後段で適用。
         if (numOutputChannels >= 1)
             juce::FloatVectorOperations::addWithMultiply(outputChannelData[0],
-                                             monitorChainBuf.getReadPointer(0), panL, numSamples);
+                                             monitorChainBuf.getReadPointer(0), gL, numSamples);
         if (numOutputChannels >= 2)
             juce::FloatVectorOperations::addWithMultiply(outputChannelData[1],
-                                             monitorChainBuf.getReadPointer(1), panR, numSamples);
+                                             monitorChainBuf.getReadPointer(1), gR, numSamples);
 
         // リバーブ送りは FX 処理後の信号から (再生時の post-fader/post-FX 送りと同じセマンティクス)。
+        // フェーダー音量も乗せる (post-fader send。フェーダーを下げると返しもリバーブも一緒に下がる)。
         if (rs > 0.0001f)
         {
+            const float rsg = rs * monGain;
             monitorReverbBuf.setSize(2, numSamples, false, false, true);
-            monitorReverbBuf.copyFrom(0, 0, monitorChainBuf.getReadPointer(0), numSamples, rs);
-            monitorReverbBuf.copyFrom(1, 0, monitorChainBuf.getReadPointer(1), numSamples, rs);
+            monitorReverbBuf.copyFrom(0, 0, monitorChainBuf.getReadPointer(0), numSamples, rsg);
+            monitorReverbBuf.copyFrom(1, 0, monitorChainBuf.getReadPointer(1), numSamples, rsg);
             monitorReverbBus.processStereo(monitorReverbBuf.getWritePointer(0),
                                            monitorReverbBuf.getWritePointer(1), numSamples);
             monitorReverbDirty = true;
@@ -1425,21 +1430,22 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
     }
 
     // ── ドライ返し: 入力をそのまま出力へ (INS 無し・従来通り) ──
-    // mono は srcL を L/R 両方へ (センター)、stereo は L=srcL / R=srcR。パンを後段で適用。
+    // mono は srcL を L/R 両方へ (センター)、stereo は L=srcL / R=srcR。フェーダー+パンを後段で適用。
     if (numOutputChannels >= 1 && inL != nullptr)
-        juce::FloatVectorOperations::addWithMultiply(outputChannelData[0], inL, panL, numSamples);
+        juce::FloatVectorOperations::addWithMultiply(outputChannelData[0], inL, gL, numSamples);
     if (numOutputChannels >= 2 && inR != nullptr)
-        juce::FloatVectorOperations::addWithMultiply(outputChannelData[1], inR, panR, numSamples);
+        juce::FloatVectorOperations::addWithMultiply(outputChannelData[1], inR, gR, numSamples);
 
     // ── モニターリバーブ: 返し音にだけウェットを足す (録音ファイルには焼き込まない) ──
-    // ドライ返しと同じ入力 (srcL / srcR) を送り、Rev 量でスケールしてプレートで処理。
-    // 出力にだけ加算するので、下流の録音 (生入力書き込み) には一切影響しない。
+    // ドライ返しと同じ入力 (srcL / srcR) を送り、Rev 量 × フェーダー音量でスケールしてプレートで処理
+    // (post-fader send)。出力にだけ加算するので、下流の録音 (生入力書き込み) には一切影響しない。
     if (rs > 0.0001f)
     {
+        const float rsg = rs * monGain;
         monitorReverbBuf.setSize(2, numSamples, false, false, true);
-        if (inL != nullptr) monitorReverbBuf.copyFrom(0, 0, inL, numSamples, rs);
+        if (inL != nullptr) monitorReverbBuf.copyFrom(0, 0, inL, numSamples, rsg);
         else                monitorReverbBuf.clear(0, 0, numSamples);
-        if (inR != nullptr) monitorReverbBuf.copyFrom(1, 0, inR, numSamples, rs);
+        if (inR != nullptr) monitorReverbBuf.copyFrom(1, 0, inR, numSamples, rsg);
         else                monitorReverbBuf.clear(1, 0, numSamples);
 
         monitorReverbBus.processStereo(monitorReverbBuf.getWritePointer(0),
@@ -1485,6 +1491,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     const int          monInputCh  = (monCfg ? monCfg->inputCh : 0);
     const bool         monStereo   = (monCfg ? monCfg->stereo  : false);
     const float        monPan      = (monCfg ? monCfg->pan     : 0.0f);
+    const float        monGain     = (monCfg ? monCfg->gain    : 1.0f);
     const bool         monActive   = inputMonitoringActive.load();
 
     // VU メータ平滑化係数: SR とブロック長から算出し、buffer size を変えても応答を一定に保つ。
@@ -1663,7 +1670,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         // 停止中も入力モニタリングは通す (ドライ返し + モニターリバーブ、INS があれば FX も)
         mixInputMonitoring(inputChannelData, numInputChannels,
                            outputChannelData, numOutputChannels, numSamples, monChain,
-                           monInputCh, monStereo, monPan);
+                           monInputCh, monStereo, monPan, monGain);
 
         // 停止中は再生デクリックの直前出力値を 0 に戻す。次の再生開始で再構築 (preparePlayback)
         // が走って playbackGen が増える場合は 0 起点のクロスフェード (= 短いフェードイン) になり、
@@ -2220,7 +2227,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // recCfg->targets で生入力を書く (FX を通さない別経路) ため、FX は焼き込まれない。
     mixInputMonitoring(inputChannelData, numInputChannels,
                        outputChannelData, numOutputChannels, numSamples, monChain,
-                       monInputCh, monStereo, monPan);
+                       monInputCh, monStereo, monPan, monGain);
 
     // recording from input (録音設定はブロック先頭で取得した recCfg を使う)
     {
