@@ -1906,10 +1906,11 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
     }
     else if (std::abs(w.deltaY) > 1.0e-4)
     {
-        // 縦スクロールは 1 トラックスナップを維持しつつ、ホイール delta を累積して
-        // スクロール量に比例した数だけトラックを送る (速いフリックほど機敏に進む)。
-        // deltaY > 0 = 上 (前のトラックへ) / deltaY < 0 = 下 (後ろのトラックへ)。
-        // しきい値は「1 ノッチ ≒ 1 トラック」になるよう調整 (mac の 1 ノッチ deltaY ≒ 0.19)。
+        // 縦スクロールはスナップ境界 (トラック先頭 / テイクリスト展開中はテイクレーン先頭) を
+        // 1 つずつ送る (scrollByTracks)。ホイール delta を累積し量に比例した数だけ送る
+        // (速いフリックほど機敏)。deltaY > 0 = 上 / deltaY < 0 = 下。
+        // しきい値は「1 ノッチ ≒ 1 境界 (折りたたみ中はトラック / 展開中はレーン)」になるよう
+        // 調整 (mac の 1 ノッチ deltaY ≒ 0.19)。
         constexpr double kStepPerTrack = 0.15;
         const juce::uint32 now = juce::Time::getMillisecondCounter();
         const bool idle = (now - lastWheelMs > 150);   // 連続フリックでない孤立ノッチか
@@ -1931,8 +1932,7 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
             {
                 wheelAccumY -= steps * kStepPerTrack;
                 steps = juce::jlimit(-16, 16, steps);                        // 1 イベントでの過剰ジャンプ防止
-                const int dir = (steps > 0) ? -1 : +1;                       // deltaY>0(steps>0) → 上(-1)
-                for (int i = 0, n = std::abs(steps); i < n; ++i) scrollByTracks(dir);
+                scrollByTracks(-steps);   // deltaY>0(steps>0) → 上 (scrollByTracks は +下/-上)
             }
         }
     }

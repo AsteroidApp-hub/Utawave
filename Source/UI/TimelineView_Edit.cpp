@@ -1104,10 +1104,11 @@ AudioClip* TimelineView::makeSplitTail(Lane* lane, const EditActions::ClipParams
 
 void TimelineView::scrollByTracks(int steps)
 {
-    // 縦スクロールを 1 トラック単位でスナップさせる。トラックは可変高さなので
-    // 固定ピクセルではなく境界 (getTrackY) を行き来する。ただしトラックがビューポート
-    // より高いと境界スナップだけでは下端 (末尾の余白) まで届かない (スクロールバーは
-    // 届く)。その場合はビューポート分のページ送りにして maxScroll まで到達できるようにする。
+    // 縦スクロールを「スナップ境界」単位で送る。境界は各トラックの先頭 + テイクリストが
+    // 展開されているトラックの各テイクレーン先頭。これにより、折りたたみ中はトラック 1 つずつ、
+    // テイクリスト展開中はテイクレーン 1 つずつスクロールできる (テイクが増えても一気に飛ばない)。
+    // メイン部 (≤maxHeight) もレーン (laneHeight) も常にビューポートより低いので、境界スナップ
+    // だけで全域に届く (旧来の「トラックがビューポートより高い時のページ送り」は不要になった)。
     const int count = trackManager.getTrackCount();
     if (count <= 0 || steps == 0) return;
 
@@ -1117,29 +1118,47 @@ void TimelineView::scrollByTracks(int steps)
     // これを合わせないとホイールがスクロールバーより手前 (余白の分) で止まる。
     const int maxScroll = juce::jmax(0, juce::jmax(400, totalH + 200) - viewportH);
 
-    int top = trackManager.trackAtY(scrollY);
-    if (top < 0) top = count - 1;
-    const int curTop  = trackManager.getTrackY(top);
-    const int nextTop = (top + 1 < count) ? trackManager.getTrackY(top + 1) : totalH;
-
-    int target = scrollY;
-    if (steps > 0)   // 下方向
+    // スナップ境界を昇順で収集 (トラックを上から走査するので自然に昇順)。
+    std::vector<int> bounds;
+    bounds.reserve((size_t) count * 2 + 1);
+    int y = 0;
+    for (int i = 0; i < count; ++i)
     {
-        // 現在トラックがビューポートより高く下端がまだ見えていない → ページ送り。
-        // そうでなければ次トラック頭へスナップ。
-        target = (nextTop - scrollY > viewportH) ? (scrollY + viewportH) : nextTop;
+        auto* t = trackManager.getTrack(i);
+        if (t == nullptr) continue;
+        bounds.push_back(y);                              // トラック先頭 (メイン部)
+        const int laneCount = t->getLaneCount();
+        if (! t->isLanesCollapsed() && laneCount > 1)     // テイクリスト展開中
+        {
+            int ly = y + t->getMainHeight();
+            for (int l = 1; l < laneCount; ++l)           // 各テイクレーン先頭
+            {
+                if (ly > maxScroll) break;                // 範囲外 (下端余白に入る分) は maxScroll で代表
+                bounds.push_back(ly);
+                ly += t->getLaneHeight();
+            }
+        }
+        y += t->getTotalHeight();
     }
-    else             // 上方向
+    // 末尾 (下端余白込みの最大スクロール) まで届くよう maxScroll を最終境界に加える。
+    if (bounds.empty() || bounds.back() < maxScroll)
+        bounds.push_back(maxScroll);
+
+    // 現在位置 (scrollY 以下で最大の境界) のインデックス。
+    int idx = 0;
+    for (int i = 0; i < (int) bounds.size(); ++i)
     {
-        if (scrollY - curTop > viewportH)
-            target = scrollY - viewportH;                    // 高いトラック内をページ送り
-        else if (scrollY > curTop)
-            target = curTop;                                 // 途中ならまず現在トラック頭へ
-        else
-            target = (top > 0) ? trackManager.getTrackY(top - 1) : 0;  // 前トラック頭へ
+        if (bounds[(size_t) i] <= scrollY) idx = i;
+        else break;
     }
 
-    target = juce::jlimit(0, maxScroll, target);
+    // 下: idx+steps。上: scrollY が境界からズレている (途中にいる) なら基準を 1 つ繰り上げる
+    // (例: 途中で 1 つ上へ = 直前の境界 = bounds[idx] へ snap)。
+    int targetIdx = idx + steps;
+    if (steps < 0 && bounds[(size_t) idx] != scrollY) targetIdx += 1;
+    targetIdx = juce::jlimit(0, (int) bounds.size() - 1, targetIdx);
+
+    const int target = juce::jlimit(0, maxScroll, bounds[(size_t) targetIdx]);
     if (target == scrollY) return;
     scrollY = target;
     vScrollBar.setCurrentRange(scrollY, vScrollBar.getCurrentRangeSize());
