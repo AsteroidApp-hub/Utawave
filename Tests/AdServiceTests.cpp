@@ -135,6 +135,33 @@ public:
             expectEquals((int) capped.size(), 2, "capped to maxCount");
         }
 
+        beginTest("selectAdsForLanguage: zh-Hans / zh-Hant / ko (BCP-47, case-insensitive)");
+        {
+            auto mk = [](const char* id, const char* lang)
+            { Ad a; a.id = id; a.title = "t"; a.lang = lang; return a; };
+
+            // 追加言語 + 全言語 + 別言語が混在したフィード
+            std::vector<Ad> in { mk("hans","zh-Hans"), mk("hant","zh-Hant"), mk("ko","ko"),
+                                 mk("all",""), mk("ja","ja"), mk("hans2","ZH-HANS") };
+
+            // languageCode() が返す BCP-47 コード (大小混在) を渡しても一致する
+            auto hans = AdService::selectAdsForLanguage(in, "zh-Hans", -1);
+            // zh-Hans 2 件 (大文字違いの hans2 含む) + all → 3 件。hant/ko/ja は除外
+            expectEquals((int) hans.size(), 3, "zh-Hans keeps zh-Hans (any case) + all");
+            for (auto& a : hans)
+                expect(a.id != "hant" && a.id != "ko" && a.id != "ja", "no other-language ad in zh-Hans set");
+            bool hasHans2 = false; for (auto& a : hans) if (a.id == "hans2") hasHans2 = true;
+            expect(hasHans2, "ZH-HANS (uppercase) matched zh-Hans");
+
+            auto hant = AdService::selectAdsForLanguage(in, "zh-Hant", -1);
+            expectEquals((int) hant.size(), 2, "zh-Hant keeps zh-Hant + all");   // hant + all
+
+            auto ko = AdService::selectAdsForLanguage(in, "ko", -1);
+            expectEquals((int) ko.size(), 2, "ko keeps ko + all");               // ko + all
+            for (auto& a : ko)
+                expect(a.id != "hans" && a.id != "hant", "no Chinese ad in ko set");
+        }
+
         beginTest("feedUrlForLanguage: token substitution and query fallback");
         {
             expectEquals(AdService::feedUrlForLanguage("https://x/ads/{lang}.json", "ja"),

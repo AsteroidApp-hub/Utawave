@@ -13,7 +13,7 @@ struct Ad
     juce::String body;
     juce::String imageUrl;
     juce::String linkUrl;
-    juce::String lang;    // "ja" / "en" / 省略・"all" (=全言語向け)。言語フィルタに使う
+    juce::String lang;    // "ja" / "en" / "zh-Hans" / "zh-Hant" / "ko" / 省略・"all" (=全言語向け)。言語フィルタに使う
     bool         pinned { false };  // true なら常に先頭固定 (シャッフル対象外・月 1 件の固定バナー)
     juce::Image  image;   // imageUrl から取得した画像 (取得失敗時は invalid)
 };
@@ -42,8 +42,8 @@ public:
     };
 
     // 非同期でフィードを取得する。完了時 (またはキャンセルされなかった時) に cb を
-    // 「メッセージスレッド」で 1 回呼ぶ。lang ("ja"/"en") をフィード URL に反映し、取得後も
-    // その言語で絞り込んでから画像 DL / キャッシュする。
+    // 「メッセージスレッド」で 1 回呼ぶ。lang ("ja"/"en"/"zh-Hans"/"zh-Hant"/"ko") をフィード URL に
+    // 反映し、取得後もその言語で絞り込んでから画像 DL / キャッシュする。
     //   ads   : 取得できた広告 (HasAds 以外は空)
     //   result: 取得結果 (HasAds / Empty / Failed)。Empty と Failed を呼び出し側で出し分ける
     // バックグラウンドスレッドは feedUrl / lang / cacheDir / cancel / cb を値コピーして保持するので、
@@ -65,7 +65,8 @@ public:
     static void arrangeForDisplay(std::vector<Ad>& ads, int maxCount, juce::Random& rng);
 
     // ── 言語対応 (純関数) ──
-    // 現在のアプリ言語コード ("ja" / それ以外は "en")。Localisation の保存設定から決まる。
+    // 現在のアプリ言語コード (BCP-47: "ja" / "en" / "zh-Hans" / "zh-Hant" / "ko")。
+    // Localisation の保存設定から決まる。公式サイト worker のロケールコードと一致させる。
     static juce::String languageCode();
     // フィード URL に言語を反映する。"{lang}" トークンがあれば置換、無ければ ?lang= を付与。
     static juce::String feedUrlForLanguage(const juce::String& baseUrl, const juce::String& lang);

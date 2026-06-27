@@ -77,28 +77,40 @@ std::vector<Ad> AdService::sampleAds()
         return img;
     };
 
+    // 言語別サンプルのタイトル (各言語で記述し、言語フィルタの確認に使う)。
+    auto titleFor = [](const juce::String& lang, int num) -> juce::String
+    {
+        const juce::String n (num);
+        if (lang == "ja")      return juce::String::fromUTF8(u8"サンプル広告 ")   + n + " (ja)";
+        if (lang == "en")      return "Sample Ad " + n + " (en)";
+        if (lang == "zh-Hans") return juce::String::fromUTF8(u8"示例广告 ")       + n + " (zh-Hans)";
+        if (lang == "zh-Hant") return juce::String::fromUTF8(u8"範例廣告 ")       + n + " (zh-Hant)";
+        if (lang == "ko")      return juce::String::fromUTF8(u8"샘플 광고 ")       + n + " (ko)";
+        return juce::String::fromUTF8(u8"全言語向けサンプル ") + n + " (all)";   // lang 空 = 全言語
+    };
+
     // バナー + 見出しのカードを上限いっぱい (kMaxAds 件) 生成し、30 件時の見え方
     // (ドット・スクロール) を確認できるようにする。色相をずらしてバナーを色違いにする。
     std::vector<Ad> out;
     const int n = kMaxAds;
+    // 言語を ja / en / zh-Hans / zh-Hant / ko / 全言語 で循環させ、各言語の言語フィルタを確認できるように
+    const char* const langs[] = { "ja", "en", "zh-Hans", "zh-Hant", "ko", "" };
+    constexpr int nLangs = (int) (sizeof(langs) / sizeof(langs[0]));
     for (int i = 0; i < n; ++i)
     {
         Ad ad;
         ad.id    = "sample-" + juce::String(i + 1);
-        // 先頭 1 件は固定バナー (pinned) のサンプル。全言語向け (lang 空) にして両言語で確認できるように。
+        // 先頭 1 件は固定バナー (pinned) のサンプル。全言語向け (lang 空) にして全言語で確認できるように。
         if (i == 0)
         {
             ad.pinned = true;
             ad.lang   = "";
-            ad.title  = juce::String::fromUTF8(u8"サンプル広告 1 (固定 pinned)");
+            ad.title  = juce::String::fromUTF8(u8"サンプル広告 1 (固定 pinned・全言語)");
         }
         else
         {
-            // 言語を ja / en / 全言語 で循環させ、言語フィルタの確認に使えるようにする
-            const char* langs[] = { "ja", "en", "" };
-            ad.lang  = langs[i % 3];
-            const juce::String tag = ad.lang.isEmpty() ? "all" : ad.lang;
-            ad.title = juce::String::fromUTF8(u8"サンプル広告 ") + juce::String(i + 1) + " (" + tag + ")";
+            ad.lang  = langs[i % nLangs];
+            ad.title = titleFor(ad.lang, i + 1);
         }
 
         if (i < n - 1)   // 最後の 1 件だけ画像なし・リンクなし (レイアウト確認用)
@@ -189,8 +201,18 @@ void AdService::arrangeForDisplay(std::vector<Ad>& ads, int maxCount, juce::Rand
 
 juce::String AdService::languageCode()
 {
-    // 日本語のみ "ja"。それ以外 (English 等) は英語圏として "en"。
-    return Localisation::getSavedLanguage() == Localisation::Language::Japanese ? "ja" : "en";
+    // 公式サイト (worker / hreflang) と同じ BCP-47 ロケールコードを返す。
+    // worker の normaliseLang は完全一致 ('zh-Hans' 等) を要求するので大文字小文字を保つ。
+    // 未知 / 想定外は英語圏として "en" にフォールバック。
+    switch (Localisation::getSavedLanguage())
+    {
+        case Localisation::Language::Japanese:           return "ja";
+        case Localisation::Language::English:            return "en";
+        case Localisation::Language::SimplifiedChinese:  return "zh-Hans";
+        case Localisation::Language::TraditionalChinese: return "zh-Hant";
+        case Localisation::Language::Korean:             return "ko";
+    }
+    return "en";
 }
 
 juce::String AdService::feedUrlForLanguage(const juce::String& baseUrl, const juce::String& lang)
@@ -203,11 +225,14 @@ juce::String AdService::feedUrlForLanguage(const juce::String& baseUrl, const ju
 
 std::vector<Ad> AdService::selectAdsForLanguage(std::vector<Ad> ads, const juce::String& lang, int maxCount)
 {
+    // 比較は両辺とも小文字化する。languageCode() は BCP-47 (大小混在の "zh-Hans" 等) を返し、
+    // 広告側 lang は配信者が任意の表記で書くため、大文字小文字に依らず一致させる。
+    const auto want = lang.trim().toLowerCase();
     std::vector<Ad> out;
     for (auto& ad : ads)
     {
         const auto l = ad.lang.trim().toLowerCase();
-        if (l.isEmpty() || l == "all" || l == lang)   // 現在言語 or 全言語向け
+        if (l.isEmpty() || l == "all" || l == want)   // 現在言語 or 全言語向け
         {
             out.push_back(std::move(ad));
             if (maxCount >= 0 && (int) out.size() >= maxCount)
