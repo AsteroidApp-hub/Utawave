@@ -89,9 +89,9 @@ public:
 
         beginTest("isNewerVersion: guards on unparsable input");
         {
-            expect(! UpdateChecker::isNewerVersion("garbage", "0.1.0"), "unparsable latest → no notify");
-            expect(! UpdateChecker::isNewerVersion("", "0.1.0"),        "empty latest → no notify");
-            expect(  UpdateChecker::isNewerVersion("0.2.0", ""),        "empty current → treat as newer");
+            expect(! UpdateChecker::isNewerVersion("garbage", "0.1.0"), "unparsable latest -> no notify");
+            expect(! UpdateChecker::isNewerVersion("", "0.1.0"),        "empty latest -> no notify");
+            expect(  UpdateChecker::isNewerVersion("0.2.0", ""),        "empty current -> treat as newer");
         }
     }
 };
