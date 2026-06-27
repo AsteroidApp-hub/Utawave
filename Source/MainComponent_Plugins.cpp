@@ -255,7 +255,7 @@ MainComponent::LyricsWindow::LyricsWindow(
     std::function<void(LyricsWindow*)> onCloseCb,
     std::function<void(const juce::String&)> onTextChangedCb,
     std::function<void(int)> onFontSizeChangedCb)
-    : DocumentWindow(tr(u8"歌詞"),
+    : DocumentWindow(tr(u8"歌詞パッド"),
                      juce::Colour(0xff1a1a1a),
                      DocumentWindow::closeButton | DocumentWindow::minimiseButton),
       view(std::make_unique<LyricsView>(initialText, fontSize)),

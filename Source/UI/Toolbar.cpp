@@ -206,6 +206,14 @@ TransportBar::TransportBar()
     exportBtn.onClick = [this] { if (onExport) onExport(); };
     addAndMakeVisible(exportBtn);
 
+    // 歌詞パッドボタン (IMPORT/EXPORT と同じスタイル・最前面の歌詞ウィンドウを開く)
+    styleBtn(lyricsBtn, AppColours::buttonBg, AppColours::text);
+    lyricsBtn.setButtonText("LYRICS");
+    lyricsBtn.setTooltip(tr(u8"歌詞パッドを開きます（歌詞を貼り付けて大きく表示）"));
+    lyricsBtn.setWantsKeyboardFocus(false);
+    lyricsBtn.onClick = [this] { if (onLyrics) onLyrics(); };
+    addAndMakeVisible(lyricsBtn);
+
     // CLICK（メトロノーム）ボタンをトグル化、右クリックで設定
     metronomeBtn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff44aa88));
     metronomeBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
@@ -495,19 +503,22 @@ void TransportBar::resized()
     const int y   = (getHeight() - h) / 2;
     const int pad = 4;
 
-    // ── Right: IMPORT + EXPORT | AUDIO + SETTING (固定右端) ──
+    // ── Right: LYRICS | IMPORT + EXPORT | AUDIO + SETTING (固定右端) ──
     const int settingW  = 64;
     const int ioW       = 62;   // IMPORT / EXPORT 幅
+    const int lyricsW   = 62;   // LYRICS 幅
     const int ioGap     = 14;   // IO グループと AUDIO グループの区切り
     const int audioLeft = getWidth() - bw - settingW - 14;
     const int exportLeft = audioLeft  - ioGap - ioW;
     const int importLeft = exportLeft - pad   - ioW;
+    const int lyricsLeft = importLeft - ioGap - lyricsW;   // IO グループの左に独立配置
+    lyricsBtn       .setBounds(lyricsLeft, y, lyricsW, h);
     importBtn       .setBounds(importLeft, y, ioW, h);
     exportBtn       .setBounds(exportLeft, y, ioW, h);
     audioSettingsBtn.setBounds(audioLeft,  y, bw, h);
     prefsBtn        .setBounds(getWidth() - settingW - 8, y, settingW, h);
-    // 区切り線 (paint の sep) は IMPORT の左に来るよう右ブロック幅を更新
-    audioBlockWidth = getWidth() - importLeft + 6;
+    // 区切り線 (paint の sep) は LYRICS の左に来るよう右ブロック幅を更新
+    audioBlockWidth = getWidth() - lyricsLeft + 6;
 
     // ── Left: 2x2 ブロック: Bar|Beat | BPM  /  Time | TAP(小) ──
     const int colW     = 100;

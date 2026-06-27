@@ -22,6 +22,7 @@ public:
     std::function<void()>     onPreferences;   // 歯車ボタン
     std::function<void()>     onImport;        // 読み込み (オーディオ / MIDI を拡張子で判別)
     std::function<void()>     onExport;        // 書き出し
+    std::function<void()>     onLyrics;        // 歌詞パッドを開く
     std::function<void(bool)> onClipGainChanged;
     std::function<void(int)>    onSnapModeSelected;
     std::function<void(bool)>   onLoopToggle;
@@ -56,6 +57,7 @@ private:
     juce::TextButton prefsBtn;
     juce::TextButton importBtn;
     juce::TextButton exportBtn;
+    juce::TextButton lyricsBtn;
     juce::TextButton gainBtn;
     juce::TextButton snapBtn;
     juce::TextButton loopBtn;

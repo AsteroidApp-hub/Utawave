@@ -83,6 +83,7 @@ MainComponent::MainComponent()
     toolbar.onPreferences   = [this] { showPreferences(); };
     toolbar.onImport        = [this] { showImportAnyDialog(); };
     toolbar.onExport        = [this] { showExportDialog(); };
+    toolbar.onLyrics        = [this] { openLyricsWindow(); };
 
     toolbar.onClipGainChanged = [this](bool v)
     {

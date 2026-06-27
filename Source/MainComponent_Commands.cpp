@@ -60,7 +60,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
             m.addItem(item);
         }
         m.addSeparator();
-        addItem(m, 200, tr(u8"歌詞を表示..."), "");
+        addItem(m, 200, tr(u8"歌詞パッドを表示..."), "");
         m.addSeparator();
         addItem(m, 7, tr(u8"プラグインを管理..."),  "");
         m.addSeparator();

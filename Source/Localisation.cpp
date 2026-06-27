@@ -106,7 +106,10 @@ static const char* const englishTranslations =
     // ── メニュー (ファイル / ヘルプ) ──
     "\"ファイル\" = \"File\"\n"
     "\"ヘルプ\" = \"Help\"\n"
-    // ── 歌詞表示窓 ──
+    // ── 歌詞パッド (歌詞表示窓) ──
+    "\"歌詞パッドを表示...\" = \"Show Lyrics Pad...\"\n"
+    "\"歌詞パッド\" = \"Lyrics Pad\"\n"
+    "\"歌詞パッドを開きます（歌詞を貼り付けて大きく表示）\" = \"Open the lyrics pad (paste lyrics for a large display)\"\n"
     "\"歌詞を表示...\" = \"Show Lyrics...\"\n"
     "\"歌詞\" = \"Lyrics\"\n"
     "\"編集モード\" = \"Edit Mode\"\n"
