@@ -505,7 +505,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();                              // 停止中 (play しない)
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.25f) < 0.01f, "dry monitor returns input unchanged (~0.25)");
         }
@@ -519,7 +519,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo());
+            s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan());
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.5f) < 0.01f, "INS (gain x2) is applied to the monitor return (~0.5)");
         }
@@ -534,7 +534,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.25f) < 0.01f,
                    "monitor chain off: dry return even with a plugin present (~0.25)");
@@ -568,7 +568,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
                 s.start();
                 s.engine.setInputMonitoringActive(true);
                 s.engine.setMonitorReverbSend(0.0f);
-                s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo());
+                s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan());
                 s.engine.play();
                 const float peak = runWithInput(s.engine, 12, 0.0f);
                 expect(std::abs(peak - 0.25f) < 0.01f,
@@ -588,7 +588,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
 
             juce::AudioBuffer<float> out(2, kBlock), in(2, kBlock);
             juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.3f, kBlock);
@@ -616,7 +616,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             s.start();
             s.engine.setInputMonitoringActive(true);
             s.engine.setMonitorReverbSend(0.0f);
-            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo());
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
 
             juce::AudioBuffer<float> out(2, kBlock), in(2, kBlock);
             juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.3f, kBlock);
@@ -633,6 +633,44 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             }
             expect(std::abs(pL - 0.3f) < 0.01f, "stereo monitor: L = inputCh (~0.3)");
             expect(std::abs(pR - 0.7f) < 0.01f, "stereo monitor: R = inputCh+1 (~0.7)");
+        }
+
+        // ── (7) パンが返しに反映される (mono, ハードL / ハードR) ──
+        // mono 入力 0.3 を pan=-1 (左) でモニタ → L=0.3 / R=0、pan=+1 (右) → L=0 / R=0.3。
+        auto runPanned = [](Scene& s, float pan, float* pL, float* pR)
+        {
+            auto* t = s.tm->getTrack(0);
+            t->setPan(pan);
+            s.engine.setMonitorChain(nullptr, t->getInputChannel(), t->isStereo(), t->getPan());
+            juce::AudioBuffer<float> out(2, kBlock), in(1, kBlock);
+            juce::FloatVectorOperations::fill(in.getWritePointer(0), 0.3f, kBlock);
+            const float* ins[1] = { in.getReadPointer(0) };
+            *pL = *pR = 0.0f;
+            for (int i = 0; i < 4; ++i)
+            {
+                out.clear();
+                float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+                s.engine.audioDeviceIOCallbackWithContext(ins, 1, chans, 2, kBlock, {});
+                *pL = juce::jmax(*pL, out.getMagnitude(0, 0, kBlock));
+                *pR = juce::jmax(*pR, out.getMagnitude(1, 0, kBlock));
+            }
+        };
+        {
+            Scene s;
+            auto* t = s.tm->addTrack({}, false);     // mono
+            t->setVolume(0.0f); t->setInputChannel(0);
+            s.start();
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+
+            float pL = 0, pR = 0;
+            runPanned(s, -1.0f, &pL, &pR);           // ハードL
+            expect(std::abs(pL - 0.3f) < 0.01f, "pan hard L: monitor L = input (~0.3)");
+            expect(pR < 0.01f,                   "pan hard L: monitor R silent (~0)");
+
+            runPanned(s, +1.0f, &pL, &pR);           // ハードR
+            expect(pL < 0.01f,                   "pan hard R: monitor L silent (~0)");
+            expect(std::abs(pR - 0.3f) < 0.01f, "pan hard R: monitor R = input (~0.3)");
         }
     }
 };

@@ -230,8 +230,9 @@ public:
     // Track 破棄 (= clearPlayback) 時に空 config を drain 公開して audio が手放すまで待つ
     // (チェーンのダングリング防止バリア)。停止中モニタでも叩けるよう現 SR/blockSize で prepare する。
     // inputCh / stereo = 主モニタトラックの入力選択。返しの L/R マッピングをこれに合わせる
-    // (mono はセンター、stereo は inputCh/inputCh+1)。chain が nullptr (ドライ返し) でも渡す。
-    void setMonitorChain(class PluginChain* chain, int inputCh, bool stereo);
+    // (mono はセンター、stereo は inputCh/inputCh+1)。pan = 返しに反映するパン (-1..+1)。
+    // chain が nullptr (ドライ返し) でも渡す。
+    void setMonitorChain(class PluginChain* chain, int inputCh, bool stereo, float pan);
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -361,7 +362,7 @@ private:
     void mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
                             float* const* outputChannelData, int numOutputChannels,
                             int numSamples, class PluginChain* monChain,
-                            int monInputCh, bool monStereo);
+                            int monInputCh, bool monStereo, float monPan);
     // UI スレッド読み出し用 (preparePlayback の autoCrossfade / zeroCrossingFade)。
     AppSettings               appSettings;
     // audio スレッド読み出し用スナップショット (メトロノーム区間が bpmChanges/meterChanges の vector を
@@ -510,6 +511,9 @@ private:
         // 別チャンネルが R に乗って L/R 分離して聞こえてしまう。
         int  inputCh { 0 };
         bool stereo  { false };
+        // 主モニタトラックのパン (-1..+1)。返しにも反映する (再生時と同じく FX 後段で適用)。
+        // pan=0 は L/R 等倍 = センター (従来挙動)。
+        float pan    { 0.0f };
     };
     std::shared_ptr<const MonitorConfig>              activeMonConfig;
     juce::SpinLock                                    monConfigLock;
