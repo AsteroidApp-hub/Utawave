@@ -72,11 +72,24 @@ void MainComponent::showPreferences()
             };
             setupLabel(languageLabel, tr(u8"言語 (Language)  ※再起動で反映"), 13.0f, juce::Colours::white);
             // 言語名は各言語の表記のまま (翻訳しない)
-            languageCombo.addItem(tr(u8"日本語"), 1);
+            languageCombo.addItem(juce::String::fromUTF8(u8"日本語"), 1);
             languageCombo.addItem("English", 2);
-            languageCombo.setSelectedId(
-                Localisation::getSavedLanguage() == Localisation::Language::English ? 2 : 1,
-                juce::dontSendNotification);
+            languageCombo.addItem(juce::String::fromUTF8(u8"简体中文"), 3);
+            languageCombo.addItem(juce::String::fromUTF8(u8"繁體中文"), 4);
+            languageCombo.addItem(juce::String::fromUTF8(u8"한국어"), 5);
+            {
+                int curId = 1;
+                switch (Localisation::getSavedLanguage())
+                {
+                    case Localisation::Language::English:            curId = 2; break;
+                    case Localisation::Language::SimplifiedChinese:  curId = 3; break;
+                    case Localisation::Language::TraditionalChinese: curId = 4; break;
+                    case Localisation::Language::Korean:             curId = 5; break;
+                    case Localisation::Language::Japanese:
+                    default:                                         curId = 1; break;
+                }
+                languageCombo.setSelectedId(curId, juce::dontSendNotification);
+            }
             languageCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
             languageCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
             languageCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
@@ -268,11 +281,12 @@ void MainComponent::showPreferences()
             addAndMakeVisible(backupCountCombo);
 
             // VU メータ基準レベル: -14 / -18 / -20 / -24 dBFS
+            // ※ 規格名 (EBU/SMPTE 等) の括弧書きは付けない (誤解防止・数値のみ)
             // ID = abs(dB) (14, 18, 20, 24)
-            vuRefCombo.addItem(tr(u8"-14 dBFS (配信向け)"),         14);
-            vuRefCombo.addItem(tr(u8"-18 dBFS (EBU R68 / 放送)"),   18);
-            vuRefCombo.addItem(tr(u8"-20 dBFS (SMPTE / ポスプロ)"), 20);
-            vuRefCombo.addItem(tr(u8"-24 dBFS (映画向け)"),         24);
+            vuRefCombo.addItem("-14 dBFS", 14);
+            vuRefCombo.addItem("-18 dBFS", 18);
+            vuRefCombo.addItem("-20 dBFS", 20);
+            vuRefCombo.addItem("-24 dBFS", 24);
             auto vuRefToId = [](float dB) -> int {
                 const int abs = (int) std::round(-dB);
                 if (abs <= 16) return 14;
@@ -290,20 +304,26 @@ void MainComponent::showPreferences()
             };
             addAndMakeVisible(vuRefCombo);
 
-            // ラウドネス自動調整ターゲット: -14 / -16 / -18 / -23 / -24 LUFS
-            // ID = abs(LUFS) (14, 16, 18, 23, 24)
-            loudnessCombo.addItem(tr(u8"-14 LUFS (Spotify / 配信)"),     14);
-            loudnessCombo.addItem(tr(u8"-16 LUFS (Apple Music)"),        16);
-            loudnessCombo.addItem(tr(u8"-18 LUFS (動画 / Web)"),         18);
-            loudnessCombo.addItem(tr(u8"-23 LUFS (EBU R128 放送)"),      23);
-            loudnessCombo.addItem(tr(u8"-24 LUFS (ATSC A/85)"),          24);
+            // ラウドネス自動調整ターゲット: -14 / -16 / -18 / -23 / -24 / -26 / -28 LUFS
+            // ID = abs(LUFS) (14, 16, 18, 23, 24, 26, 28)
+            // ※ 書き出し基準ではなくインポート時の取り込みレベル目安なので、
+            //   配信規格名 (Spotify 等) の括弧書きは付けない (誤解防止)
+            loudnessCombo.addItem("-14 LUFS", 14);
+            loudnessCombo.addItem("-16 LUFS", 16);
+            loudnessCombo.addItem("-18 LUFS", 18);
+            loudnessCombo.addItem("-23 LUFS", 23);
+            loudnessCombo.addItem("-24 LUFS", 24);
+            loudnessCombo.addItem("-26 LUFS", 26);
+            loudnessCombo.addItem("-28 LUFS", 28);
             auto loudnessToId = [](float lufs) -> int {
                 const int abs = (int) std::round(-lufs);
                 if (abs <= 15) return 14;
                 if (abs <= 17) return 16;
                 if (abs <= 20) return 18;
                 if (abs <= 23) return 23;
-                return 24;
+                if (abs <= 25) return 24;
+                if (abs <= 27) return 26;
+                return 28;
             };
             loudnessCombo.setSelectedId(loudnessToId(curLoudnessTargetLufs), juce::dontSendNotification);
             loudnessCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
@@ -530,9 +550,16 @@ void MainComponent::showPreferences()
                               appSettings.exportPeakGuard,
                               appSettings.zeroCrossingFade,
                               appSettings.stripImportedMetadata);
-    dlg->onLanguageChanged = [this](int id) {
-        const auto lang = (id == 2) ? Localisation::Language::English
-                                    : Localisation::Language::Japanese;
+    dlg->onLanguageChanged = [](int id) {
+        Localisation::Language lang = Localisation::Language::Japanese;
+        switch (id)
+        {
+            case 2: lang = Localisation::Language::English;            break;
+            case 3: lang = Localisation::Language::SimplifiedChinese;  break;
+            case 4: lang = Localisation::Language::TraditionalChinese; break;
+            case 5: lang = Localisation::Language::Korean;             break;
+            default: lang = Localisation::Language::Japanese;          break;
+        }
         Localisation::saveLanguage(lang);  // アプリ全体設定 (プロジェクトではない)
         juce::AlertWindow::showAsync(juce::MessageBoxOptions()
             .withIconType(juce::MessageBoxIconType::InfoIcon)

@@ -6,11 +6,12 @@
 
 namespace Localisation
 {
-    enum class Language { Japanese, English };
+    enum class Language { Japanese, English, SimplifiedChinese, TraditionalChinese, Korean };
 
     // 指定言語の LocalisedStrings をインストールする。
     //  - Japanese: JUCE 標準 UI の英語文字列を日本語化 (アプリ文言は元の日本語のまま)
     //  - English : アプリの日本語キーを英語へ翻訳 (JUCE 標準文言は英語のまま)
+    //  - 簡体/繁体/韓国: アプリの日本語キー + JUCE 標準英語キーを各言語へ翻訳
     void install(Language lang);
 
     // 後方互換 (= install(Language::Japanese))
