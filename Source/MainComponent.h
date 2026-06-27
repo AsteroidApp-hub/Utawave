@@ -207,6 +207,10 @@ private:
     };
     std::unique_ptr<LyricsWindow> lyricsWindow;
     void openLyricsWindow();
+    void toggleLyricsWindow();   // 開いていれば閉じる / 閉じていれば開く (ステータスバー用)
+
+    // ショートカット一覧は非モーダルの窓で保持し、ステータスバー再クリックでトグルできる
+    std::unique_ptr<juce::DialogWindow> shortcutsWindow;
 
     void openPianoRollFor(class MidiClip* clip, class Track* track);
     void propagatePlayheadToPianoRolls(double playheadSecs);

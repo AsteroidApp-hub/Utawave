@@ -62,7 +62,7 @@ MainComponent::MainComponent()
         return audioEngine.getDeviceManager().getCpuUsage() * 100.0;
     };
     statusBar.onHelpClicked = [this] { showShortcutsDialog(); };
-    statusBar.onLyricsClicked = [this] { openLyricsWindow(); };
+    statusBar.onLyricsClicked = [this] { toggleLyricsWindow(); };
     fileImporter.getCacheFolderCb = [this] { return getProjectCacheFolder(); };
 
     addAndMakeVisible(toolbar);

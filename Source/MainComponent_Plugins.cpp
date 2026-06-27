@@ -306,6 +306,13 @@ void MainComponent::openLyricsWindow()
         });
 }
 
+void MainComponent::toggleLyricsWindow()
+{
+    // 開いていれば閉じる / 閉じていれば開く (ステータスバーの「歌詞パッド」用)
+    if (lyricsWindow) lyricsWindow.reset();
+    else              openLyricsWindow();
+}
+
 void MainComponent::propagatePlayheadToPianoRolls(double playheadSecs)
 {
     for (auto* w : pianoRollWindows)

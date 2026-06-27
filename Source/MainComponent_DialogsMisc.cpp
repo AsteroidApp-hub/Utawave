@@ -189,6 +189,9 @@ void MainComponent::showDocumentation()
 // ─────────────────────────────────────────────────────────────────────────
 void MainComponent::showShortcutsDialog()
 {
+    // トグル: 既に開いていれば閉じる (ステータスバー / Cmd+/ 再操作で閉じられる)
+    if (shortcutsWindow) { shortcutsWindow.reset(); return; }
+
     struct Entry { const char* key; const char* action; };
     struct Section { const char* title; std::vector<Entry> entries; };
 
@@ -267,8 +270,9 @@ void MainComponent::showShortcutsDialog()
 
             closeBtn.setButtonText(tr(u8"閉じる"));
             closeBtn.onClick = [this] {
-                if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
-                    dw->exitModalState(0);
+                // 非モーダルの保持窓なので closeButtonPressed 経由で閉じる (onClose → member reset)
+                if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
+                    dw->closeButtonPressed();
             };
             addAndMakeVisible(closeBtn);
 
@@ -363,15 +367,30 @@ void MainComponent::showShortcutsDialog()
         }},
     };
 
-    auto* dlg = new ShortcutsDlg(std::move(sections));
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned(dlg);
-    opts.dialogTitle = tr(u8"ショートカット一覧");
-    opts.dialogBackgroundColour = juce::Colour(0xff2a2c30);
-    opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar = true;
-    opts.resizable = true;
-    opts.launchAsync();
+    // 非モーダルの窓で表示し member で保持する。これにより (1) ステータスバーの「ショートカット」
+    // 再クリックでトグルして閉じられ、(2) 一覧を見ながら本体を操作できる。閉じる経路 (OS の×/
+    // 「閉じる」ボタン/Escape) はすべて closeButtonPressed → onClose → reset に集約する。
+    class ShortcutsWin : public juce::DialogWindow
+    {
+    public:
+        std::function<void()> onClose;
+        ShortcutsWin()
+            : juce::DialogWindow(tr(u8"ショートカット一覧"), juce::Colour(0xff2a2c30),
+                                 /*escapeKeyCloses*/ true, /*addToDesktop*/ true) {}
+        void closeButtonPressed() override { if (onClose) onClose(); }
+        // 既定の escapeKeyPressed は setVisible(false) するだけで member が残りトグルがズレる。
+        // Escape も他の閉じる経路 (× / 閉じるボタン) と同じく closeButtonPressed → reset に通す。
+        bool escapeKeyPressed() override { closeButtonPressed(); return true; }
+    };
+
+    auto* w = new ShortcutsWin();
+    w->setContentOwned(new ShortcutsDlg(std::move(sections)), true);
+    w->setUsingNativeTitleBar(true);
+    w->setResizable(true, false);
+    w->centreWithSize(w->getWidth(), w->getHeight());
+    w->onClose = [this] { shortcutsWindow.reset(); };  // 全ての閉じる経路を member reset に集約
+    w->setVisible(true);
+    shortcutsWindow.reset(w);
 }
 
 void MainComponent::showAudioSettings()
