@@ -39,3 +39,6 @@
 
 # クラッシュレポート受信 Worker (独立プロジェクト)
 /utawave-crash-worker/
+
+# リリースごとの Windows シンボル (PDB) のローカル保管。配布物ではなくコミットしない
+release-symbols/

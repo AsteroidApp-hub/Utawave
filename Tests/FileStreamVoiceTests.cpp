@@ -69,7 +69,7 @@ public:
                 std::unique_ptr<juce::AudioFormatReader> fbR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> refR(fmt.createReaderFor(file));
                 expect(bgR && fbR && refR, "readers open");
-                FileStreamVoice v(std::move(bgR), fbR.get(), th);
+                FileStreamVoice v(std::move(bgR), std::move(fbR), th);
 
                 const int block = 512;
                 bool ok = true;
@@ -94,7 +94,7 @@ public:
                 std::unique_ptr<juce::AudioFormatReader> bgR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> fbR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> refR(fmt.createReaderFor(file));
-                FileStreamVoice v(std::move(bgR), fbR.get(), th);
+                FileStreamVoice v(std::move(bgR), std::move(fbR), th);
 
                 juce::Random rng(1234);
                 bool ok = true;
@@ -120,7 +120,7 @@ public:
                 std::unique_ptr<juce::AudioFormatReader> bgR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> fbR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> refR(fmt.createReaderFor(file));
-                FileStreamVoice v(std::move(bgR), fbR.get(), th);
+                FileStreamVoice v(std::move(bgR), std::move(fbR), th);
                 juce::Thread::sleep(80);
                 // 末尾跨ぎ (n-200 から 512) と完全に EOF 後 (n+100 から 256)
                 bool ok = sameAsReference(v, *refR, 2, 512, n - 200)
@@ -140,7 +140,7 @@ public:
                 std::unique_ptr<juce::AudioFormatReader> bgR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> fbR(fmt.createReaderFor(file));
                 std::unique_ptr<juce::AudioFormatReader> refR(fmt.createReaderFor(file));
-                FileStreamVoice v(std::move(bgR), fbR.get(), th);
+                FileStreamVoice v(std::move(bgR), std::move(fbR), th);
                 expect(v.getNumChannels() == 1, "mono voice reports 1 channel");
                 juce::Thread::sleep(120);
                 bool ok = true;

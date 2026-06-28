@@ -142,6 +142,47 @@ bool writeMonoConstWav(const juce::File& f, int numSamples, float value)
     return w != nullptr && w->writeFromAudioSampleBuffer(b, 0, numSamples);
 }
 
+// 変化する (正弦波) モノ WAV。const だとストリーミングが壊れていても一致してしまうため、
+// ディスクストリーミングの決定論テストには「位置で値が変わる」ソースを使う。
+bool writeMonoSineWav(const juce::File& f, int numSamples, double freq)
+{
+    juce::AudioBuffer<float> b(1, numSamples);
+    for (int i = 0; i < numSamples; ++i)
+        b.setSample(0, i, 0.5f * (float) std::sin(2.0 * juce::MathConstants<double>::pi * freq * i / kSR));
+    juce::WavAudioFormat waf;
+    using SF = juce::AudioFormatWriterOptions::SampleFormat;
+    auto wopts = juce::AudioFormatWriterOptions{}
+                     .withSampleRate(kSR).withNumChannels(1)
+                     .withBitsPerSample(32).withSampleFormat(SF::floatingPoint);
+    f.getParentDirectory().createDirectory();
+    f.deleteFile();
+    auto fos = std::make_unique<juce::FileOutputStream>(f);
+    if (!fos->openedOk()) return false;
+    std::unique_ptr<juce::OutputStream> os = std::move(fos);
+    std::unique_ptr<juce::AudioFormatWriter> w(waf.createWriterFor(os, wopts));
+    return w != nullptr && w->writeFromAudioSampleBuffer(b, 0, numSamples);
+}
+
+// numBlocks 分コールバックを駆動し、全出力サンプル (2ch) をまとめたバッファを返す。
+// sleepEvery>0 なら sleepEvery ブロックごとに少し眠り、先読みスレッドにリングを満たす隙を与える
+// (ストリーミング ON 経路でリングヒットを実際に行使するため。出力比較自体は値のみで時刻非依存)。
+juce::AudioBuffer<float> captureOutput(AudioEngine& engine, int numBlocks, int sleepEvery = 0)
+{
+    juce::AudioBuffer<float> all(2, numBlocks * kBlock);
+    all.clear();
+    juce::AudioBuffer<float> out(2, kBlock);
+    for (int b = 0; b < numBlocks; ++b)
+    {
+        out.clear();
+        float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+        engine.audioDeviceIOCallbackWithContext(nullptr, 0, chans, 2, kBlock, {});
+        all.copyFrom(0, b * kBlock, out, 0, 0, kBlock);
+        all.copyFrom(1, b * kBlock, out, 1, 0, kBlock);
+        if (sleepEvery > 0 && (b % sleepEvery) == 0) juce::Thread::sleep(3);
+    }
+    return all;
+}
+
 // numBlocks 分、const 値のモノ入力つきでコールバックを駆動する (録音ゲートテスト用)
 void runBlocksWithInput(AudioEngine& engine, int numBlocks, float inputValue)
 {
@@ -198,6 +239,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testRecordingLatencyComp();
         testRecordingWriteGate();
         testMonitorThroughInserts();
+        testDiskStreamingDeterminism();
 
         tempDir.deleteRecursively();
     }
@@ -229,6 +271,47 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             engine.setPosition(0.0);
         }
     };
+
+    void testDiskStreamingDeterminism()
+    {
+        beginTest("disk streaming: output is bit-identical to direct read");
+        // ストリーミング ON (先読みボイス経由・リングヒット行使) と OFF (従来の同期読み) で、
+        // 再生出力がサンプル単位で完全一致することを確認する (FileStreamVoice の配線が出力を
+        // 変えない = 決定論)。値が位置で変わる正弦波ソースを使い、誤読をサンプル差として検出する。
+        auto wav = tempDir.getChildFile("stream_sine.wav");
+        expect(writeMonoSineWav(wav, (int) (kSR * 2.0), 220.0), "sine source write");
+
+        const int N = 120;   // 120 * 512 / 48000 ≈ 1.28s
+
+        // OFF: ボイスを作らせない (start 前に無効化)
+        Scene off;
+        off.addConstTrack(wav, 2.0);
+        off.engine.setDiskStreamingEnabled(false);
+        off.start();
+        off.engine.play();
+        auto aOff = captureOutput(off.engine, N);
+
+        // ON: ボイス生成 (既定 ON)。sleepEvery で先読みを行使し、リングヒット経路を通す。
+        Scene on;
+        on.addConstTrack(wav, 2.0);
+        on.engine.setDiskStreamingEnabled(true);
+        on.start();
+        on.engine.play();
+        auto bOn = captureOutput(on.engine, N, /*sleepEvery*/ 4);
+
+        bool identical = true;
+        float maxDiff = 0.0f;
+        for (int ch = 0; ch < 2 && identical; ++ch)
+            for (int i = 0; i < N * kBlock; ++i)
+            {
+                const float d = std::abs(aOff.getSample(ch, i) - bOn.getSample(ch, i));
+                if (d > maxDiff) maxDiff = d;
+                if (d > 1.0e-7f) { identical = false; break; }
+            }
+        expect(identical, "streaming ON output must equal streaming OFF (direct) output sample-for-sample");
+        // ストリーミング ON でも有音 (ソースが届いている) ことを確認 (両方無音で一致する偽合格を防ぐ)
+        expect(bOn.getMagnitude(0, 0, N * kBlock) > 0.1f, "streaming ON actually renders audio");
+    }
 
     void testPlaybackRendersClip()
     {

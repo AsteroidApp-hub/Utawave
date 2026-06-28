@@ -933,6 +933,8 @@ MainComponent::MainComponent()
     // 録音レイテンシ補正の設定 (アプリ全体設定) をエンジンへ反映
     audioEngine.setRecordingLatencyComp(appPrefs.recLatencyAutoComp,
                                         appPrefs.recLatencyManualMs);
+    // ディスクストリーミング (再生の音声読み込みを先読みスレッドへ分離) の ON/OFF を反映
+    audioEngine.setDiskStreamingEnabled(appPrefs.diskStreaming);
 
     if (auto* dev = audioEngine.getDeviceManager().getCurrentAudioDevice())
     {

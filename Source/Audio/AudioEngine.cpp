@@ -7,6 +7,7 @@
 #include "../VST/PluginChain.h"
 #include "../MIDI/InternalSynth.h"
 #include "AudioDeviceSettings.h"
+#include "FileStreamVoice.h"
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
@@ -295,6 +296,10 @@ AudioEngine::AudioEngine()
     activeMonConfig   = std::make_shared<const MonitorConfig>();
     formatManager.registerBasicFormats();
 
+    // ディスクストリーミングの先読みスレッドを起動 (エンジン存続中ずっと走る。
+    // クライアント = FileStreamVoice が無い間はイベント待ちでスリープ)。
+    streamThread.startThread();
+
     // dB メータ配列は無音 (-96 dB) で初期化する。0.0f のままだと、まだ一度も
     // 書き込まれていないスロット (再生していない新規トラック等) が 0 dBFS =
     // フルスケール表示になってしまう。
@@ -322,7 +327,21 @@ void AudioEngine::initialise()
 
 void AudioEngine::shutdown()
 {
-    deviceManager.removeAudioCallback(this);
+    deviceManager.removeAudioCallback(this);   // 以後 audio thread は来ない
+
+    // 先読みボイスを全て解放してからスレッドを停止する。ボイスを握っているのは
+    // activeSnapshot / retiredSnapshots / voicePool の 3 か所なので、空スナップショットへ
+    // 差し替えて手放す。各ボイス dtor は removeTimeSliceClient で当該スライス完了を待つ
+    // (まだ streamThread は生きている)。最後にスレッドを止める。
+    { const juce::SpinLock::ScopedLockType l(snapshotLock);
+      activeSnapshot = std::make_shared<PlaybackSnapshot>(); }
+    {
+        const juce::ScopedLock sl(reclaimLock);
+        retiredSnapshots.clear();
+    }
+    voicePool.clear();
+    streamThread.stopThread(2000);
+
     mixer.releaseResources();
     deviceManager.closeAudioDevice();
 }
@@ -417,6 +436,9 @@ void AudioEngine::preparePlayback(TrackManager& tm)
     // 前回開いた reader を readerPool から流用する (再生中編集のたびに WAV を開き直して再構築が
     // 長引く = 一瞬の停止感、を避ける)。clearPlayback をまたいでも保持されるのが prevSnap との違い。
     std::unordered_map<juce::String, std::shared_ptr<juce::AudioFormatReader>> readerCache = readerPool;
+    // 先読みボイスも同様に流用する (再生中編集のたびに reader 2 本を開き直さない)。
+    const bool streamingOn = diskStreamingEnabled.load();
+    std::unordered_map<juce::String, std::shared_ptr<FileStreamVoice>> voiceCache = voicePool;
 
     // Click Track を検出: 音量・ミュートをメトロノームに連動
     bool clickTrackFound = false;
@@ -469,6 +491,26 @@ void AudioEngine::preparePlayback(TrackManager& tm)
                 readerCache.emplace(key, sharedReader);
             }
 
+            // ディスクストリーミングの先読みボイス (ファイル単位で 1 つ・流用)。生成は bg/fallback
+            // の reader を各 1 本開く。失敗時 / OFF 時は voice=null のまま (renderClip が reader 直読み)。
+            std::shared_ptr<FileStreamVoice> voice;
+            if (streamingOn)
+            {
+                auto vIt = voiceCache.find(key);
+                if (vIt != voiceCache.end())
+                    voice = vIt->second;
+                else
+                {
+                    std::unique_ptr<juce::AudioFormatReader> bgR(formatManager.createReaderFor(clip->getFile()));
+                    std::unique_ptr<juce::AudioFormatReader> fbR(formatManager.createReaderFor(clip->getFile()));
+                    if (bgR != nullptr && fbR != nullptr)
+                    {
+                        voice = std::make_shared<FileStreamVoice>(std::move(bgR), std::move(fbR), streamThread);
+                        voiceCache.emplace(key, voice);
+                    }
+                }
+            }
+
             PlaybackClip pc;
             pc.trackIdx       = ti;
             pc.file           = clip->getFile();
@@ -483,6 +525,7 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             pc.fadeOutSecs    = (float)clip->getFadeOutSecs();
             pc.fileSampleRate = sharedReader->sampleRate;
             pc.reader         = sharedReader;
+            pc.voice          = voice;
             newClips.push_back(std::move(pc));
         }
     }
@@ -663,6 +706,12 @@ void AudioEngine::preparePlayback(TrackManager& tm)
     readerPool.clear();
     for (auto& pc : snap->clips)
         if (pc.reader) readerPool.emplace(pc.file.getFullPathName(), pc.reader);
+
+    // 先読みボイスも同様に、使われているものだけ残す (未使用ボイスはここで解放され、その dtor が
+    // removeTimeSliceClient で当該スライス完了を待つ = message thread で安全)。
+    voicePool.clear();
+    for (auto& pc : snap->clips)
+        if (pc.voice) voicePool.emplace(pc.file.getFullPathName(), pc.voice);
 
     // 破棄系編集で取り除かれた AudioClip を、この新スナップショットの graveyard に載せて延命する。
     // 旧スナップショット (これらを生参照する PlaybackClip を持つ) はこの公開で退役し、audio が
@@ -946,7 +995,7 @@ void AudioEngine::invalidatePlayback()
 }
 
 void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
-                              double posStart, int numSamples, bool preFader)
+                              double posStart, int numSamples, bool preFader, bool allowStreaming)
 {
     // パンチイン中: 録音先トラック (recArmed) の古いクリップだけをミュート。
     // 他のトラック (インストなど) はそのまま再生を続ける。
@@ -986,7 +1035,13 @@ void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
     // クランプしないと多チャンネル WAV で audio thread 上の再確保が起きる
     clipBuffer.setSize(juce::jmin(2, (int)pc.reader->numChannels), nRead, false, false, true);
     clipBuffer.clear();
-    pc.reader->read(&clipBuffer, 0, nRead, fileSample, true, true);
+    // ディスクストリーミング: ボイスがあれば先読みリングから (ヒット時 audio スレッドの I/O ゼロ)、
+    // 無ければ / OFF なら従来どおり reader を直接同期読み。ボイスのミスもボイス内部で同期読みする
+    // ので、いずれの経路でも結果はビット同一 (FileStreamVoiceTests で担保)。
+    if (allowStreaming && pc.voice != nullptr && diskStreamingEnabled.load(std::memory_order_relaxed))
+        pc.voice->read(clipBuffer, 0, nRead, fileSample);
+    else
+        pc.reader->read(&clipBuffer, 0, nRead, fileSample, true, true);
 
     // フェードイン／アウト適用。ブロックがフェード範囲と重なる時だけサンプルループを回す。
     // パンチインで effectiveClipEnd が recStart まで詰められた場合 (#M4): ユーザーの長い
@@ -1301,7 +1356,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 const int tidx = activeIdx[ai];
                 if (tidx < (int)snap->clipsByTrack.size())
                     for (int ci : snap->clipsByTrack[(size_t)tidx])
-                        renderClip(snap->clips[(size_t)ci], trackBuf, posStart, n, /*preFader*/ true);
+                        renderClip(snap->clips[(size_t)ci], trackBuf, posStart, n,
+                                   /*preFader*/ true, /*allowStreaming*/ false);
 
                 auto* track = activeTracks[ai];
                 if (track && track->getPluginChain().getNumPlugins() > 0)

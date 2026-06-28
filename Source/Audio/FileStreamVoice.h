@@ -27,11 +27,12 @@ class FileStreamVoice : private juce::TimeSliceClient
 {
 public:
     // bgReader        : 先読み用 (このクラスが所有・bg スレッド専用)
-    // fallbackReader  : ミス時の同期読み用 (所有しない・audio スレッド専用に呼ばれる前提)
+    // fallbackReader  : ミス時の同期読み用 (このクラスが所有・audio スレッド専用に呼ばれる前提)。
+    //                   bg とは別インスタンスにすること (reader の seek 競合回避)。
     // thread          : 開始済みの共有先読みスレッド
     // capacitySamples : リング容量。lookaheadSamples の 2 倍以上にすること
     FileStreamVoice(std::unique_ptr<juce::AudioFormatReader> bgReader,
-                    juce::AudioFormatReader* fallbackReader,
+                    std::unique_ptr<juce::AudioFormatReader> fallbackReader,
                     juce::TimeSliceThread& thread,
                     int capacitySamples  = 1 << 18,   // 262144 ≈ 5.4s @48k
                     int lookaheadSamples = 1 << 16);  // 65536  ≈ 1.4s @48k
@@ -52,7 +53,7 @@ private:
     int useTimeSlice() override;  // bg 先読み
 
     std::unique_ptr<juce::AudioFormatReader> bg;       // bg 専用 reader (所有)
-    juce::AudioFormatReader*                 fallback; // audio 専用 reader (非所有)
+    std::unique_ptr<juce::AudioFormatReader> fallback; // audio 専用 reader (所有)
     juce::TimeSliceThread&                   thread;
 
     const int          capacity;

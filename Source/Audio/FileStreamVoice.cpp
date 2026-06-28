@@ -5,12 +5,12 @@
 #include <algorithm>
 
 FileStreamVoice::FileStreamVoice(std::unique_ptr<juce::AudioFormatReader> bgReader,
-                                 juce::AudioFormatReader* fallbackReader,
+                                 std::unique_ptr<juce::AudioFormatReader> fallbackReader,
                                  juce::TimeSliceThread& sharedThread,
                                  int capacitySamples,
                                  int lookaheadSamples)
     : bg(std::move(bgReader)),
-      fallback(fallbackReader),
+      fallback(std::move(fallbackReader)),
       thread(sharedThread),
       capacity(juce::jmax(1 << 12, capacitySamples)),
       lookahead(juce::jlimit(1 << 10, capacity - kFillChunk - 1, lookaheadSamples)),

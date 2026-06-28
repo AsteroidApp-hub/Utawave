@@ -13,6 +13,7 @@ class TrackManager;  // 前方宣言
 class Track;
 class PluginChain;
 class InternalSynth;
+class FileStreamVoice;
 
 class AudioEngine : public juce::AudioIODeviceCallback
 {
@@ -219,6 +220,12 @@ public:
 
     void clearRecordingTargets();
 
+    // ディスクストリーミング ON/OFF (既定 ON)。OFF で再生時の音声読み込みを従来の同期読みに戻す
+    // (切り分け/万一の不具合時のロールバック)。実行時に変えても renderClip が次ブロックから従う
+    // (OFF→既存ボイスは無視して reader 直読み / ON→次の preparePlayback でボイス生成)。
+    void setDiskStreamingEnabled(bool b) { diskStreamingEnabled.store(b); }
+    bool isDiskStreamingEnabled() const  { return diskStreamingEnabled.load(); }
+
     // Input monitoring
     void setInputMonitoringActive(bool b) { inputMonitoringActive.store(b); }
     // いずれかのトラックが Rec アーム中（停止中でも入力メーターを表示するかの判定用）
@@ -272,7 +279,12 @@ private:
         double       fileSampleRate { 48000.0 };
         // 同一ファイルを参照する複数クリップで reader を共有する (ファイルハンドル節約)。
         // オーディオスレッドのみが触り、read() は内部で seek するため逐次呼び出しなら安全。
+        // ディスクストリーミング OFF 時 / ボイス未生成時のフォールバック読みにも使う。
         std::shared_ptr<juce::AudioFormatReader> reader;
+        // ディスクストリーミングの先読みボイス (ファイル単位・preparePlayback で割当)。非 null なら
+        // renderClip はこれ経由で読み (ヒット時 I/O ゼロ)、ミス時はボイス内部で reader 相当の同期読み。
+        // null (= 生成失敗 / ストリーミング OFF) なら上の reader を直接使う。
+        std::shared_ptr<FileStreamVoice> voice;
 
         // 「同一の連続した音声」(= Alt+Click 分割など) か。同一ファイルかつ
         // タイムライン↔ファイル の対応 (fileOffset - clipStart) が一致する場合のみ true。
@@ -284,8 +296,12 @@ private:
         }
     };
 
+    // allowStreaming: 先読みボイスを使ってよいか。audio コールバックのみ true。オフライン書き出し
+    // (renderOfflineRange・別スレッド) は false にして reader を直読みする。ボイスのリングは SPSC
+    // (consumer = audio thread 1 本) 前提なので、書き出しスレッドから触ると二重 consumer になるため。
     void renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
-                    double posStart, int numSamples, bool preFader = false);
+                    double posStart, int numSamples, bool preFader = false,
+                    bool allowStreaming = true);
 
     void measureLevel(const float* data, int numSamples,
                       std::atomic<float>& peak, std::atomic<float>& peakHold,
@@ -295,6 +311,13 @@ private:
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
     juce::MixerAudioSource   mixer;
+
+    // ── ディスクストリーミング (先読み) ──
+    // 全 FileStreamVoice が共有する先読みスレッド。コンストラクタで起動し shutdown() で停止する。
+    // voicePool / スナップショットより前に宣言する = 破棄順 (逆順) でボイスより後に壊れる
+    // = ボイス dtor の removeTimeSliceClient が生きたスレッドに対して走る (UAF 防止)。
+    juce::TimeSliceThread streamThread { "uta-disk-stream" };
+    std::atomic<bool>     diskStreamingEnabled { true };
 
     // ── 再生スナップショット (lock-free 公開) ──
     // 再生に必要な不変データ (clips/midi) と、audio thread が中身を書く scratch (trackBuffers/
@@ -322,6 +345,10 @@ private:
     // 開き直して再構築が長引く = 一瞬の停止感、を避ける)。message thread (preparePlayback) 専用。
     // reader 自体は単一 audio thread が逐次 read/seek するためスナップショット間で共有して安全。
     std::unordered_map<juce::String, std::shared_ptr<juce::AudioFormatReader>> readerPool;
+    // ディスクストリーミングの先読みボイス (ファイルパス → ボイス)。readerPool と同じく
+    // preparePlayback 間で流用し、再生中編集のたびにボイス (= reader 2 本) を作り直さない。
+    // message thread 専用。各ボイスは streamThread を共有する。
+    std::unordered_map<juce::String, std::shared_ptr<FileStreamVoice>> voicePool;
     // 遅延破棄待ちの AudioClip (deferClipDestruction で積まれ、次の preparePlayback で公開する
     // スナップショットの graveyard へ移される)。message thread 専用。
     std::vector<std::unique_ptr<AudioClip>> pendingGraveyard;
