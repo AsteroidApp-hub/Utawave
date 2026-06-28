@@ -421,6 +421,13 @@ static juce::int64 findZeroCrossing(juce::AudioFormatReader* reader,
     return nearSample;
 }
 
+// reader / voice プールのキー = (トラック, ファイル)。3 箇所 (生成 / readerPool / voicePool 再構築) で
+// 必ず同一にするため 1 関数に集約する (ずれると毎回プール miss = 再生中編集の度に WAV を開き直す回帰)。
+static juce::String makePoolKey(int trackIdx, const juce::File& file)
+{
+    return juce::String(trackIdx) + "\n" + file.getFullPathName();
+}
+
 void AudioEngine::preparePlayback(TrackManager& tm)
 {
     lastTrackManager = &tm;
@@ -481,7 +488,7 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             // マルチスレッド再生 (Part B) ではトラックごとに別スレッドが描画するため、同一ファイルを
             // 複数トラックが参照しても reader/voice を共有すると seek/SPSC が競合する。トラック内
             // (分割クリップ等) の共有はそのまま活かしつつ、トラック間の共有だけを断つ。
-            const auto key = juce::String(ti) + "\n" + clip->getFile().getFullPathName();
+            const auto key = makePoolKey(ti, clip->getFile());
             std::shared_ptr<juce::AudioFormatReader> sharedReader;
             auto cacheIt = readerCache.find(key);
             if (cacheIt != readerCache.end())
@@ -712,13 +719,13 @@ void AudioEngine::preparePlayback(TrackManager& tm)
     // クリップ/トラックが参照しても重複 emplace は最初の 1 つだけ残る (同一トラックは同一 reader)。
     readerPool.clear();
     for (auto& pc : snap->clips)
-        if (pc.reader) readerPool.emplace(juce::String(pc.trackIdx) + "\n" + pc.file.getFullPathName(), pc.reader);
+        if (pc.reader) readerPool.emplace(makePoolKey(pc.trackIdx, pc.file), pc.reader);
 
     // 先読みボイスも同様に、使われているものだけ残す (未使用ボイスはここで解放され、その dtor が
     // removeTimeSliceClient で当該スライス完了を待つ = message thread で安全)。
     voicePool.clear();
     for (auto& pc : snap->clips)
-        if (pc.voice) voicePool.emplace(juce::String(pc.trackIdx) + "\n" + pc.file.getFullPathName(), pc.voice);
+        if (pc.voice) voicePool.emplace(makePoolKey(pc.trackIdx, pc.file), pc.voice);
 
     // 破棄系編集で取り除かれた AudioClip を、この新スナップショットの graveyard に載せて延命する。
     // 旧スナップショット (これらを生参照する PlaybackClip を持つ) はこの公開で退役し、audio が
@@ -1569,7 +1576,10 @@ void AudioEngine::renderActiveTrack(PlaybackSnapshot& snap, int ai,
                                     bool monActive, PluginChain* monChain)
 {
     const int tidx = activeTrackIdx[(size_t) ai];
-    if (tidx < 0 || tidx >= (int) snap.trackBuffers.size()) return;
+    // trackBuffers と clipScratch は preparePlayback で同数確保される。両方を明示的に確認して
+    // (size がずれた将来の構築経路でも) ワーカースレッドが範囲外アクセスしないようにする。
+    if (tidx < 0 || tidx >= (int) snap.trackBuffers.size()
+                 || tidx >= (int) snap.clipScratch.size()) return;
     auto& trackBuf = snap.trackBuffers[(size_t) tidx];
     // 容量はスナップショット構築時に確保済み (avoidReallocating=true で再確保しない)。
     trackBuf.setSize(2, numSamples, false, false, true);

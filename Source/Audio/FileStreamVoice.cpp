@@ -12,8 +12,11 @@ FileStreamVoice::FileStreamVoice(std::unique_ptr<juce::AudioFormatReader> bgRead
     : bg(std::move(bgReader)),
       fallback(std::move(fallbackReader)),
       thread(sharedThread),
-      capacity(juce::jmax(1 << 12, capacitySamples)),
-      lookahead(juce::jlimit(1 << 10, capacity - kFillChunk - 1, lookaheadSamples)),
+      // 容量は「lookahead + 充填チャンク」を必ず上回らせる (producer が consumer の読む
+      // スロットを上書きしない不変条件のため)。下限を kFillChunk の数倍にして、小さい
+      // capacitySamples を渡されても下の jlimit が lo>hi にならないようにする。
+      capacity(juce::jmax(kFillChunk * 4, capacitySamples)),
+      lookahead(juce::jlimit(1 << 10, juce::jmax(1 << 10, capacity - kFillChunk - 1), lookaheadSamples)),
       chans(bg ? juce::jmin(2, (int) bg->numChannels) : 1),
       fileLen(bg ? bg->lengthInSamples : 0)
 {

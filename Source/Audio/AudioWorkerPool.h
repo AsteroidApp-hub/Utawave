@@ -63,8 +63,13 @@ private:
     JobFn curFn   { nullptr };
     void* curCtx  { nullptr };
     int   curCount { 0 };
-    std::atomic<int> nextJob   { 0 };
-    std::atomic<int> remaining { 0 };
+    std::atomic<int> nextJob     { 0 };
+    // 完了バリア: この dispatch で起こしたワーカーが workLoop を抜けた数。parallelFor は
+    // これが「起こしたワーカー数」に達するまで返らない = 返った時点でどのワーカーも workLoop の
+    // 中にいない。これにより次ブロックの setup が前ブロックのワーカーと重ならず、leftover worker が
+    // 次ブロックのジョブを横取りする cross-block レースを構造的に排除する (job カウントではなく
+    // worker カウントで待つのが肝)。
+    std::atomic<int> workersDone { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioWorkerPool)
 };

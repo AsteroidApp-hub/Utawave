@@ -30,10 +30,7 @@ void AudioWorkerPool::workLoop()
 {
     int j;
     while ((j = nextJob.fetch_add(1, std::memory_order_acq_rel)) < curCount)
-    {
         curFn(curCtx, j);
-        remaining.fetch_sub(1, std::memory_order_acq_rel);
-    }
 }
 
 void AudioWorkerPool::parallelFor(int count, JobFn fn, void* ctx)
@@ -47,19 +44,23 @@ void AudioWorkerPool::parallelFor(int count, JobFn fn, void* ctx)
         return;
     }
 
+    // 今回起こすワーカー数 = min(ワーカー数, count-1)。audio スレッド自身も 1 参加するので
+    // count-1 本あれば足り、不要なワーカーを起こして待たずに済む。
+    const int toSignal = juce::jmin((int) workers.size(), count - 1);
+
     curFn   = fn;
     curCtx  = ctx;
     curCount = count;
-    remaining.store(count, std::memory_order_relaxed);
+    workersDone.store(0, std::memory_order_relaxed);
     nextJob.store(0, std::memory_order_release);   // 最後に公開 (acquire 側が fn/ctx/count を見える)
 
-    for (auto& w : workers) w->wake.signal();
+    for (int i = 0; i < toSignal; ++i) workers[(size_t) i]->wake.signal();
 
     workLoop();   // 呼び出し元 (audio スレッド) も処理に参加
 
-    // ワーカーが掴んで未完了のジョブが drain するまで待つ (軽い yield スピン)。
-    // audio スレッドが自分の分を終えた後の残りだけなので短時間。
-    while (remaining.load(std::memory_order_acquire) > 0)
+    // 起こした全ワーカーが workLoop を抜ける (= workersDone に達する) まで待つ。返った時点で
+    // どのワーカーも workLoop の中におらず、次の dispatch の setup と重ならない (cross-block レース排除)。
+    while (workersDone.load(std::memory_order_acquire) < toSignal)
         juce::Thread::yield();
 }
 
@@ -70,5 +71,6 @@ void AudioWorkerPool::Worker::run()
         wake.wait();                 // 次ブロックの signal まで休眠 (CPU を食わない)
         if (threadShouldExit()) break;
         pool.workLoop();
+        pool.workersDone.fetch_add(1, std::memory_order_release);  // 完了を親へ通知
     }
 }
