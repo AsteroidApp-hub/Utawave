@@ -52,6 +52,7 @@ target_sources(Utawave PRIVATE
     Source/Audio/AudioEngine.cpp
     Source/Audio/AudioFileImporter.cpp
     Source/Audio/AudioDeviceSettings.cpp
+    Source/Audio/FileStreamVoice.cpp
     Source/Audio/PitchEngine.cpp
     Source/Audio/pitchcore/PitchShiftEngine.cpp
     Source/Audio/builtin/BuiltInEQ.cpp
@@ -340,7 +341,9 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/CrashReporterTests.cpp
         Tests/PitchEngineTests.cpp
         Tests/BuiltInEffectsTests.cpp
+        Tests/FileStreamVoiceTests.cpp
         Source/Audio/AudioFileImporter.cpp
+        Source/Audio/FileStreamVoice.cpp
         Source/Audio/PitchEngine.cpp
         Source/Audio/pitchcore/PitchShiftEngine.cpp
         Source/Audio/builtin/BuiltInEQ.cpp
