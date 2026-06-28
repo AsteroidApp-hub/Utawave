@@ -328,6 +328,7 @@ void AudioEngine::initialise()
 void AudioEngine::shutdown()
 {
     deviceManager.removeAudioCallback(this);   // 以後 audio thread は来ない
+    workerPool.stop();                         // マルチコアワーカーを停止 (audio 停止後)
 
     // 先読みボイスを全て解放してからスレッドを停止する。ボイスを握っているのは
     // activeSnapshot / retiredSnapshots / voicePool の 3 か所なので、空スナップショットへ
@@ -476,7 +477,11 @@ void AudioEngine::preparePlayback(TrackManager& tm)
         for (auto& clipPtr : lane->clips)
         {
             auto* clip = clipPtr.get();
-            const auto key = clip->getFile().getFullPathName();
+            // reader / voice は **(トラック, ファイル)** 単位で共有する (ファイルパス単体ではない)。
+            // マルチスレッド再生 (Part B) ではトラックごとに別スレッドが描画するため、同一ファイルを
+            // 複数トラックが参照しても reader/voice を共有すると seek/SPSC が競合する。トラック内
+            // (分割クリップ等) の共有はそのまま活かしつつ、トラック間の共有だけを断つ。
+            const auto key = juce::String(ti) + "\n" + clip->getFile().getFullPathName();
             std::shared_ptr<juce::AudioFormatReader> sharedReader;
             auto cacheIt = readerCache.find(key);
             if (cacheIt != readerCache.end())
@@ -703,15 +708,17 @@ void AudioEngine::preparePlayback(TrackManager& tm)
 
     // 次回 preparePlayback で流用するため、実際に使った reader だけを pool に残す
     // (もう参照されないファイルのハンドルは解放される)。
+    // キーは (トラック, ファイル) 単位 (上の clip ループと一致させること)。同一ファイルを複数
+    // クリップ/トラックが参照しても重複 emplace は最初の 1 つだけ残る (同一トラックは同一 reader)。
     readerPool.clear();
     for (auto& pc : snap->clips)
-        if (pc.reader) readerPool.emplace(pc.file.getFullPathName(), pc.reader);
+        if (pc.reader) readerPool.emplace(juce::String(pc.trackIdx) + "\n" + pc.file.getFullPathName(), pc.reader);
 
     // 先読みボイスも同様に、使われているものだけ残す (未使用ボイスはここで解放され、その dtor が
     // removeTimeSliceClient で当該スライス完了を待つ = message thread で安全)。
     voicePool.clear();
     for (auto& pc : snap->clips)
-        if (pc.voice) voicePool.emplace(pc.file.getFullPathName(), pc.voice);
+        if (pc.voice) voicePool.emplace(juce::String(pc.trackIdx) + "\n" + pc.file.getFullPathName(), pc.voice);
 
     // 破棄系編集で取り除かれた AudioClip を、この新スナップショットの graveyard に載せて延命する。
     // 旧スナップショット (これらを生参照する PlaybackClip を持つ) はこの公開で退役し、audio が
@@ -808,6 +815,13 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             snap->trackBuffers.resize((size_t)(maxIdx + 1));
             for (auto& tb : snap->trackBuffers)
                 tb.setSize(2, currentBufferSize, false, false, true);
+
+            // トラック単位のクリップ読み出しスクラッチ (renderClip 用)。trackBuffers と同数・同容量。
+            // トラックごとに別インスタンスなので、マルチコア描画でワーカーが並列に renderClip を
+            // 呼んでも競合しない (renderClip 内の setSize は容量内で再確保しない)。
+            snap->clipScratch.resize((size_t)(maxIdx + 1));
+            for (auto& cs : snap->clipScratch)
+                cs.setSize(2, currentBufferSize, false, false, true);
 
             // ── PDC: 全トラックの最大プラグイン遅延を求めて各トラックの補正量を確定 ──
             int newMaxLat = 0;
@@ -995,6 +1009,7 @@ void AudioEngine::invalidatePlayback()
 }
 
 void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
+                              juce::AudioBuffer<float>& scratch,
                               double posStart, int numSamples, bool preFader, bool allowStreaming)
 {
     // パンチイン中: 録音先トラック (recArmed) の古いクリップだけをミュート。
@@ -1033,15 +1048,15 @@ void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
     // 一時バッファに読み取り。チャンネル数は 2 にクランプする (read の useLeft/useRight
     // 経路は L/R しか使わない)。事前確保 (audioDeviceAboutToStart) は 2ch × バッファ長なので、
     // クランプしないと多チャンネル WAV で audio thread 上の再確保が起きる
-    clipBuffer.setSize(juce::jmin(2, (int)pc.reader->numChannels), nRead, false, false, true);
-    clipBuffer.clear();
+    scratch.setSize(juce::jmin(2, (int)pc.reader->numChannels), nRead, false, false, true);
+    scratch.clear();
     // ディスクストリーミング: ボイスがあれば先読みリングから (ヒット時 audio スレッドの I/O ゼロ)、
     // 無ければ / OFF なら従来どおり reader を直接同期読み。ボイスのミスもボイス内部で同期読みする
     // ので、いずれの経路でも結果はビット同一 (FileStreamVoiceTests で担保)。
     if (allowStreaming && pc.voice != nullptr && diskStreamingEnabled.load(std::memory_order_relaxed))
-        pc.voice->read(clipBuffer, 0, nRead, fileSample);
+        pc.voice->read(scratch, 0, nRead, fileSample);
     else
-        pc.reader->read(&clipBuffer, 0, nRead, fileSample, true, true);
+        pc.reader->read(&scratch, 0, nRead, fileSample, true, true);
 
     // フェードイン／アウト適用。ブロックがフェード範囲と重なる時だけサンプルループを回す。
     // パンチインで effectiveClipEnd が recStart まで詰められた場合 (#M4): ユーザーの長い
@@ -1066,14 +1081,14 @@ void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
 
     if (fadeInActive || fadeOutActive)
     {
-        const int numCh   = clipBuffer.getNumChannels();
+        const int numCh   = scratch.getNumChannels();
         const double invSR = 1.0 / currentSampleRate;
 
         // チャンネル毎の生ポインタ（setSample/getSample の bounds check を回避）
         float* writePtrs[8] = {};
         const int chCount = juce::jmin(numCh, 8);
         for (int ch = 0; ch < chCount; ++ch)
-            writePtrs[ch] = clipBuffer.getWritePointer(ch);
+            writePtrs[ch] = scratch.getWritePointer(ch);
 
         double posInClip = blockStartInClip;
         for (int i = 0; i < nRead; ++i)
@@ -1122,15 +1137,15 @@ void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
         float envGainStart    = juce::Decibels::decibelsToGain(envDBStart, -60.0f);
         float envGainEnd      = juce::Decibels::decibelsToGain(envDBEnd, -60.0f);
 
-        // clipBuffer 自身にゲインランプを適用してミックス
-        clipBuffer.applyGainRamp(0, nRead, baseGain * envGainStart, baseGain * envGainEnd);
+        // scratch 自身にゲインランプを適用してミックス
+        scratch.applyGainRamp(0, nRead, baseGain * envGainStart, baseGain * envGainEnd);
 
         const int numOutCh = output.getNumChannels();
         for (int ch = 0; ch < numOutCh; ++ch)
         {
-            int srcCh = juce::jmin(ch, clipBuffer.getNumChannels() - 1);
+            int srcCh = juce::jmin(ch, scratch.getNumChannels() - 1);
             float chPan = (numOutCh >= 2) ? (ch == 0 ? panL : panR) : 1.0f;
-            output.addFrom(ch, bufOffset, clipBuffer, srcCh, 0, nRead, chPan);
+            output.addFrom(ch, bufOffset, scratch, srcCh, 0, nRead, chPan);
         }
     }
     else
@@ -1138,9 +1153,9 @@ void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
         const int numOutCh = output.getNumChannels();
         for (int ch = 0; ch < numOutCh; ++ch)
         {
-            int srcCh = juce::jmin(ch, clipBuffer.getNumChannels() - 1);
+            int srcCh = juce::jmin(ch, scratch.getNumChannels() - 1);
             float chPan = (numOutCh >= 2) ? (ch == 0 ? panL : panR) : 1.0f;
-            output.addFrom(ch, bufOffset, clipBuffer, srcCh, 0, nRead, baseGain * chPan);
+            output.addFrom(ch, bufOffset, scratch, srcCh, 0, nRead, baseGain * chPan);
         }
     }
 }
@@ -1162,11 +1177,9 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     // 停止中シンセプレビュー用に十分なサイズで先に確保 (audio thread での realloc を回避)
     const int previewCh = juce::jmax(2, device->getActiveOutputChannels().countNumberOfSetBits());
     previewBuf.setSize(previewCh, currentBufferSize);
-    // クリップ読み出し用バッファも先に確保する。これをしないと mono トラック群の後に
-    // 最初の stereo クリップを再生する瞬間などに renderClip 内の setSize が
-    // オーディオスレッドでヒープ確保し、一度きりのドロップアウトを招きうる (#M3)。
-    // 以後の per-block setSize は avoidReallocating=true なので容量内に収まり再確保しない。
-    clipBuffer.setSize(2, currentBufferSize, false, false, true);
+    // クリップ読み出し用スクラッチは PlaybackSnapshot::clipScratch (トラック単位) に移行した
+    // (マルチコア描画でワーカーが並列に renderClip を呼んでも競合しないように)。確保は
+    // preparePlayback で行う。これにより mono→stereo 切替時の renderClip 内 setSize も容量内に収まる。
 
     // モニター返し用リバーブはデバイス開始時に準備する (再生 preparePlayback に依存せず、
     // 停止中の入力モニターだけでも返しにリバーブを掛けられるようにするため)。
@@ -1195,6 +1208,13 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     activeTrackIdxScratch.reserve(64);
     activeTracksScratch.reserve(64);
 
+    // オーディオのマルチコア用ワーカーを起動 (コールバック再開前なので audio thread と競合しない)。
+    // 既定はコア数-2 (audio スレッド本体 + システム/UI に各 1 つ残す)。テストは固定数で上書きできる。
+    {
+        const int autoN = juce::jmax(0, juce::SystemStats::getNumCpus() - 2);
+        workerPool.start(forcedWorkerCount >= 0 ? forcedWorkerCount : autoN);
+    }
+
     // デバイス変更で SR / blockSize が変わった場合、全プラグインチェーンを新しい
     // 設定で prepareToPlay し直す。これをしないとプラグインが旧 SR/blockSize のまま
     // 動作し続け、特に blockSize が大きくなったときに想定外のサンプル数を受け取って
@@ -1214,6 +1234,7 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 
 void AudioEngine::audioDeviceStopped()
 {
+    workerPool.stop();   // audio コールバックはもう来ない → ワーカーも止める
     mixer.releaseResources();
     workBuffer.setSize(0, 0);
     previewBuf.setSize(0, 0);
@@ -1350,13 +1371,14 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             }
 
             juce::AudioBuffer<float> trackBuf(2, n);
+            juce::AudioBuffer<float> offlineScratch(2, n);   // 書き出しは単一スレッド = ローカル 1 本で十分
             for (size_t ai = 0; ai < activeIdx.size(); ++ai)
             {
                 trackBuf.clear();
                 const int tidx = activeIdx[ai];
                 if (tidx < (int)snap->clipsByTrack.size())
                     for (int ci : snap->clipsByTrack[(size_t)tidx])
-                        renderClip(snap->clips[(size_t)ci], trackBuf, posStart, n,
+                        renderClip(snap->clips[(size_t)ci], trackBuf, offlineScratch, posStart, n,
                                    /*preFader*/ true, /*allowStreaming*/ false);
 
                 auto* track = activeTracks[ai];
@@ -1512,6 +1534,71 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
             juce::FloatVectorOperations::add(outputChannelData[ch],
                                              monitorReverbBuf.getReadPointer(ch), numSamples);
     }
+}
+
+// マルチコア描画ジョブの文脈 (audio コールバックのスタックに置き、ワーカーへ void* で渡す)。
+// PlaybackSnapshot は AudioEngine の private 入れ子型で匿名 namespace からは名前参照できないため
+// void* で持ち、メンバ関数 produceTrackJob 内でキャストする。
+namespace
+{
+    struct ProduceCtx
+    {
+        AudioEngine*               self;
+        void*                      snap;       // = PlaybackSnapshot*
+        const std::vector<int>*    activeTrackIdx;
+        const std::vector<Track*>* activeTracks;
+        double      posStart;
+        int         numSamples;
+        bool        monActive;
+        PluginChain* monChain;
+    };
+}
+
+void AudioEngine::produceTrackJob(void* ctx, int ai)
+{
+    auto* c = static_cast<ProduceCtx*>(ctx);
+    c->self->renderActiveTrack(*static_cast<PlaybackSnapshot*>(c->snap), ai,
+                               *c->activeTrackIdx, *c->activeTracks,
+                               c->posStart, c->numSamples, c->monActive, c->monChain);
+}
+
+void AudioEngine::renderActiveTrack(PlaybackSnapshot& snap, int ai,
+                                    const std::vector<int>& activeTrackIdx,
+                                    const std::vector<Track*>& activeTracks,
+                                    double posStart, int numSamples,
+                                    bool monActive, PluginChain* monChain)
+{
+    const int tidx = activeTrackIdx[(size_t) ai];
+    if (tidx < 0 || tidx >= (int) snap.trackBuffers.size()) return;
+    auto& trackBuf = snap.trackBuffers[(size_t) tidx];
+    // 容量はスナップショット構築時に確保済み (avoidReallocating=true で再確保しない)。
+    trackBuf.setSize(2, numSamples, false, false, true);
+    trackBuf.clear();
+
+    // ドライ描画 (Pre-Fader)。Mute/Solo/Click はトラック単位で判定済み (activeTrackIdx 構築時)。
+    // クリップ読み出しは **このトラック専用スクラッチ** を渡す (並列ジョブ間で共有しない)。
+    // clipScratch は preparePlayback で trackBuffers と同数・同容量に確保済み。
+    auto& scratch = snap.clipScratch[(size_t) tidx];
+    if (tidx < (int) snap.clipsByTrack.size())
+        for (int ci : snap.clipsByTrack[(size_t) tidx])
+            renderClip(snap.clips[(size_t) ci], trackBuf, scratch, posStart, numSamples,
+                       /*preFader*/ true, /*allowStreaming*/ true);
+
+    // プラグインチェーン。二重処理ガード (入力モニタ対象トラックは mixInputMonitoring が叩く)。
+    auto* track = activeTracks[(size_t) ai];
+    const bool isMonTarget = monActive && track != nullptr
+                             && &track->getPluginChain() == monChain;
+    if (track != nullptr && ! isMonTarget
+        && track->getPluginChain().getActivePluginCountAtomic() > 0)
+    {
+        // ジョブごとに独立した空 MIDI バッファ (audio トラックは MIDI を生成しないので確保されない)。
+        // 共有スクラッチを使うと並列ジョブ間で aliasing するため、必ずローカルにする。
+        juce::MidiBuffer mb;
+        track->getPluginChain().processBlock(trackBuf, mb, &playHead);
+    }
+
+    // PDC: 自分より遅いトラックに合わせて trackBuf を遅延 (snap.trackDelays[tidx] のみ触る = 並列安全)。
+    applyTrackDelay(snap.trackDelays, tidx, trackBuf, numSamples);
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext(
@@ -1781,45 +1868,39 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         reverbSendBuf.setSize(2, numSamples, false, false, true);
         bool reverbBufCleared = false;
 
-        // トラック単位でドライ描画 → プラグインチェーン通過 → フェーダー/パン → マスターへ加算
+        // ── 描画フェーズ (マルチコア対応) ──
+        // 各トラックの「クリップ描画 + プラグインチェーン + PDC」はトラックごとに独立
+        // (自分の trackBuffers[tidx] / trackDelays[tidx] のみ触る) なので、ワーカープールへ分散する。
+        // vol/pan・マスター加算・リバーブ送り・メータは共有 (workBuffer/reverbSendBuf/メータ配列) を
+        // 書くため、この後の **直列フェーズでトラック index 昇順** に行う (= スレッド数に依らず
+        // 加算順が固定 = 出力ビット同一)。
         if (!activeTrackIdx.empty() && (int)snap->trackBuffers.size() > 0)
         {
+            const int nActive = (int) activeTrackIdx.size();
+            ProduceCtx pctx { this, snap.get(), &activeTrackIdx, &activeTracks,
+                              posStart, numSamples, monActive, monChain };
+
+            if (multicoreEnabled.load(std::memory_order_relaxed)
+                && workerPool.getNumWorkers() > 0
+                && nActive >= kMinTracksForThreads)
+            {
+                workerPool.parallelFor(nActive, &AudioEngine::produceTrackJob, &pctx);
+            }
+            else
+            {
+                for (int ai = 0; ai < nActive; ++ai)
+                    produceTrackJob(&pctx, ai);
+            }
+
+            // 直列フェーズ: 固定順 (activeTrackIdx 昇順) に vol/pan・メータ・マスター加算・リバーブ送り。
             for (size_t ai = 0; ai < activeTrackIdx.size(); ++ai)
             {
                 const int tidx = activeTrackIdx[ai];
                 if (tidx < 0 || tidx >= (int)snap->trackBuffers.size()) continue;
                 auto& trackBuf = snap->trackBuffers[(size_t)tidx];
-                // 重要: プラグインが見るバッファサイズと実際の numSamples を合わせる。
-                // スナップショット構築時に blockSize 容量を確保済みなので allocation は起きない。
-                // サイズ不一致だとプラグイン内部状態と齟齬して AudioUnitRender が落ちる事例あり。
-                trackBuf.setSize(2, numSamples, false, false, true);
-                trackBuf.clear();
+                auto* track    = activeTracks[ai];
 
-                // ドライ描画（Pre-Fader 相当: トラック Vol/Pan は後で適用）。
-                // Mute/Solo/Click はトラック単位で判定済み (activeTrackIdx 構築時) なので
-                // クリップ毎の再判定は不要。clipsByTrack で自トラックのクリップだけを直接引く。
-                if (tidx < (int)snap->clipsByTrack.size())
-                    for (int ci : snap->clipsByTrack[(size_t)tidx])
-                        renderClip(snap->clips[(size_t)ci], trackBuf, posStart, numSamples, /*preFader*/ true);
-
-                // プラグインチェーン。ロックを取らずに処理対象有無を判定する。
-                auto* track = activeTracks[ai];
-                // 二重処理ガード: このトラックが入力モニターの FX 対象なら、同じチェーン
-                // インスタンスを mixInputMonitoring が生入力で叩く。再生クリップでも叩くと
-                // 1 ブロックで 2 回処理してプラグイン内部状態 (ディレイ/包絡) が壊れるため、
-                // 再生側ではチェーンをスキップする (このトラックの旧クリップは dry で鳴る)。
-                const bool isMonTarget = monActive && track != nullptr
-                                         && &track->getPluginChain() == monChain;
-                if (track && !isMonTarget && track->getPluginChain().getActivePluginCountAtomic() > 0)
-                {
-                    chainMidiScratch.clear();
-                    track->getPluginChain().processBlock(trackBuf, chainMidiScratch, &playHead);
-                }
-
-                // PDC: 自分より遅いトラックに合わせて trackBuf を遅延させる
-                applyTrackDelay(snap->trackDelays, tidx, trackBuf, numSamples);
-
-                // トラック Vol / Pan を先に算出（メータをポストフェーダーにするため）
+                // トラック Vol / Pan を算出（メータをポストフェーダーにするため）
                 const float vol  = track ? juce::Decibels::decibelsToGain(track->getVolume()) : 1.0f;
                 const float pan  = track ? track->getPan() : 0.0f;
                 const float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);

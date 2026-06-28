@@ -34,6 +34,7 @@ AppPreferences AppPreferences::load()
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
         p.diskStreaming      = xml->getBoolAttribute("diskStreaming", p.diskStreaming);
+        p.multicoreAudio     = xml->getBoolAttribute("multicoreAudio", p.multicoreAudio);
         // 範囲は LyricsView::kMinFont/kMaxFont と一致させる (UI へ依存させないため数値で持つ)
         p.lyricsFontSize     = juce::jlimit(12, 96,
             xml->getIntAttribute("lyricsFontSize", p.lyricsFontSize));
@@ -52,6 +53,7 @@ bool AppPreferences::save() const
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
     xml.setAttribute("diskStreaming", diskStreaming);
+    xml.setAttribute("multicoreAudio", multicoreAudio);
     xml.setAttribute("lyricsFontSize", lyricsFontSize);
     const bool ok = xml.writeTo(getStoreFile());
     if (!ok)

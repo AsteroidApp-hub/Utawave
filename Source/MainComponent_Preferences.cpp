@@ -29,6 +29,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton recCompBtn;          // 録音レイテンシ自動補正 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton monInsBtn;           // 入力モニターに INS を通す (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton diskStreamBtn;       // ディスクストリーミング (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton multicoreBtn;        // オーディオのマルチコア処理 (アプリ全体設定。初期状態は showPreferences 側)
         juce::Label        recCompOffsetLabel;
         juce::Slider       recCompOffsetSlider; // 追加の手動オフセット (ms)
         juce::Label        exportLabel, startupLabel;
@@ -59,6 +60,7 @@ void MainComponent::showPreferences()
         std::function<void(double)> onRecCompOffsetChanged;
         std::function<void(bool)>  onMonInsChanged;
         std::function<void(bool)>  onDiskStreamChanged;
+        std::function<void(bool)>  onMulticoreChanged;
         std::function<void()>      onResetDefaults;
 
         PrefsDlg(int curBits, bool curFollowSel, bool curRetro, bool curRtz,
@@ -240,6 +242,16 @@ void MainComponent::showPreferences()
                 if (onDiskStreamChanged) onDiskStreamChanged(diskStreamBtn.getToggleState());
             };
             addAndMakeVisible(diskStreamBtn);
+
+            // オーディオのマルチコア処理 (再生時のトラック描画を複数コアへ分散。アプリ全体設定)。
+            // 既定 ON。多トラック/重いプラグインでスケール。OFF で単一スレッドへ (互換重視)。
+            multicoreBtn.setButtonText(
+                tr(u8"オーディオをマルチコアで処理する (多トラック/重いプラグインで軽くなる)"));
+            multicoreBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            multicoreBtn.onClick = [this] {
+                if (onMulticoreChanged) onMulticoreChanged(multicoreBtn.getToggleState());
+            };
+            addAndMakeVisible(multicoreBtn);
 
             // 自動保存: 無効 + 5 分刻み (5/10/15/20/25/30)
             // ID = minutes + 1 (無効=1, 5分=6, ...)
@@ -455,7 +467,8 @@ void MainComponent::showPreferences()
             recCompOffsetLabel.setBounds(14, y, 250, 24);
             recCompOffsetSlider.setBounds(270, y, w - 270 - 14, 24); y += 34;
             monInsBtn.setBounds(14, y, w - 28, 24); y += 28;
-            diskStreamBtn.setBounds(14, y, w - 28, 24); y += 32;
+            diskStreamBtn.setBounds(14, y, w - 28, 24); y += 28;
+            multicoreBtn.setBounds(14, y, w - 28, 24); y += 32;
             autoSaveLabel.setBounds(14, y, w - 28, 22); y += 26;
             autoSaveCombo.setBounds(14, y, w - 28, 26); y += 32;
             backupCountLabel.setBounds(14, y, w - 28, 22); y += 26;
@@ -710,6 +723,13 @@ void MainComponent::showPreferences()
         appPrefs.save();
         audioEngine.setDiskStreamingEnabled(v);
     };
+    // オーディオのマルチコア処理 (アプリ全体設定)。即時保存 + エンジンへ即反映 (次ブロックから従う)。
+    dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);
+    dlg->onMulticoreChanged = [this](bool v) {
+        appPrefs.multicoreAudio = v;
+        appPrefs.save();
+        audioEngine.setMulticoreAudioEnabled(v);
+    };
     dlg->onResetDefaults = [this, dlg]
     {
         // AppSettings の各フィールドをデフォルト値 (構造体の初期化子) に揃える
@@ -744,12 +764,14 @@ void MainComponent::showPreferences()
         appPrefs.recLatencyManualMs = defPrefs.recLatencyManualMs;
         appPrefs.monitorThroughInserts = defPrefs.monitorThroughInserts;
         appPrefs.diskStreaming      = defPrefs.diskStreaming;
+        appPrefs.multicoreAudio     = defPrefs.multicoreAudio;
         appPrefs.save();
         menuItemsChanged();
         applyMidiPagingToOpenEditors();
         audioEngine.setRecordingLatencyComp(appPrefs.recLatencyAutoComp,
                                             appPrefs.recLatencyManualMs);
         audioEngine.setDiskStreamingEnabled(appPrefs.diskStreaming);
+        audioEngine.setMulticoreAudioEnabled(appPrefs.multicoreAudio);
         syncInputMonitorStateToEngine();   // モニタ FX 経路を既定 (ON) に戻す
         dlg->showMidiExportBtn.setToggleState(appPrefs.showMidiExportMenu, juce::dontSendNotification);
         dlg->midiPagingBtn.setToggleState(appPrefs.midiPagingEnabled, juce::dontSendNotification);
@@ -759,6 +781,7 @@ void MainComponent::showPreferences()
         dlg->recCompOffsetSlider.setValue(appPrefs.recLatencyManualMs, juce::dontSendNotification);
         dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
         dlg->diskStreamBtn.setToggleState(appPrefs.diskStreaming, juce::dontSendNotification);
+        dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);
 
         // ダイアログの UI を新しい値に同期
         dlg->syncUiToValues(appSettings.resampleOutputBits,

@@ -935,6 +935,8 @@ MainComponent::MainComponent()
                                         appPrefs.recLatencyManualMs);
     // ディスクストリーミング (再生の音声読み込みを先読みスレッドへ分離) の ON/OFF を反映
     audioEngine.setDiskStreamingEnabled(appPrefs.diskStreaming);
+    // オーディオのマルチコア処理 (トラック描画を複数コアへ分散) の ON/OFF を反映
+    audioEngine.setMulticoreAudioEnabled(appPrefs.multicoreAudio);
 
     if (auto* dev = audioEngine.getDeviceManager().getCurrentAudioDevice())
     {

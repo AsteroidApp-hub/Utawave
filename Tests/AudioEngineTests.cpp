@@ -240,6 +240,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testRecordingWriteGate();
         testMonitorThroughInserts();
         testDiskStreamingDeterminism();
+        testMulticoreDeterminism();
 
         tempDir.deleteRecursively();
     }
@@ -311,6 +312,53 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         expect(identical, "streaming ON output must equal streaming OFF (direct) output sample-for-sample");
         // ストリーミング ON でも有音 (ソースが届いている) ことを確認 (両方無音で一致する偽合格を防ぐ)
         expect(bOn.getMagnitude(0, 0, N * kBlock) > 0.1f, "streaming ON actually renders audio");
+    }
+
+    void testMulticoreDeterminism()
+    {
+        beginTest("multicore: output is bit-identical to single-thread");
+        // 複数トラック (>= kMinTracksForThreads) を並列描画 (ワーカー強制起動) した出力が、
+        // 単一スレッド処理とサンプル単位で完全一致することを確認する。produce(並列) + 直列 sum の
+        // 再構成が、加算順を固定する限りスレッド数に依らずビット同一であることの担保。
+        const int kTracks = 6;
+        std::vector<juce::File> wavs;
+        for (int k = 0; k < kTracks; ++k)
+        {
+            auto f = tempDir.getChildFile("mc_" + juce::String(k) + ".wav");
+            expect(writeMonoSineWav(f, (int) (kSR * 1.5), 160.0 + 50.0 * k), "mc source write");
+            wavs.push_back(f);
+        }
+
+        auto buildScene = [&] (Scene& s, bool multi, int workers)
+        {
+            for (int k = 0; k < kTracks; ++k)
+            {
+                auto* t = s.addConstTrack(wavs[(size_t) k], 1.5);
+                t->setVolume(-2.0f * (float) k);                 // フェーダーをばらけさせる
+                t->setPan((k % 2) ? 0.3f : -0.3f);               // パンもばらけさせる
+                if (k == 2) t->setReverbSend(0.4f);              // リバーブ送りも経路に含める
+            }
+            s.engine.setForcedAudioWorkerCountForTests(workers); // start 前に固定
+            s.engine.setMulticoreAudioEnabled(multi);
+            s.start();
+            s.engine.play();
+        };
+
+        const int N = 100;
+        Scene off; buildScene(off, /*multi*/ false, /*workers*/ 0);
+        auto aOff = captureOutput(off.engine, N);
+
+        Scene on;  buildScene(on,  /*multi*/ true,  /*workers*/ 3);
+        expect(on.engine.getAudioWorkerCount() == 3, "3 audio workers started (parallel path engaged)");
+        auto bOn = captureOutput(on.engine, N, /*sleepEvery*/ 2);
+
+        bool identical = true;
+        for (int ch = 0; ch < 2 && identical; ++ch)
+            for (int i = 0; i < N * kBlock; ++i)
+                if (std::abs(aOff.getSample(ch, i) - bOn.getSample(ch, i)) > 1.0e-7f)
+                    { identical = false; break; }
+        expect(identical, "multicore output must equal single-thread output sample-for-sample");
+        expect(bOn.getMagnitude(0, 0, N * kBlock) > 0.1f, "multicore path actually renders audio");
     }
 
     void testPlaybackRendersClip()

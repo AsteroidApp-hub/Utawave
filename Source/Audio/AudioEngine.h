@@ -8,6 +8,7 @@
 #include "../AppSettings.h"
 #include "../Tracks/AudioClip.h"
 #include "EnginePlayHead.h"
+#include "AudioWorkerPool.h"
 
 class TrackManager;  // 前方宣言
 class Track;
@@ -226,6 +227,15 @@ public:
     void setDiskStreamingEnabled(bool b) { diskStreamingEnabled.store(b); }
     bool isDiskStreamingEnabled() const  { return diskStreamingEnabled.load(); }
 
+    // オーディオのマルチコア処理 ON/OFF (既定 ON)。ON で再生時のトラック描画 (クリップ + プラグイン
+    // チェーン + PDC) を複数コアへ分散する。マスター加算はトラック index 昇順の直列なので、ON/OFF で
+    // 出力はビット同一 (決定論)。稀にスレッド安全でないプラグイン向けに OFF で従来の単一スレッド経路へ。
+    void setMulticoreAudioEnabled(bool b) { multicoreEnabled.store(b); }
+    bool isMulticoreAudioEnabled() const  { return multicoreEnabled.load(); }
+    int  getAudioWorkerCount() const      { return workerPool.getNumWorkers(); }
+    // テスト用: 次回 audioDeviceAboutToStart で起動するワーカー数を固定する (-1 = 自動 = コア数-2)。
+    void setForcedAudioWorkerCountForTests(int n) { forcedWorkerCount = n; }
+
     // Input monitoring
     void setInputMonitoringActive(bool b) { inputMonitoringActive.store(b); }
     // いずれかのトラックが Rec アーム中（停止中でも入力メーターを表示するかの判定用）
@@ -299,9 +309,23 @@ private:
     // allowStreaming: 先読みボイスを使ってよいか。audio コールバックのみ true。オフライン書き出し
     // (renderOfflineRange・別スレッド) は false にして reader を直読みする。ボイスのリングは SPSC
     // (consumer = audio thread 1 本) 前提なので、書き出しスレッドから触ると二重 consumer になるため。
+    // scratch: クリップ読み出し用の一時バッファ。**呼び出し側が用意する** (マルチスレッド描画では
+    // トラックごとに別インスタンスを渡す = 共有メンバだと並列で競合するため)。容量は blockSize 分。
     void renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
+                    juce::AudioBuffer<float>& scratch,
                     double posStart, int numSamples, bool preFader = false,
                     bool allowStreaming = true);
+
+    // 1 アクティブトラック (ai = activeTrackIdx 内の位置) のドライ描画 + プラグインチェーン + PDC を
+    // snap.trackBuffers[tidx] に書く。トラックごとに独立な状態のみ触る (= ワーカースレッド並列実行可)。
+    // vol/pan・マスター加算・リバーブ送り・メータは呼び出し側が直列フェーズで行う (共有書込のため)。
+    void renderActiveTrack(PlaybackSnapshot& snap, int ai,
+                           const std::vector<int>& activeTrackIdx,
+                           const std::vector<Track*>& activeTracks,
+                           double posStart, int numSamples,
+                           bool monActive, PluginChain* monChain);
+    // AudioWorkerPool 用ジョブ (ctx = ProduceCtx*)。renderActiveTrack を呼ぶだけの薄いブリッジ。
+    static void produceTrackJob(void* ctx, int ai);
 
     void measureLevel(const float* data, int numSamples,
                       std::atomic<float>& peak, std::atomic<float>& peakHold,
@@ -318,6 +342,15 @@ private:
     // = ボイス dtor の removeTimeSliceClient が生きたスレッドに対して走る (UAF 防止)。
     juce::TimeSliceThread streamThread { "uta-disk-stream" };
     std::atomic<bool>     diskStreamingEnabled { true };
+
+    // ── オーディオのマルチコア処理 (Part B) ──
+    // トラック描画を分散するワーカープール。audioDeviceAboutToStart で起動 / Stopped で停止。
+    // parallelFor は audio コールバック内で同期完結する (ジョブは drain してから返る)。
+    AudioWorkerPool   workerPool;
+    std::atomic<bool> multicoreEnabled { true };
+    int               forcedWorkerCount { -1 };   // テスト用の固定ワーカー数 (-1=自動)
+    // これ未満のアクティブトラック数では並列化しない (起床コストが勝つため直列実行)。
+    static constexpr int kMinTracksForThreads = 4;
 
     // ── 再生スナップショット (lock-free 公開) ──
     // 再生に必要な不変データ (clips/midi) と、audio thread が中身を書く scratch (trackBuffers/
@@ -369,7 +402,6 @@ private:
     int                       declickXfadeRemain { 0 };  // audio thread 専用 (クロスフェード残サンプル)
     float                     declickLast[2] { 0.0f, 0.0f };// audio thread 専用 (直前出力値)
     float                     declickHold[2] { 0.0f, 0.0f };// audio thread 専用 (クロスフェード元値)
-    juce::AudioBuffer<float>  clipBuffer;
     // トラック単位のドライバッファ（プラグインチェーン処理用、index = trackIdx）は
     // PlaybackSnapshot::trackBuffers に集約 (公開後は構造不変、audio thread が中身のみ書く)。
 
@@ -620,6 +652,10 @@ private:
         std::vector<std::pair<int, Track*>>         clipTracks;
         std::vector<MidiPlayback>                   midi;
         std::vector<juce::AudioBuffer<float>>       trackBuffers;
+        // クリップ読み出し用スクラッチ (index = trackIdx)。renderClip がトラック描画時に使う。
+        // トラックごとに別インスタンスなので、マルチコア描画でワーカーが並列に renderClip を
+        // 呼んでも競合しない (旧: 単一メンバ clipBuffer を共有していた)。preparePlayback で確保。
+        std::vector<juce::AudioBuffer<float>>       clipScratch;
         std::vector<TrackDelay>                      trackDelays;
         std::vector<std::shared_ptr<InternalSynth>> synths;
         // 遅延破棄: 破棄系編集 (テイク操作/分割/無音カット) で取り除いた AudioClip を、まだそれを
