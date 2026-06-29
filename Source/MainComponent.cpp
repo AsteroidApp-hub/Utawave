@@ -200,6 +200,13 @@ MainComponent::MainComponent()
         applyTrackEditUndoable(t, std::move(m));
     };
 
+    // Shift+Option+クリックで S / M を選択中トラックへ一括適用 (1 Undo にまとめる)。
+    // クリックされたトラック自身も含め、選択集合の全トラックを同じ値 (value) にそろえる。
+    trackHeaderPanel.onTrackSoloBatch = [this](int clickedIdx, bool value)
+    { applyToggleToSelectedTracks(clickedIdx, value, /*solo=*/true); };
+    trackHeaderPanel.onTrackMuteBatch = [this](int clickedIdx, bool value)
+    { applyToggleToSelectedTracks(clickedIdx, value, /*solo=*/false); };
+
     trackHeaderPanel.onTrackChanged = [this]
     {
         markProjectDirty();
@@ -2010,14 +2017,15 @@ MainComponent::TrackState MainComponent::captureTrackState(Track* t) const
     return s;
 }
 
-void MainComponent::applyTrackEditUndoable(Track* t, std::function<void()> mutate)
+void MainComponent::applyTrackEditUndoable(Track* t, std::function<void()> mutate, bool newTransaction)
 {
     if (!t || !mutate) return;
     TrackState before = captureTrackState(t);
     mutate();
     TrackState after = captureTrackState(t);
     if (before == after) return;   // 実際の変化なし
-    undoManager.beginNewTransaction();
+    // newTransaction=false なら呼び出し側が開始したトランザクションへ積む (一括編集を 1 Undo に)。
+    if (newTransaction) undoManager.beginNewTransaction();
     // 差分適用: このトランザクションで実際に変化したフィールドだけを undo/redo で書き戻す。
     // TrackState 全体を無条件に復元すると、Undo を通さない他経路 (ラウドネス調整 /
     // メトロノーム設定ダイアログ等) で変えた vol/pan/reverbSend を、無関係なトラック編集
@@ -2042,6 +2050,28 @@ void MainComponent::applyTrackEditUndoable(Track* t, std::function<void()> mutat
             if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
             audioEngine.invalidatePlayback();   // 内蔵シンセ/ソロ等をエンジンへ反映
         }));
+}
+
+void MainComponent::applyToggleToSelectedTracks(int clickedIdx, bool value, bool solo)
+{
+    const int trackCount = trackManager.getTrackCount();
+    // 対象 = ヘッダの複数選択集合 ∪ クリックされたトラック。境界外 index は弾く。
+    const auto& sel = trackHeaderPanel.getSelectedTrackIndices();
+    std::vector<int> scope;
+    for (int i : sel)
+        if (i >= 0 && i < trackCount) scope.push_back(i);
+    if (clickedIdx >= 0 && clickedIdx < trackCount
+        && std::find(scope.begin(), scope.end(), clickedIdx) == scope.end())
+        scope.push_back(clickedIdx);
+    if (scope.empty()) return;
+
+    // 複数トラックの変更を 1 つの Undo にまとめる (先頭で 1 回だけトランザクション開始)。
+    undoManager.beginNewTransaction();
+    for (int i : scope)
+        if (auto* t = trackManager.getTrack(i))
+            applyTrackEditUndoable(t,
+                [t, solo, value] { if (solo) t->setSoloed(value); else t->setMuted(value); },
+                /*newTransaction=*/false);
 }
 
 bool MainComponent::computeLoudnessTargetVol(const juce::File& file, double fileOffset,

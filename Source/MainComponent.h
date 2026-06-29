@@ -339,7 +339,11 @@ private:
         bool operator!=(const TrackState& o) const { return !(*this == o); }
     };
     TrackState captureTrackState(Track*) const;
-    void       applyTrackEditUndoable(Track*, std::function<void()> mutate);
+    // newTransaction=false は呼び出し側が先に beginNewTransaction() を 1 回呼んだ前提で、
+    // 複数トラックの編集を 1 つの Undo にまとめる一括用 (Shift+Option+S/M 等)。
+    void       applyTrackEditUndoable(Track*, std::function<void()> mutate, bool newTransaction = true);
+    // Shift+Option+クリックの一括ソロ/ミュート: 選択集合 (∪ clickedIdx) を value にそろえて 1 Undo。
+    void       applyToggleToSelectedTracks(int clickedIdx, bool value, bool solo);
     bool       trackStillExists(Track*) const;
     // ── プラグインチェーン操作の Undo (追加 / 削除 / バイパス / 並べ替え / トラック間移動) ──
     // チェーンは Track* (nullptr=マスター) を apply 時に解決する。削除済みトラックなら no-op。

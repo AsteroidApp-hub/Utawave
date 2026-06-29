@@ -118,6 +118,13 @@ void TrackHeaderPanel::mouseDown(const juce::MouseEvent& e)
         }
         if (hitIdx >= 0)
         {
+            // Shift+Option+クリックが S/M ボタン上なら、選択は変えずに一括トグルへ回す
+            // (ここで selectTrackForUI を通すと Shift が範囲選択として効き選択集合が変わってしまう)。
+            // 実際の一括適用はボタンの onClick → onSoloBatch/onMuteBatch が担う。
+            if (e.mods.isShiftDown() && e.mods.isAltDown()
+                && headerViews[(size_t) hitIdx]->isSoloOrMuteButton(e.eventComponent))
+                return;
+
             selectTrackForUI(hitIdx, e.mods);
 
             // 並び替えドラッグ用初期化 (修飾なし & 非インタラクティブ部のみ)
@@ -505,6 +512,9 @@ void TrackHeaderPanel::refresh()
         // 範囲選択を単一選択に戻してしまう。よって両方とも空にしておく。
         view->onSelected         = nullptr;
         view->onSelectedWithMods = nullptr;
+        // Shift+Option+クリックの S/M 一括: 選択集合への適用は MainComponent へ委譲。
+        view->onSoloBatch = [this, idx](bool v) { if (onTrackSoloBatch) onTrackSoloBatch(idx, v); };
+        view->onMuteBatch = [this, idx](bool v) { if (onTrackMuteBatch) onTrackMuteBatch(idx, v); };
         view->onDeleteRequest = [this, idx]
         {
             // idx が複数選択に含まれていれば選択集合をまとめて、そうでなければ idx 単体を削除。

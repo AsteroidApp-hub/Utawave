@@ -77,6 +77,11 @@ public:
     // 引数: 対象 Track*, 実行する mutate。
     std::function<void(Track*, std::function<void()>)> onTrackEditUndoable;
 
+    // Shift+Option+クリックで S / M を選択中トラックへ一括適用する委譲。
+    // 引数: クリックされた trackIdx, クリック後の新しい値 (true=ON)。MainComponent が選択集合へ適用。
+    std::function<void(int, bool)> onTrackSoloBatch;
+    std::function<void(int, bool)> onTrackMuteBatch;
+
     // 全トラックヘッダを再描画する (選択/範囲変化で ↑ ボタンの活性表示を更新)
     void repaintHeaders();
 

@@ -49,10 +49,13 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
 
     styleToggle(muteBtn, juce::Colour(0xffffaa00), juce::Colours::black);
     muteBtn.onClick = [this] {
-        if (onSelected) onSelected();
         // setClickingTogglesState(true) なので onClick 時点でボタンの toggle は既に反転済み。
         // track 側はまだ旧値なので editTrackUndoable の前後スナップショットで差分が取れる。
         const bool v = muteBtn.getToggleState();
+        // Shift+Option+クリック: クリック後の値を選択中トラックへ一括適用 (Panel が委譲)。
+        const auto mods = juce::ModifierKeys::currentModifiers;
+        if (mods.isShiftDown() && mods.isAltDown() && onMuteBatch) { onMuteBatch(v); return; }
+        if (onSelected) onSelected();
         editTrackUndoable([this, v] { track.setMuted(v); });
         if (onChanged) onChanged();
     };
@@ -60,8 +63,11 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
 
     styleToggle(soloBtn, juce::Colour(0xff44aaff), juce::Colours::black);
     soloBtn.onClick = [this] {
-        if (onSelected) onSelected();
         const bool v = soloBtn.getToggleState();
+        // Shift+Option+クリック: クリック後の値を選択中トラックへ一括適用 (Panel が委譲)。
+        const auto mods = juce::ModifierKeys::currentModifiers;
+        if (mods.isShiftDown() && mods.isAltDown() && onSoloBatch) { onSoloBatch(v); return; }
+        if (onSelected) onSelected();
         editTrackUndoable([this, v] { track.setSoloed(v); });
         if (onChanged) onChanged();
     };

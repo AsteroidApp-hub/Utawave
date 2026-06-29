@@ -352,6 +352,7 @@ void MainComponent::showShortcutsDialog()
             { u8"Shift+R",                u8"録音アーム トグル" },
             { u8"Shift+S",                u8"ソロ トグル" },
             { u8"Shift+M",                u8"ミュート トグル" },
+            { u8"Shift+Option+クリック",   u8"S / M ボタンで選択トラックを一括ソロ/ミュート" },
             { u8"Shift+I",                u8"入力モニター トグル" },
             { u8"Shift+T",                u8"テイクレーン (TList) 表示切替" },
             { u8"↑ / ↓",                  u8"選択範囲のフォーカスレーンを移動" },

@@ -57,6 +57,10 @@ public:
     std::function<void()>      onSelected;   // トラック選択コールバック (互換用)
     // 修飾キー付き選択コールバック (Shift / Cmd を Panel 側に伝える)
     std::function<void(juce::ModifierKeys)> onSelectedWithMods;
+    // Shift+Option+クリック で S / M を選択トラックへ一括適用 (引数 = クリック後の新しい値)。
+    // Panel 側が選択集合を解決して MainComponent へ委譲する。
+    std::function<void(bool)>  onSoloBatch;
+    std::function<void(bool)>  onMuteBatch;
     std::function<void()>      onDeleteRequest;        // トラック削除リクエスト
     std::function<int()>       getDeleteCount;         // 削除メニューで実際に消える本数 (複数選択時の表示用)
     std::function<void(bool)>  onDuplicateRequest;     // トラック複製リクエスト (includeTakeLanes: false=Lane 0 のみ)
@@ -83,6 +87,10 @@ public:
     bool isResizing() const  { return draggingResize || draggingLaneResize; }
 
     Track& getTrack() { return track; }
+
+    // Shift+Option+クリックの一括ソロ/ミュート判定用: 渡したコンポーネントが S/M ボタンか。
+    // Panel が「このクリックは選択を変えず一括トグルに回す」かどうかを見分けるのに使う。
+    bool isSoloOrMuteButton(const juce::Component* c) const { return c == &soloBtn || c == &muteBtn; }
 
     // 自身のトラックインデックス（D&D 識別用）。-1 = 未設定
     void setTrackIndex(int idx) { trackIndex = idx; }
