@@ -23,7 +23,7 @@ BuiltInCompressor::BuiltInCompressor()
     addPreset(u8"リミッター風",  { -6.0f, 12.0f,  1.0f,  80.0f, 0.0f, 0.0f });
 }
 
-const juce::String BuiltInCompressor::getName() const { return tr(u8"内蔵コンプ"); }
+const juce::String BuiltInCompressor::getName() const { return tr(u8"コンプ"); }
 
 float BuiltInCompressor::currentMakeupDb() const
 {

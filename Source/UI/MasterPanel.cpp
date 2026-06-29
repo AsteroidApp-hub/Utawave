@@ -180,7 +180,7 @@ void MasterPanel::refreshChips()
             btn->setColour(juce::TextButton::buttonOnColourId, juce::Colour(0x30ffffff));
             btn->setColour(juce::TextButton::textColourOffId,
                            AppColours::textDim.withAlpha(0.55f));
-            btn->setTooltip(tr(u8"クリックでプラグインを追加"));
+            btn->setTooltip(platformShortcutText(tr(u8"クリックでプラグイン追加（Cmd+クリックでバイパス）")));
             const int slotIdx = i;
             btn->onClick = [this, slotIdx]
             {

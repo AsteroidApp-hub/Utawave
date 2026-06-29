@@ -16,6 +16,7 @@
 #include "../Source/Audio/builtin/BuiltInCompressor.h"
 #include "../Source/Audio/builtin/BuiltInDeEsser.h"
 #include "../Source/Audio/builtin/BuiltInGate.h"
+#include "../Source/Audio/builtin/BuiltInMaximizer.h"
 #include "../Source/Audio/builtin/BuiltInReverb.h"
 #include "../Source/Audio/builtin/BuiltInFactory.h"
 
@@ -63,6 +64,7 @@ public:
         testCompressor();
         testDeEsser();
         testGate();
+        testMaximizer();
         testReverb();
         testFactory();
     }
@@ -296,6 +298,77 @@ private:
         }
     }
 
+    static float peakOf(const juce::AudioBuffer<float>& b)
+    {
+        float p = 0.0f;
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+            p = juce::jmax(p, b.getMagnitude(ch, 0, b.getNumSamples()));
+        return p;
+    }
+
+    void testMaximizer()
+    {
+        const int expectLookahead = (int) std::round(0.003 * kSr);
+
+        beginTest("Maximizer reports lookahead latency");
+        {
+            BuiltInMaximizer m;
+            m.prepareToPlay(kSr, 4096);
+            expect(m.getLatencySamples() == expectLookahead, "latency must equal the lookahead samples");
+            expect(m.getLatencySamples() > 0, "maximizer has non-zero lookahead latency");
+        }
+
+        beginTest("Maximizer holds output under the ceiling");
+        {
+            BuiltInMaximizer m;
+            m.prepareToPlay(kSr, 24000);
+            m.setP(BuiltInMaximizer::DriveDb, 12.0f);    // 強くドライブ → リミッティング
+            m.setP(BuiltInMaximizer::CeilingDb, -0.3f);
+            m.setP(BuiltInMaximizer::ReleaseMs, 100.0f);
+
+            auto sig = makeSine(220.0, 0.5, 24000);      // -6 dB を +12 で押し上げる
+            m.processBlock(sig, emptyMidi);
+
+            const float ceil = juce::Decibels::decibelsToGain(-0.3f);
+            const float pk = peakOf(sig);
+            expect(pk <= ceil * 1.0005f, "driven output must never exceed the ceiling (brickwall)");
+            expect(pk > ceil * 0.9f, "output should be pushed up close to the ceiling (loudness gain)");
+            expect(m.getReductionDb() > 1.0f, "GR meter should show limiting when driven hard");
+        }
+
+        beginTest("Maximizer leaves quiet signal below ceiling unlimited");
+        {
+            BuiltInMaximizer m;
+            m.prepareToPlay(kSr, 12000);
+            m.setP(BuiltInMaximizer::DriveDb, 12.0f);
+            m.setP(BuiltInMaximizer::CeilingDb, 0.0f);
+            m.setP(BuiltInMaximizer::ReleaseMs, 100.0f);
+
+            const float driveGain = juce::Decibels::decibelsToGain(12.0f);
+            auto sig = makeSine(220.0, 0.05, 12000);     // -26 dB → +12 でも -14 dB (天井以下)
+            const double inRms = rmsTail(sig, 4000);
+            m.processBlock(sig, emptyMidi);
+            const double outRms = rmsTail(sig, 4000);     // 末尾 = lookahead 整定後
+            expect(std::abs(outRms - inRms * driveGain) < inRms * driveGain * 0.05,
+                   "below-ceiling signal should just get the clean drive gain");
+            expect(m.getReductionDb() < 0.5f, "no reduction when the driven signal stays under the ceiling");
+        }
+
+        beginTest("Maximizer state round-trips");
+        {
+            BuiltInMaximizer a;
+            a.setP(BuiltInMaximizer::DriveDb, 9.0f);
+            a.setP(BuiltInMaximizer::CeilingDb, -1.5f);
+            a.setP(BuiltInMaximizer::ReleaseMs, 240.0f);
+            juce::MemoryBlock mb;
+            a.getStateInformation(mb);
+            BuiltInMaximizer b;
+            b.setStateInformation(mb.getData(), (int) mb.getSize());
+            for (int i = 0; i < a.getParamCount(); ++i)
+                expect(std::abs(a.getP(i) - b.getP(i)) < 1.0e-3f, "param should round-trip");
+        }
+    }
+
     void testReverb()
     {
         beginTest("Reverb mix=0 is exact passthrough");
@@ -352,6 +425,7 @@ private:
             expect(BuiltInFactory::create("utawave.eq")      != nullptr, "eq id creates");
             expect(BuiltInFactory::create("utawave.comp")    != nullptr, "comp id creates");
             expect(BuiltInFactory::create("utawave.deesser") != nullptr, "deesser id creates");
+            expect(BuiltInFactory::create("utawave.maximizer") != nullptr, "maximizer id creates");
             expect(BuiltInFactory::create("utawave.reverb")  != nullptr, "reverb id creates");
             expect(BuiltInFactory::create("nope")            == nullptr, "unknown id is null");
         }

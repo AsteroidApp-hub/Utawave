@@ -34,7 +34,7 @@ BuiltInEQ::BuiltInEQ()
     addPreset(u8"ラジオ風",     { 220.0f, 200.0f, -6.0f,0.7f, 500.0f,  2.0f,1.5f, 1800.0f,  4.0f,1.5f, 4000.0f,  3.0f,1.5f,  8000.0f, -5.0f });
 }
 
-const juce::String BuiltInEQ::getName() const { return tr(u8"内蔵EQ"); }
+const juce::String BuiltInEQ::getName() const { return tr(u8"EQ"); }
 
 void BuiltInEQ::prepareToPlay(double sampleRate, int)
 {

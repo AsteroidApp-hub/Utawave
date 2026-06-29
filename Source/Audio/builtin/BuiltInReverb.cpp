@@ -20,7 +20,7 @@ BuiltInReverb::BuiltInReverb()
     addPreset(u8"薄く",     { 8.0f,  0.50f, 0.50f, 0.8f });
 }
 
-const juce::String BuiltInReverb::getName() const { return tr(u8"内蔵リバーブ"); }
+const juce::String BuiltInReverb::getName() const { return tr(u8"リバーブ"); }
 
 void BuiltInReverb::prepareToPlay(double sampleRate, int blockSize)
 {

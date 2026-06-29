@@ -58,6 +58,7 @@ private:
     juce::OwnedArray<juce::Label>  knobLabels;
     std::vector<int> knobParamIdx;
     int   graphH;
+    bool  showPresets { true };   // プリセットが 1 件も無いエフェクトでは上部のプリセット欄を隠す
     float smReductionDb { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModernEffectEditor)

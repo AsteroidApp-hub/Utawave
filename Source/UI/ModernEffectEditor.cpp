@@ -29,25 +29,29 @@ ModernEffectEditor::ModernEffectEditor(BuiltInEffect& f, std::vector<int> knobPa
 {
     setLookAndFeel(&laf);
 
-    presetLabel.setText(tr(u8"プリセット"), juce::dontSendNotification);
-    presetLabel.setColour(juce::Label::textColourId, AppColours::textDim);
-    presetLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(presetLabel);
-
     const auto& presets = fx.getPresets();
-    for (int i = 0; i < (int) presets.size(); ++i)
-        presetBox.addItem(tr(presets[(size_t) i].name), 100 + i);
-    presetBox.setTextWhenNothingSelected(tr(u8"選択..."));
-    presetBox.onChange = [this]
+    showPresets = ! presets.empty();
+    if (showPresets)
     {
-        const int idx = presetBox.getSelectedId() - 100;
-        if (idx < 0) return;
-        fx.applyPreset(idx);
-        for (int i = 0; i < knobs.size(); ++i)
-            knobs[i]->setValue((double) fx.getP(knobParamIdx[(size_t) i]), juce::dontSendNotification);
-        repaint();
-    };
-    addAndMakeVisible(presetBox);
+        presetLabel.setText(tr(u8"プリセット"), juce::dontSendNotification);
+        presetLabel.setColour(juce::Label::textColourId, AppColours::textDim);
+        presetLabel.setJustificationType(juce::Justification::centredRight);
+        addAndMakeVisible(presetLabel);
+
+        for (int i = 0; i < (int) presets.size(); ++i)
+            presetBox.addItem(tr(presets[(size_t) i].name), 100 + i);
+        presetBox.setTextWhenNothingSelected(tr(u8"選択..."));
+        presetBox.onChange = [this]
+        {
+            const int idx = presetBox.getSelectedId() - 100;
+            if (idx < 0) return;
+            fx.applyPreset(idx);
+            for (int i = 0; i < knobs.size(); ++i)
+                knobs[i]->setValue((double) fx.getP(knobParamIdx[(size_t) i]), juce::dontSendNotification);
+            repaint();
+        };
+        addAndMakeVisible(presetBox);
+    }
 
     for (int i = 0; i < (int) knobParamIdx.size(); ++i)
     {
@@ -80,7 +84,7 @@ ModernEffectEditor::ModernEffectEditor(BuiltInEffect& f, std::vector<int> knobPa
 
     const int cols = juce::jmax(1, (int) knobParamIdx.size());
     const int w = juce::jmax(440, kMargin * 2 + cols * kKnobW);
-    setSize(w, kTopH + graphH + kKnobRowH + kMargin * 2);
+    setSize(w, (showPresets ? kTopH : 0) + graphH + kKnobRowH + kMargin * 2);
     startTimerHz(30);
 }
 
@@ -134,9 +138,12 @@ void ModernEffectEditor::drawLevelBar(juce::Graphics& g, juce::Rectangle<float> 
 void ModernEffectEditor::resized()
 {
     auto area = getLocalBounds().reduced(kMargin, kMargin);
-    auto top = area.removeFromTop(kTopH);
-    presetBox.setBounds(top.removeFromRight(170).reduced(0, 4));
-    presetLabel.setBounds(top.removeFromRight(76).reduced(0, 4));
+    if (showPresets)
+    {
+        auto top = area.removeFromTop(kTopH);
+        presetBox.setBounds(top.removeFromRight(170).reduced(0, 4));
+        presetLabel.setBounds(top.removeFromRight(76).reduced(0, 4));
+    }
 
     auto knobRow = area.removeFromBottom(kKnobRowH);
     const int cols = juce::jmax(1, knobs.size());

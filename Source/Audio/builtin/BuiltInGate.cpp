@@ -21,7 +21,7 @@ BuiltInGate::BuiltInGate()
     addPreset(u8"ゆるめ",     { -55.0f, 30.0f, 10.0f, 300.0f, 400.0f });
 }
 
-const juce::String BuiltInGate::getName() const { return tr(u8"内蔵ゲート"); }
+const juce::String BuiltInGate::getName() const { return tr(u8"ゲート"); }
 
 void BuiltInGate::prepareToPlay(double sampleRate, int)
 {

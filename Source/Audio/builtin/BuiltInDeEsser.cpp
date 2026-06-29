@@ -20,7 +20,7 @@ BuiltInDeEsser::BuiltInDeEsser()
     addPreset(u8"サ行 低め",  { 5500.0f, -28.0f, 4.0f });
 }
 
-const juce::String BuiltInDeEsser::getName() const { return tr(u8"内蔵ディエッサー"); }
+const juce::String BuiltInDeEsser::getName() const { return tr(u8"ディエッサー"); }
 
 int BuiltInDeEsser::readAnalyzerSamples(float* dest, int maxN) const
 {

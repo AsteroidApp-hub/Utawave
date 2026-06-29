@@ -6,6 +6,7 @@
 #include "BuiltInCompressor.h"
 #include "BuiltInDeEsser.h"
 #include "BuiltInGate.h"
+#include "BuiltInMaximizer.h"
 #include "BuiltInReverb.h"
 #include "../../Localisation.h"
 
@@ -24,11 +25,12 @@ namespace
     // 並び順 = メニューの並び順。エフェクトを増やすときはここに 1 行足す。
     const Entry kEntries[] =
     {
-        { "utawave.eq",      u8"内蔵EQ",         [] { return std::unique_ptr<BuiltInEffect>(new BuiltInEQ()); } },
-        { "utawave.comp",    u8"内蔵コンプ",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInCompressor()); } },
-        { "utawave.deesser", u8"内蔵ディエッサー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDeEsser()); } },
-        { "utawave.gate",    u8"内蔵ゲート",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInGate()); } },
-        { "utawave.reverb",  u8"内蔵リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
+        { "utawave.eq",      u8"EQ",         [] { return std::unique_ptr<BuiltInEffect>(new BuiltInEQ()); } },
+        { "utawave.comp",    u8"コンプ",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInCompressor()); } },
+        { "utawave.deesser", u8"ディエッサー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDeEsser()); } },
+        { "utawave.gate",    u8"ゲート",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInGate()); } },
+        { "utawave.maximizer", u8"マキシマイザー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInMaximizer()); } },
+        { "utawave.reverb",  u8"リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
     };
     constexpr int kNumEntries = (int) (sizeof(kEntries) / sizeof(kEntries[0]));
 }
