@@ -11,7 +11,12 @@ public:
     TrackManager(juce::AudioFormatManager& fmt);
 
     // insertAfter >= 0 ならそのインデックスの直後に挿入、-1 (既定) なら末尾に追加。
-    Track* addTrack(const juce::String& name = {}, bool stereo = false, int insertAfter = -1);
+    // midi=true は onChanged() (= ヘッダビュー再構築) が走る前に setMidiTrack(true) する。
+    // ヘッダビューは構築時に isMidiTrack() を読んで MIDI/音声のコントロールを作り分けるため、
+    // 追加後に setMidiTrack すると最後に追加したトラックのビューが音声用のまま残る
+    // (パネルの高速パスは集合不変だとビューを再構築せず再利用するため)。
+    Track* addTrack(const juce::String& name = {}, bool stereo = false, int insertAfter = -1,
+                    bool midi = false);
     Track* addClickTrack();
     bool   hasClickTrack() const;
     Track* getClickTrack() const;   // CLICK トラック (無ければ nullptr)

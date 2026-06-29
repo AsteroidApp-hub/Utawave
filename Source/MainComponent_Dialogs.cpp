@@ -242,9 +242,8 @@ void MainComponent::importMidiFromFile(const juce::File& file, double dropTimeOv
             const auto& src = sharedResult->tracks[(size_t)trackIdx];
 
             auto* track = trackManager.addTrack(src.name.isNotEmpty() ? src.name : ("MIDI " + juce::String(trackIdx + 1)),
-                                                /*stereo=*/true);
+                                                /*stereo=*/true, /*insertAfter=*/-1, /*midi=*/true);
             if (!track) continue;
-            track->setMidiTrack(true);
             // MIDI トラックの内蔵シンセ出力は大きめなので、デフォルトで -14 dB に設定
             track->setVolume(-14.0f);
 

@@ -9,7 +9,7 @@ TrackManager::TrackManager(juce::AudioFormatManager& fmt)
     : formatManager(fmt)
 {}
 
-Track* TrackManager::addTrack(const juce::String& name, bool stereo, int insertAfter)
+Track* TrackManager::addTrack(const juce::String& name, bool stereo, int insertAfter, bool midi)
 {
     juce::String n = name;
     if (n.isEmpty())
@@ -39,6 +39,8 @@ Track* TrackManager::addTrack(const juce::String& name, bool stereo, int insertA
         if (t->isInsertSlotsVisible()) { insVisible = true; break; }
     track->setInsertSlotsVisible(insVisible);
     Track* ptr = track.get();
+    // ヘッダビューは onChanged() で isMidiTrack() を読んで作られるので、その前に確定させる。
+    if (midi) ptr->setMidiTrack(true);
     if (insertAfter >= 0 && insertAfter < (int) tracks.size())
         tracks.insert(tracks.begin() + insertAfter + 1, std::move(track));
     else

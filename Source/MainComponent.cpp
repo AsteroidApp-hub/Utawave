@@ -1300,9 +1300,8 @@ void MainComponent::addMidiTrack()
             ++midiCount;
 
     auto* track = trackManager.addTrack("MIDI " + juce::String(midiCount + 1), /*stereo=*/true,
-                                        newTrackInsertAfter());
+                                        newTrackInsertAfter(), /*midi=*/true);
     if (!track) return;
-    track->setMidiTrack(true);
     track->setVolume(-14.0f);  // 内蔵シンセ出力は大きめなので控えめに
 
     // クリップは空のまま作らない。ユーザがタイムライン上で
