@@ -141,29 +141,40 @@ int TrackManager::indexOf(const Track* t) const
     return -1;
 }
 
-Track* TrackManager::duplicateTrack(int sourceIdx)
+Track* TrackManager::duplicateTrack(int sourceIdx, bool includeTakeLanes)
 {
     if (sourceIdx < 0 || sourceIdx >= (int) tracks.size()) return nullptr;
     auto* src = tracks[(size_t) sourceIdx].get();
     if (!src || src->isClickTrack()) return nullptr;  // Click は複製不可
 
-    // 名前: "(コピー)" を付与。同名が既にあれば連番
-    auto baseName = src->getName() + tr(u8" (コピー)");
-    auto nameUnique = [this](juce::String s) -> juce::String
+    // 名前: 末尾に連番 "(1)" "(2)" … を付与 (空きの最小番号)。
+    // 既に "名前 (N)" 形式なら末尾の番号を剥がして基底名にし、番号だけ繰り上げる。
+    juce::String baseName = src->getName();
     {
-        int n = 1;
-        juce::String candidate = s;
-        while (true)
+        auto trimmed = baseName.trimEnd();
+        if (trimmed.endsWithChar (')'))
         {
+            auto open = trimmed.lastIndexOfChar ('(');
+            if (open > 0 && trimmed[open - 1] == ' ')
+            {
+                auto inner = trimmed.substring (open + 1, trimmed.length() - 1);
+                if (inner.isNotEmpty() && inner.containsOnly ("0123456789"))
+                    baseName = trimmed.substring (0, open).trimEnd();
+            }
+        }
+    }
+    auto nameUnique = [this, &baseName]() -> juce::String
+    {
+        for (int n = 1; ; ++n)
+        {
+            juce::String candidate = baseName + " (" + juce::String(n) + ")";
             bool dup = false;
             for (auto& t : tracks)
                 if (t->getName() == candidate) { dup = true; break; }
             if (!dup) return candidate;
-            ++n;
-            candidate = s + " " + juce::String(n);
         }
     };
-    auto dst = std::make_unique<Track>(nameUnique(baseName), formatManager, thumbnailCache);
+    auto dst = std::make_unique<Track>(nameUnique(), formatManager, thumbnailCache);
 
     // 基本プロパティをコピー (録音アーム・ソロは混乱を避けるため引き継がない)
     dst->setColour          (src->getColour());
@@ -187,8 +198,10 @@ Track* TrackManager::duplicateTrack(int sourceIdx)
     dst->setInsertSlotsVisible(src->isInsertSlotsVisible());
     dst->setLanesCollapsed  (src->isLanesCollapsed());
 
-    // オーディオクリップ: 全レーンの全クリップをコピー
-    for (int li = 0; li < src->getLaneCount(); ++li)
+    // オーディオクリップ: 全レーンの全クリップをコピー。
+    // includeTakeLanes=false なら Lane 0 (= メインレーン) のみで、テイクレーンは複製しない。
+    const int laneLimit = includeTakeLanes ? src->getLaneCount() : 1;
+    for (int li = 0; li < laneLimit; ++li)
     {
         auto* srcLane = src->getLane(li);
         if (!srcLane) continue;

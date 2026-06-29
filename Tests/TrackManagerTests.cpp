@@ -31,6 +31,7 @@ public:
         testClickAndMidiQueries();
         testDuplicateBasic();
         testDuplicateMidiDeepCopy();
+        testDuplicateExcludeTakeLanes();
         testDuplicateGuardsAndUniqueName();
         testAudioFolderSignature();
         testExtractInsertIndexOf();
@@ -112,8 +113,8 @@ public:
         auto* dst = tm.duplicateTrack(0);
         expect(dst != nullptr, "duplicate returns a track");
         expect(tm.getTrackCount() == 2 && tm.getTrack(1) == dst, "inserted right after source");
-        expect(dst->getName() == juce::String("Vocals") + tr(u8" (コピー)"),
-               "name is source + copy suffix");
+        expect(dst->getName() == juce::String("Vocals (1)"),
+               "name is source + numbered suffix");
 
         expect(juce::approximatelyEqual(dst->getVolume(), -6.0f), "volume copied");
         expect(juce::approximatelyEqual(dst->getPan(), 0.3f),     "pan copied");
@@ -141,6 +142,33 @@ public:
             expect((int) dc->getGainPoints().size() == 1, "gain points deep-copied (count)");
         }
         expect(dst->getLane(0)->soloed.load(), "lane soloed copied");
+    }
+
+    // ── includeTakeLanes=false (Option 押下複製): Lane 0 のみコピーしテイクレーンは複製しない ──
+    void testDuplicateExcludeTakeLanes()
+    {
+        beginTest("duplicateTrack(includeTakeLanes=false) copies only Lane 0, drops take lanes");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        auto* src = tm.addTrack("Vocals");
+        juce::File dummy("/tmp/utawave_dummy_clip.wav");
+        src->addClip(dummy, 0.0, 1.0);                 // Lane 0
+        src->ensureLane(1)->addClip(dummy, 0.0, 1.0,   // Take lane (Lane 1)
+                                    fmt, tm.getThumbnailCache());
+        src->ensureLane(2)->addClip(dummy, 0.0, 1.0,   // Take lane (Lane 2)
+                                    fmt, tm.getThumbnailCache());
+        expect(src->getLaneCount() == 3, "source has lane 0 + 2 take lanes");
+
+        // includeTakeLanes=false → テイクレーンを複製しない
+        auto* d0 = tm.duplicateTrack(0, false);
+        expect(d0 != nullptr, "duplicate (exclude takes) returns a track");
+        expect(d0->getLaneCount() == 1, "only Lane 0 is present (take lanes dropped)");
+        expect(d0->getLane(0) != nullptr && (int) d0->getLane(0)->clips.size() == 1,
+               "Lane 0 clip copied");
+
+        // 既定 (includeTakeLanes=true) は従来どおりテイクレーンも複製
+        auto* d1 = tm.duplicateTrack(0, true);
+        expect(d1 != nullptr && d1->getLaneCount() == 3, "default keeps take lanes");
     }
 
     // ── MIDI トラックの深いコピー: synth/移調・MIDI クリップ ch・シーケンス ──
@@ -191,9 +219,9 @@ public:
         auto* d1 = tm.duplicateTrack(1);
         auto* d2 = tm.duplicateTrack(1);
         expect(d1 != nullptr && d2 != nullptr, "two duplicates created");
-        expect(d1->getName() == juce::String("Vocals") + tr(u8" (コピー)"), "first copy name");
+        expect(d1->getName() == juce::String("Vocals (1)"), "first copy name");
+        expect(d2->getName() == juce::String("Vocals (2)"), "second copy gets next number");
         expect(d2->getName() != d1->getName(), "second copy gets a distinct (numbered) name");
-        expect(d2->getName().startsWith(d1->getName()), "second copy name extends the first");
     }
 
     // ── audioFolderSignature: 拡張子フィルタ・内容変化で変化・非ディレクトリは空・決定論的 ──

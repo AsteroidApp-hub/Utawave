@@ -275,7 +275,8 @@ private:
     // ツールバーの GRID 表示を appSettings.snapMode に同期する (ラベル + 点灯)。
     // プロジェクト読込後にも呼ぶ (スナップは効くのに表示が Off のままになるのを防ぐ)
     void syncSnapLabelToSettings();
-    void duplicateTrack(int sourceTrackIdx);
+    // includeTakeLanes=false (Option 押下複製) なら Lane 0 のみ複製しテイクリストは複製しない。
+    void duplicateTrack(int sourceTrackIdx, bool includeTakeLanes = true);
     // トラック追加/複製を Undo 可能にする (t は追加済みであること。最初の perform は no-op)。
     // newTransaction=false で現在のトランザクションに積む (MIDI インポートのように複数
     // トラック + テンポ/拍子を 1 回の Undo で戻したい場合)。

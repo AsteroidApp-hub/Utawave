@@ -31,8 +31,9 @@ public:
     bool   reorderTo(const std::vector<Track*>& desired);
     // sourceIdx のトラックを複製し、すぐ後ろに挿入する。
     // クリップ・ゲイン/パン/リバーブ送り・色・MIDI 設定までコピーする。
+    // includeTakeLanes=false なら Lane 0 のみコピーし、テイクレーン (Lane 1 以降) は複製しない。
     // プラグインチェーンは AudioPluginInstance の生成が非同期なので別途呼び出し側でクローンする。
-    Track* duplicateTrack(int sourceIdx);
+    Track* duplicateTrack(int sourceIdx, bool includeTakeLanes = true);
     int    getTrackCount() const { return (int)tracks.size(); }
     Track* getTrack(int i)      { return tracks[(size_t)i].get(); }
     const Track* getTrack(int i) const { return tracks[(size_t)i].get(); }

@@ -511,11 +511,11 @@ void TrackHeaderPanel::refresh()
         };
         // 削除メニューのラベルに「選択中の N 本」を出すため、削除対象数を返す
         view->getDeleteCount = [this, idx] { return deleteScopeCount(idx); };
-        view->onDuplicateRequest = [this, idx]
+        view->onDuplicateRequest = [this, idx](bool includeTakeLanes)
         {
             // プラグインクローンは MainComponent 側で行う必要があるため必ず委譲
             if (onTrackDuplicateRequest)
-                onTrackDuplicateRequest(idx);
+                onTrackDuplicateRequest(idx, includeTakeLanes);
             if (onTrackChanged) onTrackChanged();
         };
         view->onLanePromoteRequest   = [this, idx](int lane) { if (onLanePromoteRequest)  onLanePromoteRequest(idx, lane); };

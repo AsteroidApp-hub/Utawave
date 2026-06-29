@@ -140,7 +140,9 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
                               + tr(u8" LUFS に合わせる"));
         }
         m.addSeparator();
-        m.addItem(201, tr(u8"トラックを複製"));
+        // 通常複製はテイクリストごと複製。Option (Win は Alt) 押下時は Lane 0 のみ複製する。
+        m.addItem(201, tr(u8"トラックを複製")
+                          + platformShortcutText(tr(u8" (Option: TList を除く)")));
         // 複数選択中はまとめて削除できることを示す (選択中の N 本)
         const int delCount = getDeleteCount ? getDeleteCount() : 1;
         m.addItem(200, delCount > 1
@@ -168,7 +170,9 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
                     if (onDeleteRequest) onDeleteRequest();
                 }
                 else if (result == 201) {
-                    if (onDuplicateRequest) onDuplicateRequest();
+                    // Option (Mac) / Alt (Win) 押下中はテイクリストを複製しない (Lane 0 のみ)
+                    const bool excludeTakes = juce::ModifierKeys::getCurrentModifiers().isAltDown();
+                    if (onDuplicateRequest) onDuplicateRequest(!excludeTakes);
                 }
                 else if (result >= 400 && result < 500) {
                     if (onPluginEditRequest) onPluginEditRequest(result - 400);

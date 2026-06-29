@@ -168,9 +168,9 @@ MainComponent::MainComponent()
     {
         deleteTracks(indices);
     };
-    trackHeaderPanel.onTrackDuplicateRequest = [this](int trackIdx)
+    trackHeaderPanel.onTrackDuplicateRequest = [this](int trackIdx, bool includeTakeLanes)
     {
-        duplicateTrack(trackIdx);
+        duplicateTrack(trackIdx, includeTakeLanes);
     };
     // トラック並べ替えの Undo (並べ替え自体は performReorder が実施済み)
     trackHeaderPanel.onTracksReordered = [this](std::vector<Track*> before, std::vector<Track*> after,
@@ -1812,13 +1812,13 @@ void MainComponent::syncSnapLabelToSettings()
         toolbar.setSnapLabel(labels[mode], mode != 0);
 }
 
-void MainComponent::duplicateTrack(int sourceTrackIdx)
+void MainComponent::duplicateTrack(int sourceTrackIdx, bool includeTakeLanes)
 {
     auto* src = trackManager.getTrack(sourceTrackIdx);
     if (!src || src->isClickTrack()) return;
 
     // クリップ・設定をコピー (戻り値はすぐ後ろに挿入された新しいトラック)
-    auto* dst = trackManager.duplicateTrack(sourceTrackIdx);
+    auto* dst = trackManager.duplicateTrack(sourceTrackIdx, includeTakeLanes);
     if (!dst) return;
 
     // プラグインチェーンをクローンする:

@@ -63,7 +63,7 @@ public:
     std::function<void(int, int, int, int, bool)> onPluginDropAcrossTracks;
     // 削除する trackIdx 群（複数選択をまとめて削除。プラグイン後処理・確認は呼び出し側でやる）
     std::function<void(const std::vector<int>&)> onTracksDeleteRequest;
-    std::function<void(int)> onTrackDuplicateRequest;    // trackIdx（プラグインも含めて複製）
+    std::function<void(int, bool)> onTrackDuplicateRequest;  // trackIdx, includeTakeLanes（プラグインも含めて複製。false=Lane 0 のみ）
     // 並べ替え完了通知 (Undo 用): 変更前/変更後のトラック順 + 移動した (選択中の) トラック群
     // (Track* 列)。並べ替えは performReorder が既に実施済みで、呼び出し側は履歴に積むだけ。
     // 移動トラック群は undo/redo 後に identity で選択を貼り直すのに使う (選択状態を維持)。

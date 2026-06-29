@@ -59,7 +59,7 @@ public:
     std::function<void(juce::ModifierKeys)> onSelectedWithMods;
     std::function<void()>      onDeleteRequest;        // トラック削除リクエスト
     std::function<int()>       getDeleteCount;         // 削除メニューで実際に消える本数 (複数選択時の表示用)
-    std::function<void()>      onDuplicateRequest;     // トラック複製リクエスト
+    std::function<void(bool)>  onDuplicateRequest;     // トラック複製リクエスト (includeTakeLanes: false=Lane 0 のみ)
     // テイクレーン (laneIndex>0) の ↑ ボタン: 指定レーンを Lane 0 へ採用
     std::function<void(int)>   onLanePromoteRequest;
     // ↑ ボタンの活性判定 (laneIndex)。未設定時は非活性扱い。
