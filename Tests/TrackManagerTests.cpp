@@ -28,6 +28,7 @@ public:
     {
         testColourCycle();
         testAutoNaming();
+        testAddTrackInsertAfter();
         testClickAndMidiQueries();
         testDuplicateBasic();
         testDuplicateMidiDeepCopy();
@@ -69,6 +70,31 @@ public:
         expect(tm.addTrack("Track 5")->getName() == "Track 5", "explicit name is respected");
         expect(tm.addTrack()->getName() == "Track 6", "next empty -> max(5) + 1 = Track 6");
         expect(tm.addTrack("Vocals")->getName() == "Vocals", "non-Track name is respected");
+    }
+
+    // ── addTrack(insertAfter): 指定インデックスの直後に挿入・-1/範囲外は末尾 ──
+    void testAddTrackInsertAfter()
+    {
+        beginTest("addTrack inserts after a given index; -1/out-of-range appends");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        auto* a = tm.addTrack("A");
+        auto* b = tm.addTrack("B");
+        auto* c = tm.addTrack("C");                      // [A, B, C]
+        juce::ignoreUnused(a, c);
+
+        // index 1 (B) の直後へ挿入 → [A, B, X, C]
+        auto* x = tm.addTrack("X", false, /*insertAfter=*/1);
+        expect(tm.indexOf(x) == 2, "inserted right after index 1");
+        expect(tm.indexOf(b) == 1 && tm.indexOf(c) == 3, "following tracks shift down");
+
+        // -1 は末尾 → [A, B, X, C, Y]
+        auto* y = tm.addTrack("Y", false, /*insertAfter=*/-1);
+        expect(tm.indexOf(y) == 4, "insertAfter -1 appends at the end");
+
+        // 範囲外も末尾 → [..., Z]
+        auto* z = tm.addTrack("Z", false, /*insertAfter=*/99);
+        expect(tm.indexOf(z) == 5, "out-of-range insertAfter appends at the end");
     }
 
     // ── hasClickTrack / addClickTrack (1 本のみ) / hasMidiTrack ──

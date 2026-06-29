@@ -10,7 +10,8 @@ class TrackManager
 public:
     TrackManager(juce::AudioFormatManager& fmt);
 
-    Track* addTrack(const juce::String& name = {}, bool stereo = false);
+    // insertAfter >= 0 ならそのインデックスの直後に挿入、-1 (既定) なら末尾に追加。
+    Track* addTrack(const juce::String& name = {}, bool stereo = false, int insertAfter = -1);
     Track* addClickTrack();
     bool   hasClickTrack() const;
     Track* getClickTrack() const;   // CLICK トラック (無ければ nullptr)

@@ -88,8 +88,8 @@ void TrackHeaderPanel::showAddTrackMenu()
               !trackManager.hasClickTrack());
     m.showMenuAsync(juce::PopupMenu::Options(),
         [this](int result) {
-            if (result == 1 && onAddTrackWithMode) onAddTrackWithMode(false);
-            else if (result == 2 && onAddTrackWithMode) onAddTrackWithMode(true);
+            if (result == 1 && onAddTrackWithMode) onAddTrackWithMode(false, /*appendAtBottom=*/false);
+            else if (result == 2 && onAddTrackWithMode) onAddTrackWithMode(true, /*appendAtBottom=*/false);
             else if (result == 4 && onAddMidiTrack) onAddMidiTrack();
             else if (result == 3 && onAddClickTrack) onAddClickTrack();
         });
@@ -330,7 +330,9 @@ void TrackHeaderPanel::mouseDoubleClick(const juce::MouseEvent& e)
     int addBtnY = getHeight() - 34;
     if (e.y > tracksBottom && e.y < addBtnY)
     {
-        if (onAddTrackWithMode) onAddTrackWithMode(false);
+        // ダブルクリックは一番下の空き領域で行うため、選択に依らず末尾へ追加する
+        // (クリックした位置のすぐ上に追加され、追加されたことを確認しやすい)
+        if (onAddTrackWithMode) onAddTrackWithMode(false, /*appendAtBottom=*/true);
     }
 }
 

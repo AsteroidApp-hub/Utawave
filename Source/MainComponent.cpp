@@ -14,6 +14,7 @@
 #include "UI/PianoRollEditor.h"
 #include "MIDI/MidiImporter.h"
 #include "MIDI/MidiImportDialog.h"
+#include <algorithm>
 
 void MainComponent::applyTooltipVisibility()
 {
@@ -109,8 +110,9 @@ MainComponent::MainComponent()
     trackManager.onChanged = refreshTracks;
 
     trackHeaderPanel.onAddTrack            = [this] { addTrack(); markProjectDirty(); };
-    trackHeaderPanel.onAddTrackWithMode    = [this](bool stereo) {
-        pushTrackAddUndo(trackManager.addTrack({}, stereo));
+    trackHeaderPanel.onAddTrackWithMode    = [this](bool stereo, bool appendAtBottom) {
+        const int insertAfter = appendAtBottom ? -1 : newTrackInsertAfter();
+        pushTrackAddUndo(trackManager.addTrack({}, stereo, insertAfter));
         markProjectDirty();
     };
     trackHeaderPanel.onAddMidiTrack        = [this] { addMidiTrack(); };
@@ -1213,9 +1215,16 @@ void MainComponent::updatePlayheadScrub (double timestampSec)
         seekTo (audioEngine.getCurrentPositionSeconds() + dir * scrubSpeed * dt);  // seekTo が 0 クランプ + 全同期
 }
 
+int MainComponent::newTrackInsertAfter() const
+{
+    const auto& sel = trackHeaderPanel.getSelectedTrackIndices();
+    if (sel.empty()) return -1;                 // 未選択 → 末尾
+    return *std::max_element(sel.begin(), sel.end());  // 選択の最下段の直後へ
+}
+
 void MainComponent::addTrack()
 {
-    pushTrackAddUndo(trackManager.addTrack());
+    pushTrackAddUndo(trackManager.addTrack({}, /*stereo=*/false, newTrackInsertAfter()));
     markProjectDirty();
 }
 
@@ -1290,7 +1299,8 @@ void MainComponent::addMidiTrack()
         if (auto* t = trackManager.getTrack(i); t && t->isMidiTrack())
             ++midiCount;
 
-    auto* track = trackManager.addTrack("MIDI " + juce::String(midiCount + 1), /*stereo=*/true);
+    auto* track = trackManager.addTrack("MIDI " + juce::String(midiCount + 1), /*stereo=*/true,
+                                        newTrackInsertAfter());
     if (!track) return;
     track->setMidiTrack(true);
     track->setVolume(-14.0f);  // 内蔵シンセ出力は大きめなので控えめに

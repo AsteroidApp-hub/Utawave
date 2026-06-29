@@ -48,7 +48,8 @@ public:
     std::function<float(int)> onGetTrackOutVUR;
 
     std::function<void()>     onAddTrack;          // モノ（既定）
-    std::function<void(bool)> onAddTrackWithMode;  // false=mono, true=stereo
+    // (stereo, appendAtBottom): appendAtBottom=true で選択に依らず末尾へ追加 (ダブルクリック用)
+    std::function<void(bool, bool)> onAddTrackWithMode;  // false=mono, true=stereo
     std::function<void()>     onAddMidiTrack;      // 空の MIDI トラック（ハモリ/ガイド打ち込み用）
     std::function<void()>     onAddClickTrack;
     std::function<void()>     onTrackChanged;

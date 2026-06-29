@@ -9,7 +9,7 @@ TrackManager::TrackManager(juce::AudioFormatManager& fmt)
     : formatManager(fmt)
 {}
 
-Track* TrackManager::addTrack(const juce::String& name, bool stereo)
+Track* TrackManager::addTrack(const juce::String& name, bool stereo, int insertAfter)
 {
     juce::String n = name;
     if (n.isEmpty())
@@ -38,9 +38,13 @@ Track* TrackManager::addTrack(const juce::String& name, bool stereo)
     for (auto& t : tracks)
         if (t->isInsertSlotsVisible()) { insVisible = true; break; }
     track->setInsertSlotsVisible(insVisible);
-    tracks.push_back(std::move(track));
+    Track* ptr = track.get();
+    if (insertAfter >= 0 && insertAfter < (int) tracks.size())
+        tracks.insert(tracks.begin() + insertAfter + 1, std::move(track));
+    else
+        tracks.push_back(std::move(track));
     if (onChanged) onChanged();
-    return tracks.back().get();
+    return ptr;
 }
 
 Track* TrackManager::addClickTrack()

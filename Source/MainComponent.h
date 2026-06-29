@@ -277,6 +277,9 @@ private:
     void syncSnapLabelToSettings();
     // includeTakeLanes=false (Option 押下複製) なら Lane 0 のみ複製しテイクリストは複製しない。
     void duplicateTrack(int sourceTrackIdx, bool includeTakeLanes = true);
+    // 「+」ボタンで新規トラックを追加する位置: 選択中トラックがあればその直後 (最大選択 index)、
+    // 無ければ -1 (= 末尾) を返す。
+    int newTrackInsertAfter() const;
     // トラック追加/複製を Undo 可能にする (t は追加済みであること。最初の perform は no-op)。
     // newTransaction=false で現在のトランザクションに積む (MIDI インポートのように複数
     // トラック + テンポ/拍子を 1 回の Undo で戻したい場合)。
