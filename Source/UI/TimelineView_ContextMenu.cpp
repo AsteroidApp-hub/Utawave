@@ -31,15 +31,12 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
     juce::PopupMenu m;
     // J ラムダはこの関数の後段で定義されているため、ここでローカルに用意する
 
-    // Take レーン (laneIdx > 0) のクリップ → 最上段に「このテイクを使う」
-    const bool isTakeLane = (rcRef.laneIdx > 0);
-    if (isTakeLane)
-    {
-        // 注意: 320 は「クロスフェードを描く」で使用済み。混同すると採用ではなく
-        // クロスフェードが走ってしまうため、別 ID (321) を使う。
-        m.addItem(321, tr(u8"このテイクを使う"));
-        m.addSeparator();
-    }
+    // Take レーン (laneIdx > 0) のクリップ → 右クリックメニューからの「このテイクを使う」(ID 321) は
+    // 一時的に非表示にしている。「選択範囲 + 波形クリップを選択中」にこのメニューから採用すると、
+    // 採用自体と Undo 記録 (LaneSnapshotAction) はデータ上正しく行われるのに、まれに Undo しても
+    // 見た目が戻らない (再現条件が不安定) 不具合があったため。テイク採用はトラックヘッダの ↑ ボタンと
+    // Shift+↑ ショートカット (どちらも promoteTakeLane 経由・この症状が出ない) に一本化する。
+    // 原因を特定できたら m.addItem(321, ...) を復活させる (result==321 のハンドラは残してある)。
 
     // 色変更サブメニュー
     juce::PopupMenu colourMenu;
