@@ -238,6 +238,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testDeferredDestructionRebuild();
         testRecordingLatencyComp();
         testRecordingWriteGate();
+        testLoopWrapFromOutside();
         testMonitorThroughInserts();
         testDiskStreamingDeterminism();
         testMulticoreDeterminism();
@@ -636,6 +637,49 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         tw.reset();
         bg.stopThread(2000);
         expect(wav.existsAsFile() && wav.getSize() > 0, "recorded file has data");
+    }
+
+    void testLoopWrapFromOutside()
+    {
+        beginTest("loop: starting past loopEnd plays forward (no yank into loop)");
+        // 回帰テスト: ルーラーでループ範囲を設定し、再生バーがループ末尾より後ろにある状態で
+        // 再生すると、最初のブロックで newPos >= loopEnd が成立して fmod でループ範囲内へ
+        // 引き戻されていた (再生位置が全然違う所から鳴るバグ)。ラップは「末尾を下から跨いだ」
+        // 時だけにする修正の担保。位置の前進だけ見ればよいのでクリップは無しでよい。
+        const double blockSecs = (double)kBlock / kSR;
+        const double ls = 0.3, le = 0.8;
+
+        // ── A: ループ末尾より後ろ (1.2) から再生 → ループ内へ引き戻されず前進する ──
+        {
+            Scene s;
+            s.start();
+            s.engine.setLoopRange(ls, le, true);
+            const double startPos = 1.2;          // loopEnd(0.8) より後ろ
+            s.engine.setPosition(startPos);
+            s.engine.play();
+            const int blocks = 20;                // ~0.21s
+            runBlocks(s.engine, blocks);
+            const double pos = s.engine.getCurrentPositionSeconds();
+            // 引き戻されていれば pos は [0.3, 0.8) に入る。修正後は startPos から前進し続ける。
+            const double expected = startPos + blocks * blockSecs;
+            expectWithinAbsoluteError(pos, expected, 2.0 * blockSecs);
+            expect(pos > le, "position stays past loopEnd (not wrapped into the loop)");
+        }
+
+        // ── B: ループ内 (末尾手前) から再生 → 末尾を跨いだら正しくラップする (通常動作不変) ──
+        {
+            Scene s;
+            s.start();
+            s.engine.setLoopRange(ls, le, true);
+            const double startPos = 0.78;         // loopEnd(0.8) の手前 = 跨いでラップするはず
+            s.engine.setPosition(startPos);
+            s.engine.play();
+            const int blocks = 20;                // 末尾を 1 回以上跨ぐのに十分
+            runBlocks(s.engine, blocks);
+            const double pos = s.engine.getCurrentPositionSeconds();
+            expect(pos >= ls && pos < le, "position wrapped back inside [loopStart, loopEnd)");
+            expect(pos < startPos, "position is behind the start (proves it wrapped)");
+        }
     }
 
     // 入力モニターの返しがトラックの INS チェーンを尊重すること (Phase A の回帰テスト)。
