@@ -108,6 +108,8 @@ public:
         testTempoChangeRoundTrip();
         testOverwriteExistingFile();
         testImporterDirectSmf();
+        testImporterTrailingChunks();
+        testImporterChannelSplit();
         testImporterMissingFile();
         testHasMidiTrackPredicate();
     }
@@ -631,6 +633,132 @@ public:
         // 240tick @ 480ppq = 0.5 quarter; 100BPM -> 0.3s, 尺も 0.3s
         expectWithinAbsoluteError(notes[0].start, 0.3, 0.01, "note start 0.3s");
         expectWithinAbsoluteError(notes[0].dur,   0.3, 0.01, "note dur 0.3s");
+    }
+
+    // ── importer: 末尾に独自チャンク (Yamaha XF の XFIH/XFKM 等) を持つ SMF を救済する ──
+    // 標準トラックの後に未知チャンクが付くと JUCE の readFrom は余剰バイトを嫌って false を
+    // 返す。MidiImporter は MThd + MTrk だけを抽出し直して読み込めること (回帰テスト)。
+    void testImporterTrailingChunks()
+    {
+        beginTest("importer: SMF with trailing XF chunks (XFIH/XFKM) is recovered");
+
+        // 正常な Type 0 SMF を 1 トラックで作る
+        juce::MidiFile mf;
+        mf.setTicksPerQuarterNote(480);
+        juce::MidiMessageSequence seq;
+        seq.addEvent(juce::MidiMessage::tempoMetaEvent(500000), 0.0);   // 120 BPM
+        seq.addEvent(juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0.0);
+        seq.addEvent(juce::MidiMessage::noteOff(1, 60),                    480.0);
+        mf.addTrack(seq);
+
+        juce::MemoryBlock smf;
+        {
+            juce::MemoryOutputStream os(smf, false);
+            expect(mf.writeTo(os), "writeTo ok");
+        }
+
+        // 末尾に Yamaha XF を模した独自チャンク (XFIH / XFKM) を付ける
+        auto appendChunk = [](juce::MemoryBlock& mb, const char* id, int len)
+        {
+            mb.append(id, 4);
+            const juce::uint8 b[4] = { (juce::uint8)(len >> 24), (juce::uint8)(len >> 16),
+                                       (juce::uint8)(len >> 8),  (juce::uint8) len };
+            mb.append(b, 4);
+            std::vector<char> body((size_t) len, 0);
+            mb.append(body.data(), (size_t) len);
+        };
+        appendChunk(smf, "XFIH", 16);
+        appendChunk(smf, "XFKM", 32);
+
+        auto f = outFile("trailing_xf.mid");
+        f.deleteFile();
+        {
+            juce::FileOutputStream os(f);
+            expect(os.openedOk(), "open output stream");
+            os.write(smf.getData(), smf.getSize());
+            os.flush();
+        }
+
+        // 素の JUCE では末尾チャンクのせいで失敗することを確認 (前提条件)
+        {
+            juce::FileInputStream is(f);
+            juce::MidiFile plain;
+            expect(! plain.readFrom(is), "raw JUCE readFrom fails on trailing chunks");
+        }
+
+        // MidiImporter は救済して読み込めること
+        auto imp = MidiImporter::load(f);
+        expect(imp.ok, "import recovers despite trailing chunks");
+        expectEquals((int) imp.tracks.size(), 1, "one note track");
+        expectWithinAbsoluteError(imp.initialBpm, 120.0, 0.05, "120 BPM");
+        if (! imp.tracks.empty())
+        {
+            auto notes = extractNotes(imp.tracks[0]);
+            expectEquals((int) notes.size(), 1, "one note");
+            if (! notes.empty())
+                expectEquals(notes[0].pitch, 60, "pitch 60");
+        }
+    }
+
+    // ── importer: 1 トラックに複数チャンネルがある SMF (Type 0 等) をチャンネル別に分割する ──
+    // Type 0 のカラオケ MIDI は全パートが 1 MTrk に同居する。各 MIDI チャンネルを独立した
+    // トラックへ割り当て、正しいチャンネルルーティング + 楽器名で取り込めること (回帰テスト)。
+    void testImporterChannelSplit()
+    {
+        beginTest("importer: multi-channel single track (Type 0) splits per channel");
+
+        juce::MidiFile mf;
+        mf.setTicksPerQuarterNote(480);
+
+        // 1 つの MTrk に 3 チャンネル分のノートを入れる (ベース/ドラム/オーボエ)
+        juce::MidiMessageSequence seq;
+        seq.addEvent(juce::MidiMessage::tempoMetaEvent(500000), 0.0);  // 120 BPM
+        // ch1: program 33 (Electric Bass finger)
+        seq.addEvent(juce::MidiMessage::programChange(1, 33), 0.0);
+        seq.addEvent(juce::MidiMessage::noteOn (1, 40, (juce::uint8) 100), 0.0);
+        seq.addEvent(juce::MidiMessage::noteOff(1, 40),                    240.0);
+        // ch10: ドラム (program 0)
+        seq.addEvent(juce::MidiMessage::noteOn (10, 36, (juce::uint8) 110), 0.0);
+        seq.addEvent(juce::MidiMessage::noteOff(10, 36),                    120.0);
+        // ch2: program 68 (Oboe)
+        seq.addEvent(juce::MidiMessage::programChange(2, 68), 0.0);
+        seq.addEvent(juce::MidiMessage::noteOn (2, 72, (juce::uint8) 90), 240.0);
+        seq.addEvent(juce::MidiMessage::noteOff(2, 72),                   480.0);
+        mf.addTrack(seq);
+
+        auto f = outFile("typed0_multichannel.mid");
+        f.deleteFile();
+        {
+            juce::FileOutputStream os(f);
+            expect(os.openedOk(), "open output stream");
+            expect(mf.writeTo(os), "writeTo ok");
+            os.flush();
+        }
+
+        auto imp = MidiImporter::load(f);
+        expect(imp.ok, "import ok");
+        expectEquals((int) imp.tracks.size(), 3, "split into 3 tracks (one per channel)");
+        if (imp.tracks.size() != 3) return;
+
+        // チャンネル順 (0-based) に並ぶ: ch1(idx0), ch2(idx1), ch10(idx9)
+        expectEquals(imp.tracks[0].primaryChannel, 0,  "track0 = MIDI ch1");
+        expectEquals(imp.tracks[1].primaryChannel, 1,  "track1 = MIDI ch2");
+        expectEquals(imp.tracks[2].primaryChannel, 9,  "track2 = MIDI ch10");
+        expect(! imp.tracks[0].isDrum, "ch1 not drum");
+        expect(  imp.tracks[2].isDrum, "ch10 is drum");
+
+        // 名前: GM 楽器名 (チャンネル番号は付けない) / ドラムは "Drums"
+        expect(imp.tracks[0].name == "Electric Bass (finger)", "ch1 named by GM program");
+        expect(imp.tracks[1].name == "Oboe",                   "ch2 named by GM program");
+        expect(imp.tracks[2].name == "Drums",                  "ch10 named Drums");
+
+        // 各トラックは自分のチャンネルのノートだけを持つ (混ざらない)
+        expectEquals((int) extractNotes(imp.tracks[0]).size(), 1, "ch1 has its 1 note");
+        expectEquals((int) extractNotes(imp.tracks[1]).size(), 1, "ch2 has its 1 note");
+        expectEquals((int) extractNotes(imp.tracks[2]).size(), 1, "ch10 has its 1 note");
+        expectEquals(extractNotes(imp.tracks[0])[0].pitch, 40, "ch1 pitch 40");
+        expectEquals(extractNotes(imp.tracks[1])[0].pitch, 72, "ch2 pitch 72");
+        expectEquals(extractNotes(imp.tracks[2])[0].pitch, 36, "ch10 pitch 36");
     }
 
     // ── 14. importer: 存在しないファイルは ok=false + エラー文 ──
