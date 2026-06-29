@@ -8,7 +8,10 @@
 // 歌詞表示ビュー: テキストをコピペで貼り付け、歌唱中に最前面の窓で読む用途。
 // 常に編集可能 (読み取り専用の表示モードへの切替は廃止)。文字サイズを − / ＋ で調整する。
 // テキストはプロジェクト (.uta) に保存され、文字サイズはアプリ全体設定 (AppPreferences) に保存される。
-class LyricsView : public juce::Component
+// 歌詞が空のときは .txt ファイルのドラッグ&ドロップで読み込める (子の TextEditor は
+// FileDragAndDropTarget ではないため、JUCE が親の LyricsView へドロップをルーティングする)。
+class LyricsView : public juce::Component,
+                   public juce::FileDragAndDropTarget
 {
 public:
     static constexpr int kMinFont   = 12;
@@ -34,12 +37,16 @@ public:
         editor.setColour(juce::TextEditor::outlineColourId,         juce::Colours::transparentBlack);
         editor.setColour(juce::TextEditor::focusedOutlineColourId,  juce::Colours::transparentBlack);
         editor.setColour(juce::TextEditor::highlightColourId,       juce::Colour(0xff3a5a78));
+        // 歌詞が空のときの薄字ガイド (D&D / 読み込み案内)。editor が body を覆うため
+        // setTextToShowWhenEmpty で editor 自身に描かせる (未フォーカス + 空のときだけ表示)。
+        editor.setTextToShowWhenEmpty(tr(u8"ここにテキストファイル (.txt) をドラッグ & ドロップ、または「.txt を読み込む」から開きます"),
+                                      juce::Colours::white.withAlpha(0.35f));
         editor.setText(initialText, false);
         editor.onTextChange = [this] { if (onTextChanged) onTextChanged(editor.getText()); };
         addAndMakeVisible(editor);
 
-        loadButton.setButtonText(tr(u8"読み込み"));
-        loadButton.setTooltip(tr(u8"テキストファイルから歌詞を読み込む"));
+        loadButton.setButtonText(tr(u8".txt を読み込む"));
+        loadButton.setTooltip(tr(u8"テキストファイル (.txt) から歌詞を読み込む"));
         loadButton.onClick    = [this] { openFileToLoad(); };
         fontDownButton.setButtonText("A-");
         fontUpButton.setButtonText("A+");
@@ -62,12 +69,21 @@ public:
         g.fillAll(juce::Colour(0xff1a1a1a));
         g.setColour(juce::Colour(0xff2a2f35));
         g.fillRect(0, kBarHeight - 1, getWidth(), 1);
+
+        // D&D 中はボディ周囲をアクセント枠でハイライト (editor が中央を覆うので外周だけ見える)
+        if (dragHighlight_)
+        {
+            auto body = getLocalBounds();
+            body.removeFromTop(kBarHeight);
+            g.setColour(juce::Colour(0xff7a5acc));
+            g.drawRoundedRectangle(body.reduced(3).toFloat(), 6.0f, 3.0f);
+        }
     }
 
     void resized() override
     {
         auto bar = getLocalBounds().removeFromTop(kBarHeight).reduced(6, 4);
-        loadButton.setBounds(bar.removeFromLeft(88));
+        loadButton.setBounds(bar.removeFromLeft(150));
         fontUpButton.setBounds(bar.removeFromRight(44));
         bar.removeFromRight(4);
         fontDownButton.setBounds(bar.removeFromRight(44));
@@ -77,7 +93,58 @@ public:
         editor.setBounds(body.reduced(8));
     }
 
+    // ── FileDragAndDropTarget: 歌詞が空のときだけ .txt の D&D を受ける ──
+    bool isInterestedInFileDrag(const juce::StringArray& files) override
+    {
+        if (editor.getText().isNotEmpty()) return false;   // 既に歌詞があるときは受けない
+        return hasTextFile(files);
+    }
+
+    void fileDragEnter(const juce::StringArray& files, int, int) override
+    {
+        if (isInterestedInFileDrag(files)) { dragHighlight_ = true; repaint(); }
+    }
+
+    void fileDragExit(const juce::StringArray&) override
+    {
+        if (dragHighlight_) { dragHighlight_ = false; repaint(); }
+    }
+
+    void filesDropped(const juce::StringArray& files, int, int) override
+    {
+        dragHighlight_ = false;
+        repaint();
+        for (const auto& f : files)
+        {
+            if (isTextFile(f))
+            {
+                loadFromFile(juce::File(f));
+                break;
+            }
+        }
+    }
+
 private:
+    static bool isTextFile(const juce::String& path)
+    {
+        return path.endsWithIgnoreCase(".txt") || path.endsWithIgnoreCase(".text");
+    }
+
+    static bool hasTextFile(const juce::StringArray& files)
+    {
+        for (const auto& f : files)
+            if (isTextFile(f)) return true;
+        return false;
+    }
+
+    void loadFromFile(const juce::File& file)
+    {
+        if (! file.existsAsFile()) return;
+        // loadFileAsString は BOM / UTF-8 / UTF-16 を判別して読む
+        editor.setText(file.loadFileAsString(), true);   // sendNotification=true で onTextChanged を発火 (保存される)
+        editor.moveCaretToTop(false);
+    }
+
     void changeFont(int delta)
     {
         const int next = juce::jlimit(kMinFont, kMaxFont, fontSize_ + delta);
@@ -107,10 +174,7 @@ private:
                 if (safe == nullptr) return;
                 auto file = fc.getResult();
                 if (file == juce::File()) return;   // キャンセル
-                // loadFileAsString は BOM / UTF-8 / UTF-16 を判別して読む
-                const auto text = file.loadFileAsString();
-                editor.setText(text, true);         // sendNotification=true で onTextChanged を発火 (保存される)
-                editor.moveCaretToTop(false);
+                loadFromFile(file);
             });
     }
 
@@ -119,6 +183,7 @@ private:
     juce::TextButton fontDownButton, fontUpButton;
     std::unique_ptr<juce::FileChooser> chooser;
     int  fontSize_ { 16 };
+    bool dragHighlight_ { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LyricsView)
 };
