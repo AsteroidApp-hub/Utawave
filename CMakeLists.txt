@@ -61,6 +61,7 @@ target_sources(Utawave PRIVATE
     Source/Audio/builtin/BuiltInDeEsser.cpp
     Source/Audio/builtin/BuiltInGate.cpp
     Source/Audio/builtin/BuiltInMaximizer.cpp
+    Source/Audio/builtin/BuiltInDelay.cpp
     Source/Audio/builtin/BuiltInReverb.cpp
     Source/Audio/builtin/BuiltInFactory.cpp
     Source/Tracks/AudioClip.cpp
@@ -114,6 +115,7 @@ target_sources(Utawave PRIVATE
     Source/UI/BuiltInDeEsserEditor.cpp
     Source/UI/BuiltInGateEditor.cpp
     Source/UI/BuiltInMaximizerEditor.cpp
+    Source/UI/BuiltInDelayEditor.cpp
     Source/UI/BuiltInReverbEditor.cpp
     Source/UI/StatusBar.cpp
 )
@@ -357,6 +359,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/Audio/builtin/BuiltInDeEsser.cpp
         Source/Audio/builtin/BuiltInGate.cpp
         Source/Audio/builtin/BuiltInMaximizer.cpp
+        Source/Audio/builtin/BuiltInDelay.cpp
         Source/Audio/builtin/BuiltInReverb.cpp
         Source/Audio/builtin/BuiltInFactory.cpp
         Source/UI/BuiltInEffectEditor.cpp
@@ -366,6 +369,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/UI/BuiltInDeEsserEditor.cpp
         Source/UI/BuiltInGateEditor.cpp
         Source/UI/BuiltInMaximizerEditor.cpp
+        Source/UI/BuiltInDelayEditor.cpp
         Source/UI/BuiltInReverbEditor.cpp
         Source/Project/AdService.cpp
         Source/Project/UpdateChecker.cpp

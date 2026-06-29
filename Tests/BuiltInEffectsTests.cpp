@@ -17,6 +17,7 @@
 #include "../Source/Audio/builtin/BuiltInDeEsser.h"
 #include "../Source/Audio/builtin/BuiltInGate.h"
 #include "../Source/Audio/builtin/BuiltInMaximizer.h"
+#include "../Source/Audio/builtin/BuiltInDelay.h"
 #include "../Source/Audio/builtin/BuiltInReverb.h"
 #include "../Source/Audio/builtin/BuiltInFactory.h"
 
@@ -65,6 +66,7 @@ public:
         testDeEsser();
         testGate();
         testMaximizer();
+        testDelay();
         testReverb();
         testFactory();
     }
@@ -369,6 +371,152 @@ private:
         }
     }
 
+    // 指定範囲 [from,to) のチャンネル0の最大絶対値とその位置
+    static std::pair<int,float> peakInRange(const juce::AudioBuffer<float>& b, int from, int to)
+    {
+        int idx = from; float pk = 0.0f;
+        for (int i = juce::jmax(0, from); i < juce::jmin(to, b.getNumSamples()); ++i)
+        {
+            const float a = std::abs(b.getSample(0, i));
+            if (a > pk) { pk = a; idx = i; }
+        }
+        return { idx, pk };
+    }
+
+    static juce::AudioBuffer<float> makeImpulse(int numSamples)
+    {
+        juce::AudioBuffer<float> b(2, numSamples);
+        b.clear();
+        b.setSample(0, 0, 1.0f);
+        b.setSample(1, 0, 1.0f);
+        return b;
+    }
+
+    // テンポ同期テスト用の最小 playhead (BPM だけ返す)
+    struct FakePlayHead : public juce::AudioPlayHead
+    {
+        double bpm;
+        explicit FakePlayHead(double b) : bpm(b) {}
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            PositionInfo p;
+            p.setBpm(bpm);
+            p.setIsPlaying(true);
+            return p;
+        }
+    };
+
+    void testDelay()
+    {
+        beginTest("Delay mix=0 is passthrough");
+        {
+            BuiltInDelay d;
+            d.setP(BuiltInDelay::Sync, 0.0f);
+            d.setP(BuiltInDelay::TimeMs, 100.0f);
+            d.setP(BuiltInDelay::Mix, 0.0f);
+            d.prepareToPlay(kSr, 8192);
+
+            auto imp = makeImpulse(8000);
+            juce::AudioBuffer<float> copy(imp);
+            d.processBlock(imp, emptyMidi);
+            bool identical = true;
+            for (int i = 0; i < 8000 && identical; ++i)
+                if (imp.getSample(0, i) != copy.getSample(0, i)) identical = false;
+            expect(identical, "mix=0 must leave the dry signal unchanged (no wet added)");
+        }
+
+        beginTest("Delay produces an echo at the set time");
+        {
+            BuiltInDelay d;
+            d.setP(BuiltInDelay::Sync, 0.0f);
+            d.setP(BuiltInDelay::TimeMs, 100.0f);     // 100ms = 4800 samples @48k
+            d.setP(BuiltInDelay::Feedback, 0.0f);
+            d.setP(BuiltInDelay::Tone, 1.0f);         // bright = no damping
+            d.setP(BuiltInDelay::Mix, 100.0f);
+            d.setP(BuiltInDelay::PingPong, 0.0f);
+            d.prepareToPlay(kSr, 16384);              // delaySmoothed inits from TimeMs (set above)
+
+            auto imp = makeImpulse(14400);
+            d.processBlock(imp, emptyMidi);
+
+            const int expectAt = (int) std::lround(0.100 * kSr);   // 4800
+            auto echo = peakInRange(imp, expectAt - 50, expectAt + 50);
+            expect(echo.second > 0.9f, "an echo near 100ms should be ~unity (mix 100, fb 0, bright)");
+            // フィードバック 0 なので 2 つ目のエコーは無い
+            auto echo2 = peakInRange(imp, expectAt * 2 - 50, expectAt * 2 + 50);
+            expect(echo2.second < 0.1f, "feedback 0 must yield no second echo");
+        }
+
+        beginTest("Delay feedback yields decaying repeats");
+        {
+            BuiltInDelay d;
+            d.setP(BuiltInDelay::Sync, 0.0f);
+            d.setP(BuiltInDelay::TimeMs, 100.0f);
+            d.setP(BuiltInDelay::Feedback, 50.0f);
+            d.setP(BuiltInDelay::Tone, 1.0f);
+            d.setP(BuiltInDelay::Mix, 100.0f);
+            d.setP(BuiltInDelay::PingPong, 0.0f);
+            d.prepareToPlay(kSr, 16384);
+
+            auto imp = makeImpulse(16000);
+            d.processBlock(imp, emptyMidi);
+
+            const int step = (int) std::lround(0.100 * kSr);
+            auto e1 = peakInRange(imp, step - 50, step + 50);
+            auto e2 = peakInRange(imp, step * 2 - 50, step * 2 + 50);
+            auto e3 = peakInRange(imp, step * 3 - 50, step * 3 + 50);
+            expect(e1.second > 0.9f, "first repeat ~unity");
+            expect(e2.second > 0.4f && e2.second < 0.6f, "second repeat ~0.5 (fb 50%)");
+            expect(e3.second > 0.2f && e3.second < 0.35f, "third repeat ~0.25 (fb 50%^2)");
+        }
+
+        beginTest("Delay tempo sync resolves division from host BPM");
+        {
+            BuiltInDelay d;
+            FakePlayHead ph(120.0);                   // 120 BPM → 1 beat = 0.5s
+            d.setPlayHead(&ph);
+            d.setP(BuiltInDelay::Sync, 1.0f);
+            d.prepareToPlay(kSr, 1024);
+
+            juce::AudioBuffer<float> blk(2, 512); blk.clear();
+
+            d.setP(BuiltInDelay::Division, 3.0f);     // 1/8 = 0.5 beat → 0.25s
+            d.processBlock(blk, emptyMidi);
+            expect(std::abs(d.getDelaySeconds() - 0.25f) < 0.005f, "1/8 at 120 BPM = 0.25s");
+
+            d.setP(BuiltInDelay::Division, 0.0f);     // 1/4 = 1 beat → 0.5s
+            d.processBlock(blk, emptyMidi);
+            expect(std::abs(d.getDelaySeconds() - 0.5f) < 0.005f, "1/4 at 120 BPM = 0.5s");
+
+            d.setPlayHead(nullptr);                    // 後始末 (スタック上の ph より先に外す)
+        }
+
+        beginTest("Delay division table sanity");
+        {
+            expect(BuiltInDelay::numDivisions() >= 4, "several note divisions exist");
+            expect(std::abs(BuiltInDelay::divisionBeats(0) - 1.0) < 1.0e-9, "1/4 = 1 beat");
+            expect(std::abs(BuiltInDelay::divisionBeats(3) - 0.5) < 1.0e-9, "1/8 = 0.5 beat");
+        }
+
+        beginTest("Delay state round-trips");
+        {
+            BuiltInDelay a;
+            a.setP(BuiltInDelay::Sync, 0.0f);
+            a.setP(BuiltInDelay::Division, 2.0f);
+            a.setP(BuiltInDelay::TimeMs, 280.0f);
+            a.setP(BuiltInDelay::Feedback, 44.0f);
+            a.setP(BuiltInDelay::Tone, 0.3f);
+            a.setP(BuiltInDelay::Mix, 33.0f);
+            a.setP(BuiltInDelay::PingPong, 0.0f);
+            juce::MemoryBlock mb;
+            a.getStateInformation(mb);
+            BuiltInDelay b;
+            b.setStateInformation(mb.getData(), (int) mb.getSize());
+            for (int i = 0; i < a.getParamCount(); ++i)
+                expect(std::abs(a.getP(i) - b.getP(i)) < 1.0e-3f, "param should round-trip");
+        }
+    }
+
     void testReverb()
     {
         beginTest("Reverb mix=0 is exact passthrough");
@@ -426,6 +574,7 @@ private:
             expect(BuiltInFactory::create("utawave.comp")    != nullptr, "comp id creates");
             expect(BuiltInFactory::create("utawave.deesser") != nullptr, "deesser id creates");
             expect(BuiltInFactory::create("utawave.maximizer") != nullptr, "maximizer id creates");
+            expect(BuiltInFactory::create("utawave.delay")   != nullptr, "delay id creates");
             expect(BuiltInFactory::create("utawave.reverb")  != nullptr, "reverb id creates");
             expect(BuiltInFactory::create("nope")            == nullptr, "unknown id is null");
         }

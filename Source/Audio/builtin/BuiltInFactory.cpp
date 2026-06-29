@@ -7,6 +7,7 @@
 #include "BuiltInDeEsser.h"
 #include "BuiltInGate.h"
 #include "BuiltInMaximizer.h"
+#include "BuiltInDelay.h"
 #include "BuiltInReverb.h"
 #include "../../Localisation.h"
 
@@ -30,6 +31,7 @@ namespace
         { "utawave.deesser", u8"ディエッサー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDeEsser()); } },
         { "utawave.gate",    u8"ゲート",     [] { return std::unique_ptr<BuiltInEffect>(new BuiltInGate()); } },
         { "utawave.maximizer", u8"マキシマイザー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInMaximizer()); } },
+        { "utawave.delay",   u8"ディレイ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDelay()); } },
         { "utawave.reverb",  u8"リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
     };
     constexpr int kNumEntries = (int) (sizeof(kEntries) / sizeof(kEntries[0]));
