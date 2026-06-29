@@ -2455,12 +2455,17 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     }
 
     // update position（ループ範囲でラップ）
-    double newPos = currentPosition.load() + (double)numSamples / currentSampleRate;
+    const double oldPos = currentPosition.load();
+    double newPos = oldPos + (double)numSamples / currentSampleRate;
     if (loopActive.load())
     {
         double ls = loopStartSecs.load();
         double le = loopEndSecs.load();
-        if (le > ls && newPos >= le)
+        // ループ末尾を「下から跨いだ」時だけラップする。再生開始位置がループ末尾より
+        // 後ろ (oldPos >= le) のときにラップすると、ループ外から再生したのにループ内へ
+        // 引き戻されてしまう (再生位置が全然違う所から鳴るバグ)。oldPos < le を条件に
+        // 加えることで、ループ外 (末尾より後ろ) から再生したら通常どおりその位置から鳴る。
+        if (le > ls && oldPos < le && newPos >= le)
         {
             newPos = ls + std::fmod(newPos - ls, le - ls);
             // ループ継ぎ目のクリック防止: 次ブロック (loopStart の内容) へ向けて、
