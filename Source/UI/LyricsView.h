@@ -83,7 +83,10 @@ public:
     void resized() override
     {
         auto bar = getLocalBounds().removeFromTop(kBarHeight).reduced(6, 4);
-        loadButton.setBounds(bar.removeFromLeft(150));
+        // ボタン幅はテキスト実寸に合わせる (固定幅だと短い訳語で中央寄せの余白が目立つため)
+        const auto font  = getLookAndFeel().getTextButtonFont(loadButton, bar.getHeight());
+        const int  textW = font.getStringWidth(loadButton.getButtonText());
+        loadButton.setBounds(bar.removeFromLeft(juce::jlimit(72, bar.getWidth() - 96, textW + 24)));
         fontUpButton.setBounds(bar.removeFromRight(44));
         bar.removeFromRight(4);
         fontDownButton.setBounds(bar.removeFromRight(44));
