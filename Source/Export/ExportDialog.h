@@ -9,7 +9,7 @@
 class ExportDialog : public juce::Component
 {
 public:
-    enum class RangeKind { Project, Selection, Bars };
+    enum class RangeKind { Project, Ruler, Bars };
 
     struct TrackInfo
     {
@@ -24,13 +24,16 @@ public:
         juce::String defaultBaseName;   // mix-down 時のファイル名（拡張子なし）
         juce::File   defaultFolder;     // 出力フォルダ
         double       projectEndSec  { 0.0 };
-        double       selStartSec    { 0.0 };
-        double       selEndSec      { 0.0 };
-        bool         selAvailable   { false };
         double       projectSr      { 48000.0 };
         int          projectBits    { 32 };
-        int          projectEndBar  { 1 };           // 末尾小節（小節範囲のデフォルト終了値）
-        std::function<double(int)> barToSec;         // 1-based 小節番号 → 開始時刻（秒）
+        // ルーラー範囲（ループ範囲を兼用）: ルーラー横ドラッグで指定した範囲。
+        double       rulerStartSec  { 0.0 };
+        double       rulerEndSec    { 0.0 };
+        bool         rulerAvailable { false };
+        juce::String rulerRangeDesc;                 // 表示用（例: "Bar 5 〜 33"）
+        // 小節範囲: 1-based 小節番号 → 開始秒、末尾小節（デフォルト終了値）
+        int          projectEndBar  { 1 };
+        std::function<double(int)> barToSec;
         std::vector<TrackInfo> tracks;
     };
 
@@ -50,7 +53,7 @@ private:
     void rebuildTrackList();
     void layoutTrackRows();
     void updateModeVisibility();
-    void updateRangeVisibility();   // 小節範囲モードのときだけ小節入力を表示
+    void updateRangeVisibility();   // ルーラー範囲モードのときだけ範囲表示ラベルを出す
     std::vector<int> getSelectedTrackIndices() const;
     int  getTrackChannels(int trackIndex) const;  // 1 = mono / 2 = stereo
     bool getTrackPreFader(int trackIndex) const;
@@ -65,8 +68,11 @@ private:
 
     juce::Label    rangeLabel;
     juce::TextButton rangeProjectBtn   { tr(u8"プロジェクト全体") };
-    juce::TextButton rangeSelectionBtn { tr(u8"範囲選択") };
+    juce::TextButton rangeRulerBtn     { tr(u8"ルーラー範囲") };
     juce::TextButton rangeBarsBtn      { tr(u8"小節範囲") };
+
+    // ルーラー範囲モード用: 現在のルーラー範囲を読み取り専用で表示
+    juce::Label      rulerRangeLabel;
 
     // 小節範囲モード用: 開始/終了小節の入力
     juce::Label      barStartLabel;

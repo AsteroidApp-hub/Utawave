@@ -221,10 +221,22 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         double start = 0.0;
         double end   = juce::jmax(0.001, playPosition);
         if (end > start)
+            // これは「範囲選択」操作なので選択範囲だけを更新（ルーラー範囲 / ループとは独立）
+            timelineView.setSelectionRange(start, end, true);
+        return true;
+    }
+
+    // P = 範囲選択 / 選択クリップ(波形)の範囲を「ルーラー範囲(ループ)」に設定
+    if (!key.getModifiers().isCommandDown() && !key.getModifiers().isShiftDown()
+        && !key.getModifiers().isAltDown()
+        && (key.getKeyCode() == 'p' || key.getKeyCode() == 'P'))
+    {
+        double s = 0.0, e = 0.0;
+        if (timelineView.getRangeForRulerFromSelection(s, e) && e > s)
         {
-            loopStartSecs = start;
-            loopEndSecs   = end;
-            timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+            loopStartSecs = s;
+            loopEndSecs   = e;
+            timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
             audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
         }
         return true;

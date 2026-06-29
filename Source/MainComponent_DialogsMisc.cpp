@@ -319,6 +319,7 @@ void MainComponent::showShortcutsDialog()
             { u8"R",                      u8"録音 開始 / 停止 (パンチイン対応)" },
             { u8"Cmd+Shift+R",            u8"遡及録音を確定" },
             { u8"L",                      u8"ループ再生 ON / OFF" },
+            { u8"P",                      u8"範囲選択/選択クリップをルーラー範囲に設定" },
             { u8"[ / ]",                  u8"選択トラックの縦幅 (最大↔標準 / 最小↔標準)" },
             { u8"Shift+Enter",            u8"曲頭〜再生位置を範囲選択" },
             { u8"Home / 0 / Return",      u8"先頭へ戻る" },
@@ -499,16 +500,21 @@ void MainComponent::showExportDialog()
     if (projectEnd <= 0.0) projectEnd = 60.0;
     ctx.projectEndSec = projectEnd;
 
+    // ルーラー範囲書き出し: ルーラー横ドラッグで指定した範囲（ループ範囲を兼用）を使う
+    if (loopEndSecs > loopStartSecs + 0.001)
+    {
+        ctx.rulerAvailable = true;
+        ctx.rulerStartSec  = loopStartSecs;
+        ctx.rulerEndSec    = loopEndSecs;
+        const int sb = timelineView.getRuler().barAtTime(loopStartSecs);
+        const int eb = timelineView.getRuler().barAtTime(loopEndSecs);
+        ctx.rulerRangeDesc = tr(u8"小節") + " " + juce::String(sb)
+                             + juce::String::fromUTF8(u8" 〜 ") + juce::String(eb);
+    }
+
     // 小節範囲書き出し: 1-based 小節番号 → 開始秒 の変換と、末尾小節（デフォルト終了値）
     ctx.barToSec      = [this](int bar1) { return timelineView.getRuler().barStartSecs(bar1); };
     ctx.projectEndBar = timelineView.getRuler().barAtTime(projectEnd);
-
-    if (timelineView.hasSelectionRange())
-    {
-        ctx.selAvailable  = true;
-        ctx.selStartSec   = timelineView.getSelectionStart();
-        ctx.selEndSec     = timelineView.getSelectionEnd();
-    }
 
     ctx.projectSr   = (appSettings.projectSampleRate > 0.0)
                           ? appSettings.projectSampleRate

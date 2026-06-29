@@ -357,7 +357,7 @@ MainComponent::MainComponent()
         loopStartSecs = t;
         if (loopEndSecs <= loopStartSecs) loopEndSecs = loopStartSecs + 1.0;
         loopActive = true;
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+        timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
         audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
     };
     ruler.onSetLoopEnd = [this](double t)
@@ -365,15 +365,16 @@ MainComponent::MainComponent()
         loopEndSecs = t;
         if (loopEndSecs < loopStartSecs) std::swap(loopStartSecs, loopEndSecs);
         loopActive = true;
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+        timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
         audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
     };
     ruler.onSetLoopRange = [this](double s, double e)
     {
-        // ドラッグでは範囲だけを更新（ループ再生は LOOP ボタンで切替）
+        // ルーラー範囲のドラッグでは範囲だけを更新（ループ再生は LOOP ボタンで切替）。
+        // 選択範囲とは独立 (ルーラー帯のみ更新)。
         loopStartSecs = s;
         loopEndSecs   = e;
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+        timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
         audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
     };
 
@@ -422,11 +423,9 @@ MainComponent::MainComponent()
 
     timelineView.onSetSelectionRange = [this](double s, double e)
     {
-        // クリップ上半分のドラッグで範囲選択
-        loopStartSecs = s;
-        loopEndSecs   = e;
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
-        audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+        // クリップ上半分のドラッグで範囲選択。ルーラー範囲 / ループ再生とは独立
+        // (選択範囲はループ再生やプロジェクト保存に影響しない = それぞれ別々に機能)。
+        timelineView.setSelectionRange(s, e, e > s + 0.001);
     };
 
     // 選択 (クリップ / 範囲) が変わったらヘッダの ↑ (採用) ボタンの活性表示を更新
@@ -446,7 +445,7 @@ MainComponent::MainComponent()
     toolbar.onLoopToggle = [this](bool v)
     {
         loopActive = v && (loopEndSecs > loopStartSecs + 0.001);
-        timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+        timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
         audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
         toolbar.setLoopActive(loopActive);
     };
@@ -664,7 +663,9 @@ MainComponent::MainComponent()
     ruler.onClearLoop = [this]
     {
         loopActive = false;
-        timelineView.setLoopRange(0.0, 0.0, false);
+        loopStartSecs = 0.0;
+        loopEndSecs   = 0.0;
+        timelineView.setRulerRange(0.0, 0.0, false);
         audioEngine.setLoopRange(0.0, 0.0, false);
     };
     ruler.onClearMarkers = [this]

@@ -9,6 +9,7 @@
 #include "../Audio/BpmDetector.h"
 #include "../Audio/LufsMeter.h"
 #include "TextImageCache.h"
+#include "RulerRangeMath.h"
 #include <set>
 #include <map>
 #include <utility>
@@ -318,6 +319,18 @@ void TimelineRuler::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // ルーラー範囲の端/中央を掴んだら調整ドラッグへ（Cmd は無し = マーカー追加優先のため除外）
+    if (! e.mods.isCommandDown())
+    {
+        const int lh = hitTestLoopHandle(e.x, e.y);   // 1=左端 / 2=右端 のみ
+        if (lh != 0)
+        {
+            draggingLoopHandle = lh;
+            seekArmed          = false;
+            return;
+        }
+    }
+
     // Cmd+クリック: マーカー追加
     if (e.mods.isCommandDown())
     {
@@ -327,6 +340,17 @@ void TimelineRuler::mouseDown(const juce::MouseEvent& e)
 
     // 左クリック: ドラッグ開始位置を記録 + シーク（snap 適用）
     beginSeekDrag(e);
+}
+
+int TimelineRuler::hitTestLoopHandle(int x, int y) const
+{
+    // ルーラー範囲は小節バー行(hBars)だけに描かれるので、その帯だけで掴める。
+    // 描画 (paint) と同じ行高定数 + 同じ timeToX を使い、見た目と掴み位置を一致させる。
+    const int yBars = hMarkerRow + hTempoRow + hMeterRow;   // Bars 行の上端
+    const int hBars = barsRowVisible ? hBarsRow : 0;
+    const double lx1 = RulerRangeMath::timeToX(loopStart, currentBpm, pixelsPerBeat, scrollX);
+    const double lx2 = RulerRangeMath::timeToX(loopEnd,   currentBpm, pixelsPerBeat, scrollX);
+    return RulerRangeMath::loopHandleAt(lx1, lx2, x, y, yBars, hBars, 6.0);
 }
 
 void TimelineRuler::beginSeekDrag(const juce::MouseEvent& e)
@@ -396,6 +420,24 @@ void TimelineRuler::mouseDrag(const juce::MouseEvent& e)
         return;
     }
 
+    // ルーラー範囲の端ハンドルのドラッグ（左右端のリサイズのみ・全体移動は廃止）
+    if (draggingLoopHandle != 0)
+    {
+        double t = xToSeconds(e.x);
+        if (onSnapTime) t = onSnapTime(t);
+        if (draggingLoopHandle == 1)        // 左端（右端を固定）
+        {
+            double s = juce::jlimit(0.0, loopEnd - 0.01, t);
+            if (onSetLoopRange) onSetLoopRange(s, loopEnd);
+        }
+        else                                 // 右端（左端を固定）
+        {
+            double en = juce::jmax(loopStart + 0.01, t);
+            if (onSetLoopRange) onSetLoopRange(loopStart, en);
+        }
+        return;
+    }
+
     const int dx = e.x - dragStartX;
     const int dy = e.y - dragStartY;
     const int absDx = std::abs(dx);
@@ -443,6 +485,7 @@ void TimelineRuler::mouseUp(const juce::MouseEvent&)
     draggingMarkerIdx = -1;
     draggingBpmIdx    = -1;
     draggingMeterIdx  = -1;
+    draggingLoopHandle = 0;
     isDraggingLoop    = false;
     isDraggingZoom    = false;
     // ドラッグ中に beginMusicEdit() していれば、ここで 1 つの Undo として確定する
@@ -457,11 +500,16 @@ void TimelineRuler::mouseMove(const juce::MouseEvent& e)
                        || hitTestBpmMarker(e.x, e.y) >= 0
                        || hitTestMeterMarker(e.x, e.y) >= 0;
 
+    const int loopHandle = cmdHeld ? 0 : hitTestLoopHandle(e.x, e.y);
+
     if (onMarker)
         setMouseCursor(juce::MouseCursor::PointingHandCursor);
     else if (cmdHeld && e.y >= 0 && e.y < 44)
         // Cmd を押している間はマーカー / テンポ / 拍子の追加が可能 → ペンシル風カーソル
         setMouseCursor(juce::MouseCursor::CrosshairCursor);
+    else if (loopHandle == 1 || loopHandle == 2)
+        // ルーラー範囲の左右端 → 横リサイズカーソル
+        setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
     else
         // マーカー行を除く全行 (Tempo / Meter / Bars / Time) でシーク可能
         setMouseCursor(juce::MouseCursor::IBeamCursor);
@@ -515,12 +563,12 @@ void TimelineRuler::paint(juce::Graphics& g)
 {
     g.fillAll(AppColours::rulerBg);
 
-    // ── 行レイアウト ──
-    const int hMarker = 16;
-    const int hTempo  = 14;
-    const int hMeter  = 14;
-    const int hBars   = barsRowVisible ? 20 : 0;
-    const int hTime   = timeRowVisible ? 16 : 0;
+    // ── 行レイアウト (高さは TimelineRuler の constexpr 定数を共有) ──
+    const int hMarker = hMarkerRow;
+    const int hTempo  = hTempoRow;
+    const int hMeter  = hMeterRow;
+    const int hBars   = barsRowVisible ? hBarsRow : 0;
+    const int hTime   = timeRowVisible ? hTimeRow : 0;
     const int yMarker = 0;
     const int yTempo  = yMarker + hMarker;
     const int yMeter  = yTempo  + hTempo;
@@ -706,21 +754,37 @@ void TimelineRuler::paint(juce::Graphics& g)
         }
     }
 
-    // ── 選択範囲（常に表示。loopActive のときだけ色を強調） ──
-    if (loopEnd > loopStart)
+    // ── ルーラー範囲（ロケーター / ループ範囲を兼用） ──
+    //    選択範囲(青)と区別できるよう薄い白系で、小節バー行(hBars)内だけを着色する。
+    //    角は三角ロケーター。loopActive のときだけ少し濃くする。
+    if (loopEnd > loopStart && hBars > 0)
     {
-        double bpsLocal = currentBpm / 60.0;
-        float lx1 = (float)(loopStart * bpsLocal * pixelsPerBeat - scrollX);
-        float lx2 = (float)(loopEnd   * bpsLocal * pixelsPerBeat - scrollX);
+        float lx1 = (float) RulerRangeMath::timeToX(loopStart, currentBpm, pixelsPerBeat, scrollX);
+        float lx2 = (float) RulerRangeMath::timeToX(loopEnd,   currentBpm, pixelsPerBeat, scrollX);
         if (lx2 > 0 && lx1 < W)
         {
-            float alphaFill = loopActive ? 0.30f : 0.15f;
-            float alphaLine = loopActive ? 1.0f  : 0.6f;
-            g.setColour(juce::Colour(0xff5a8aaa).withAlpha(alphaFill));
-            g.fillRect(lx1, (float)yBars, lx2 - lx1, (float)(hBars + hTime));
-            g.setColour(juce::Colour(0xff5a8aaa).withAlpha(alphaLine));
-            g.drawLine(lx1, (float)yBars, lx1, (float)(yBars + hBars + hTime), 2.0f);
-            g.drawLine(lx2, (float)yBars, lx2, (float)(yBars + hBars + hTime), 2.0f);
+            const float yb = (float)yBars;
+            const float bh = (float)hBars;
+            const juce::Colour loopCol = juce::Colours::white;
+            const float alphaFill = loopActive ? 0.22f : 0.12f;
+            const float alphaLine = loopActive ? 0.85f : 0.55f;
+            g.setColour(loopCol.withAlpha(alphaFill));
+            g.fillRect(lx1, yb, lx2 - lx1, bh);
+            g.setColour(loopCol.withAlpha(alphaLine));
+            g.drawLine(lx1, yb, lx1, yb + bh, 1.5f);
+            g.drawLine(lx2, yb, lx2, yb + bh, 1.5f);
+            // 角の三角ロケーター（左端=右下がり / 右端=左下がり）
+            const float tw = 7.0f;
+            const float th = juce::jmin(bh, 9.0f);
+            if (lx2 - lx1 > tw * 2.0f)
+            {
+                g.setColour(loopCol.withAlpha(loopActive ? 0.95f : 0.7f));
+                juce::Path triL, triR;
+                triL.addTriangle(lx1, yb, lx1 + tw, yb, lx1, yb + th);
+                triR.addTriangle(lx2, yb, lx2 - tw, yb, lx2, yb + th);
+                g.fillPath(triL);
+                g.fillPath(triR);
+            }
         }
     }
 
@@ -1006,6 +1070,20 @@ void TimelineView::repaintRecordingArea()
         x2 = juce::jmin(area.getRight(), x2);
         if (x2 > x1) repaint(x1, trackTop, x2 - x1, trackH);
     }
+}
+
+bool TimelineView::getRangeForRulerFromSelection(double& start, double& end) const
+{
+    // 範囲選択を最優先、無ければ選択クリップ群 (primary + 追加選択) の全体スパン
+    std::vector<std::pair<double, double>> spans;
+    if (selectedClip.valid())
+        spans.emplace_back(selectedClip.clip->getStartPosition(),
+                           selectedClip.clip->getEndPosition());
+    for (auto& r : extraSelections)
+        if (r.clip)
+            spans.emplace_back(r.clip->getStartPosition(), r.clip->getEndPosition());
+    return RulerRangeMath::rangeForRuler(hasSelectionRange(), loopStartTV, loopEndTV,
+                                         spans, start, end);
 }
 
 void TimelineView::clearAllSelections()

@@ -314,7 +314,7 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
     toolbar.setBpm(bpm);
     timelineView.setBpm(bpm);
     timelineView.setMarkers(markers);
-    timelineView.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
+    timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);  // 保存されるのはルーラー(ループ)範囲
     timelineView.setAppSettings(appSettings);
     timelineView.setPlayheadPosition(playPosition);
     timelineView.setHorizontalZoom(loadedPpb);  // 保存されていたタイムライン横ズームを復元

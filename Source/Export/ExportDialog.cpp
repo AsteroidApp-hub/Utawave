@@ -55,22 +55,30 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
         b.setConnectedEdges(juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
     };
     styleRangeBtn(rangeProjectBtn);
-    styleRangeBtn(rangeSelectionBtn);
+    styleRangeBtn(rangeRulerBtn);
     styleRangeBtn(rangeBarsBtn);
     // 連結時の端を矯正（先頭は左角丸、末尾は右角丸、間は両連結）
     rangeProjectBtn.setConnectedEdges(juce::Button::ConnectedOnRight);
     rangeBarsBtn.setConnectedEdges(juce::Button::ConnectedOnLeft);
 
     rangeProjectBtn.setToggleState(true, juce::dontSendNotification);
-    rangeSelectionBtn.setEnabled(context.selAvailable);
+    rangeRulerBtn.setEnabled(context.rulerAvailable);
+    if (! context.rulerAvailable)
+        rangeRulerBtn.setTooltip(tr(u8"ルーラー（小節バー）を横ドラッグして範囲を指定してください"));
     addAndMakeVisible(rangeProjectBtn);
-    addAndMakeVisible(rangeSelectionBtn);
+    addAndMakeVisible(rangeRulerBtn);
     addAndMakeVisible(rangeBarsBtn);
 
-    // 範囲ボタンの切替で小節入力の表示/非表示を更新
-    rangeProjectBtn  .onClick = [this] { updateRangeVisibility(); };
-    rangeSelectionBtn.onClick = [this] { updateRangeVisibility(); };
-    rangeBarsBtn     .onClick = [this] { updateRangeVisibility(); };
+    // 範囲ボタンの切替で範囲入力欄の表示/非表示を更新
+    rangeProjectBtn.onClick = [this] { updateRangeVisibility(); };
+    rangeRulerBtn  .onClick = [this] { updateRangeVisibility(); };
+    rangeBarsBtn   .onClick = [this] { updateRangeVisibility(); };
+
+    // ルーラー範囲: 現在のルーラー範囲を読み取り専用で表示
+    rulerRangeLabel.setJustificationType(juce::Justification::centredLeft);
+    rulerRangeLabel.setColour(juce::Label::textColourId, juce::Colour(0xffb0b6bd));
+    rulerRangeLabel.setText(context.rulerRangeDesc, juce::dontSendNotification);
+    addChildComponent(rulerRangeLabel);
 
     // 小節範囲: 開始 / 終了小節の入力
     styleField(barStartLabel, tr(u8"開始小節"));
@@ -85,8 +93,6 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
     auto styleBarEditor = [](juce::TextEditor& ed)
     {
         ed.setJustification(juce::Justification::centred);
-        // leftIndent は固定の右側余白 (rightEdgeSpace=2) に合わせて左右対称にし、
-        // 横方向をぴったり中央へ。topIndent も小さくして縦中央を保つ。
         ed.setIndents(2, 2);
         ed.setFont(juce::FontOptions(15.0f));
         ed.setInputRestrictions(6, "0123456789");
@@ -426,6 +432,7 @@ void ExportDialog::updateModeVisibility()
 
 void ExportDialog::updateRangeVisibility()
 {
+    rulerRangeLabel.setVisible(rangeRulerBtn.getToggleState());
     const bool barsMode = rangeBarsBtn.getToggleState();
     barStartLabel.setVisible(barsMode);
     barStartEditor.setVisible(barsMode);
@@ -488,9 +495,16 @@ void ExportDialog::resized()
     {
         auto row = r.removeFromTop(26);
         const int w = row.getWidth() / 3;
-        rangeProjectBtn  .setBounds(row.removeFromLeft(w));
-        rangeSelectionBtn.setBounds(row.removeFromLeft(w));
-        rangeBarsBtn     .setBounds(row);
+        rangeProjectBtn.setBounds(row.removeFromLeft(w));
+        rangeRulerBtn  .setBounds(row.removeFromLeft(w));
+        rangeBarsBtn   .setBounds(row);
+        r.removeFromTop(8);
+    }
+
+    // ルーラー範囲モードのときだけ: 現在のルーラー範囲を表示する行
+    if (rangeRulerBtn.getToggleState())
+    {
+        rulerRangeLabel.setBounds(r.removeFromTop(22));
         r.removeFromTop(8);
     }
 
@@ -498,8 +512,8 @@ void ExportDialog::resized()
     if (rangeBarsBtn.getToggleState())
     {
         auto row = r.removeFromTop(26);
-        const int edW  = 52;   // 入力欄の幅（小節番号は数桁なのでコンパクトに）
-        const int edH  = 22;   // 入力欄の高さ（行内で縦中央寄せ）
+        const int edW  = 52;
+        const int edH  = 22;
         const int lblW = 56;
         const int sepW = 16;
         auto editorRect = [edW, edH](juce::Rectangle<int> cell)
@@ -608,10 +622,10 @@ void ExportDialog::resized()
 
 bool ExportDialog::resolveRange(double& start, double& end) const
 {
-    if (rangeSelectionBtn.getToggleState())
+    if (rangeRulerBtn.getToggleState())
     {
-        start = context.selStartSec;
-        end   = context.selEndSec;
+        start = context.rulerStartSec;
+        end   = context.rulerEndSec;
     }
     else if (rangeBarsBtn.getToggleState())
     {

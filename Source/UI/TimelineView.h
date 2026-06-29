@@ -78,14 +78,18 @@ public:
     bool isBarsRowVisible() const   { return barsRowVisible; }
     std::function<void(bool)> onBarsRowVisibilityChanged;
     // 現在の必要な高さ（行表示状態から算出）
+    // ── 行の高さ (paint / getDesiredHeight / hitTestLoopHandle で共有・drift 防止) ──
+    // Marker / Tempo / Meter は常時表示 (固定)。Bars / Time のみ表示切替可。
+    static constexpr int hMarkerRow = 16;
+    static constexpr int hTempoRow  = 14;
+    static constexpr int hMeterRow  = 14;
+    static constexpr int hBarsRow   = 20;
+    static constexpr int hTimeRow   = 16;
     int  getDesiredHeight() const
     {
-        const int hMarker = 16;
-        const int hTempo  = 14;
-        const int hMeter  = 14;
-        const int hBars   = barsRowVisible ? 20 : 0;
-        const int hTime   = timeRowVisible ? 16 : 0;
-        return hMarker + hTempo + hMeter + hBars + hTime;
+        const int hBars = barsRowVisible ? hBarsRow : 0;
+        const int hTime = timeRowVisible ? hTimeRow : 0;
+        return hMarkerRow + hTempoRow + hMeterRow + hBars + hTime;
     }
     void setMeterChanges(const std::vector<MeterChange>& mc) { meterChanges = mc; repaint(); }
     void setBpmChanges(const std::vector<BpmChange>& bc)     { bpmChanges = bc;   repaint(); }
@@ -174,6 +178,12 @@ private:
     int    dragStartX     { 0 };
     int    dragStartY     { 0 };
     bool   isDraggingLoop { false };
+    // ルーラー範囲（ループ範囲を兼用）の端ハンドル
+    // (Studio One / Cubase のロケーターのように左右端を掴んでリサイズ。全体移動は廃止 =
+    //  範囲内の通常クリックは上下ドラッグのズーム/シークに使うため)
+    int    draggingLoopHandle { 0 };   // 0=なし 1=左端 2=右端
+    // ルーラー範囲の端ヒットテスト (1=左端 2=右端 0=外)
+    int    hitTestLoopHandle(int x, int y) const;
     // 上下ドラッグでズーム
     bool   isDraggingZoom { false };
     double zoomStartPpb   { 80.0 };
@@ -308,16 +318,26 @@ public:
         ruler.setMarkers(m);
     }
     const std::vector<Marker>& getMarkers() const { return ruler.getMarkers(); }
-    void setLoopRange(double s, double e, bool active)
+    // ルーラー範囲（ロケーター / ループ範囲）: ルーラーの帯だけを更新する。
+    // 選択範囲 (loopStartTV/...) とは独立 (それぞれ別々に機能させる要望のため)。
+    void setRulerRange(double s, double e, bool active)
+    {
+        ruler.setLoopRange(s, e, active);   // ruler 自身が repaint する
+    }
+    // 選択範囲（クリップ域のドラッグ / Shift+Enter）: 選択だけを更新する。
+    // ルーラー帯は触らない。
+    void setSelectionRange(double s, double e, bool active)
     {
         loopStartTV = s; loopEndTV = e; loopActiveTV = active;
-        ruler.setLoopRange(s, e, active);
         repaint();
         notifySelectionChanged();  // 範囲変化 → ヘッダの採用ボタン活性表示を更新
     }
     bool hasSelectionRange() const { return loopEndTV > loopStartTV + 0.001; }
     double getSelectionStart() const { return loopStartTV; }
     double getSelectionEnd()   const { return loopEndTV; }
+    // P キー用: 範囲選択があればその範囲、無ければ選択クリップ群 (primary + 追加選択) の
+    // 全体 [start,end] を返す。どちらも無ければ false。
+    bool getRangeForRulerFromSelection(double& start, double& end) const;
     void splitAtSelection();  // B キー: 選択範囲端でクリップを切る
 
     // 選択範囲のフォーカスレーン（テイク比較用）
