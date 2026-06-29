@@ -172,7 +172,8 @@ TransportBar::TransportBar()
         opts.launchAsync();
     };
     metronomeBtn.setButtonText("CLICK");
-    metronomeBtn.setTooltip(tr(u8"メトロノームのオン/オフ（右クリックで音色・音量を設定）"));
+    metronomeBtn.setTooltip(platformShortcutText(
+        tr(u8"メトロノームのオン/オフ（Option+C・右クリックで音色・音量を設定）")));
     audioSettingsBtn.setButtonText("AUDIO");
     audioSettingsBtn.setTooltip(tr(u8"マイクやスピーカーなどオーディオ機器の設定です。音が出ない・録音できないときはここで入力と出力を選びます"));
 
@@ -567,6 +568,11 @@ void TransportBar::setLoopActive(bool v)
 void TransportBar::setMetronomeActive(bool v)
 {
     metronomeBtn.setToggleState(v, juce::dontSendNotification);
+}
+
+bool TransportBar::isMetronomeActive() const
+{
+    return metronomeBtn.getToggleState();
 }
 
 void TransportBar::setCountInBars(int bars)

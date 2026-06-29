@@ -319,6 +319,7 @@ void MainComponent::showShortcutsDialog()
             { u8"R",                      u8"録音 開始 / 停止 (パンチイン対応)" },
             { u8"Cmd+Shift+R",            u8"遡及録音を確定" },
             { u8"L",                      u8"ループ再生 ON / OFF" },
+            { u8"Option+C",               u8"メトロノーム (CLICK) ON / OFF" },
             { u8"P",                      u8"範囲選択/選択クリップをルーラー範囲に設定" },
             { u8"[ / ]",                  u8"選択トラックの縦幅 (最大↔標準 / 最小↔標準)" },
             { u8"Shift+Enter",            u8"曲頭〜再生位置を範囲選択" },

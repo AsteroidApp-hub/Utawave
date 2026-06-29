@@ -276,6 +276,17 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         if (kc == 'd' || kc == 'D') { timelineView.duplicateSelectedClips(); return true; }
     }
 
+    // Option+C (Win: Alt+C) = メトロノーム (CLICK) のオン/オフ
+    if (key.getModifiers().isAltDown()
+        && !key.getModifiers().isCommandDown() && !key.getModifiers().isShiftDown()
+        && (key.getKeyCode() == 'c' || key.getKeyCode() == 'C'))
+    {
+        const bool on = !toolbar.isMetronomeActive();
+        audioEngine.setMetronomeEnabled(on);
+        toolbar.setMetronomeActive(on);
+        return true;
+    }
+
     // Cmd+Shift+R = 遡及録音を確定（再生中バックグラウンド録音を採用）
     if (key.getModifiers().isCommandDown() && key.getModifiers().isShiftDown()
         && (key.getKeyCode() == 'r' || key.getKeyCode() == 'R'))

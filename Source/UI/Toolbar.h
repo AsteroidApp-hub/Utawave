@@ -37,6 +37,7 @@ public:
     void setSnapLabel(const juce::String& label, bool active);
     void setLoopActive(bool v);
     void setMetronomeActive(bool v);
+    bool isMetronomeActive() const;
     void setCountInBars(int bars);    // ボタンのラベル更新
     void setPreRollSecs(double secs); // ボタンのラベル更新
 
