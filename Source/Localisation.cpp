@@ -56,7 +56,15 @@ static const char* const japaneseTranslations =
     "\"No MIDI inputs available\" = \"使用可能な MIDI 入力がありません\"\n"
     "\"Active MIDI inputs:\" = \"アクティブな MIDI 入力:\"\n"
     "\"MIDI Output:\" = \"MIDI 出力:\"\n"
-    "\"<< none >>\" = \"<< なし >>\"\n";
+    "\"<< none >>\" = \"<< なし >>\"\n"
+    // ── オーディオデバイスの起動エラー (AudioDeviceSelectorComponent / WASAPI) ──
+    "\"Error when trying to open audio device!\" = \"オーディオデバイスを開けませんでした\"\n"
+    "\"Couldn't open the input device!\" = \"入力デバイスを開けませんでした\"\n"
+    "\"Couldn't open the output device!\" = \"出力デバイスを開けませんでした\"\n"
+    "\"Couldn't start the input device!\" = \"入力デバイスを開始できませんでした\"\n"
+    "\"Couldn't start the output device!\" = \"出力デバイスを開始できませんでした\"\n"
+    "\"Couldn't open the output device (buffer size mismatch)\" = \"出力デバイスを開けませんでした（バッファサイズが一致しません）\"\n"
+    "\"The input and output devices don't share a common sample rate!\" = \"入力デバイスと出力デバイスで共通のサンプルレートがありません\"\n";
 
 // アプリの日本語文言 → 英語の翻訳テーブル。
 // キーは tr(u8"...") に渡す日本語文字列と完全一致させる (末尾スペース・改行も含む)。
@@ -720,6 +728,14 @@ static const char* const simplifiedChineseTranslations =
     "\"Active MIDI inputs:\" = \"已启用的 MIDI 输入：\"\n"
     "\"MIDI Output:\" = \"MIDI 输出：\"\n"
     "\"<< none >>\" = \"<< 无 >>\"\n"
+    // ── 音频设备启动错误 (AudioDeviceSelectorComponent / WASAPI) ──
+    "\"Error when trying to open audio device!\" = \"打开音频设备时出错\"\n"
+    "\"Couldn't open the input device!\" = \"无法打开输入设备\"\n"
+    "\"Couldn't open the output device!\" = \"无法打开输出设备\"\n"
+    "\"Couldn't start the input device!\" = \"无法启动输入设备\"\n"
+    "\"Couldn't start the output device!\" = \"无法启动输出设备\"\n"
+    "\"Couldn't open the output device (buffer size mismatch)\" = \"无法打开输出设备（缓冲区大小不匹配）\"\n"
+    "\"The input and output devices don't share a common sample rate!\" = \"输入设备和输出设备没有共同的采样率\"\n"
     // ── アプリ UI 文言 ──
     "\n"
     // ── トランスポート / ツールバー ──
@@ -1373,6 +1389,14 @@ static const char* const traditionalChineseTranslations =
     "\"Active MIDI inputs:\" = \"啟用的 MIDI 輸入：\"\n"
     "\"MIDI Output:\" = \"MIDI 輸出：\"\n"
     "\"<< none >>\" = \"<< 無 >>\"\n"
+    // ── 音訊裝置啟動錯誤 (AudioDeviceSelectorComponent / WASAPI) ──
+    "\"Error when trying to open audio device!\" = \"開啟音訊裝置時發生錯誤\"\n"
+    "\"Couldn't open the input device!\" = \"無法開啟輸入裝置\"\n"
+    "\"Couldn't open the output device!\" = \"無法開啟輸出裝置\"\n"
+    "\"Couldn't start the input device!\" = \"無法啟動輸入裝置\"\n"
+    "\"Couldn't start the output device!\" = \"無法啟動輸出裝置\"\n"
+    "\"Couldn't open the output device (buffer size mismatch)\" = \"無法開啟輸出裝置（緩衝區大小不符）\"\n"
+    "\"The input and output devices don't share a common sample rate!\" = \"輸入裝置與輸出裝置沒有共通的取樣率\"\n"
     // ── アプリ UI 文言 ──
     "\n"
     // ── トランスポート / ツールバー ──
@@ -2026,6 +2050,14 @@ static const char* const koreanTranslations =
     "\"Active MIDI inputs:\" = \"활성 MIDI 입력:\"\n"
     "\"MIDI Output:\" = \"MIDI 출력:\"\n"
     "\"<< none >>\" = \"<< 없음 >>\"\n"
+    // ── 오디오 장치 시작 오류 (AudioDeviceSelectorComponent / WASAPI) ──
+    "\"Error when trying to open audio device!\" = \"오디오 장치를 열 수 없습니다\"\n"
+    "\"Couldn't open the input device!\" = \"입력 장치를 열 수 없습니다\"\n"
+    "\"Couldn't open the output device!\" = \"출력 장치를 열 수 없습니다\"\n"
+    "\"Couldn't start the input device!\" = \"입력 장치를 시작할 수 없습니다\"\n"
+    "\"Couldn't start the output device!\" = \"출력 장치를 시작할 수 없습니다\"\n"
+    "\"Couldn't open the output device (buffer size mismatch)\" = \"출력 장치를 열 수 없습니다 (버퍼 크기 불일치)\"\n"
+    "\"The input and output devices don't share a common sample rate!\" = \"입력 장치와 출력 장치가 공통 샘플레이트를 공유하지 않습니다\"\n"
     // ── アプリ UI 文言 ──
     "\n"
     // ── トランスポート / ツールバー ──
