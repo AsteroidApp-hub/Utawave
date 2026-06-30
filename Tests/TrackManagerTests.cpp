@@ -15,6 +15,7 @@
 #include <JuceHeader.h>
 #include "../Source/Tracks/TrackManager.h"
 #include "../Source/Edit/TrackActions.h"
+#include "../Source/Edit/EditActions.h"
 #include "../Source/Localisation.h"
 
 namespace
@@ -40,6 +41,7 @@ public:
         testTrackDeleteAction();
         testReorderTo();
         testTrackReorderAction();
+        testMoveClipToNewTrackUndo();
     }
 
     // ── 色サイクル: track i は paletteColour(i)、9 本目 (idx 8) は 1 本目と同色 ──
@@ -375,6 +377,93 @@ public:
         expect(action.perform(), "third redo succeeds");
         expect(action.perform() == false, "redo without a preceding undo is rejected");
     }
+    // ── 波形を空き領域へドロップ → 新規トラックへ移動 の合成 Undo/Redo ──
+    // MainComponent::moveClipToNewTrack と同じ作法 (TrackAdd + ClipDelete + ClipAdd を
+    // 1 トランザクション) を本物の juce::UndoManager で往復検証する。クリップを掴んで
+    // 全トラックより下の空き領域へ落とした時の「元に戻す」が正しく動くことを担保する。
+    void testMoveClipToNewTrackUndo()
+    {
+        beginTest("Move-to-new-track composition: undo restores source clip to its ORIGINAL (pre-drag) position");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+
+        // ソーストラック: 先に「既にある波形」(小クリップ) を 0..2s に置き、掴むクリップは
+        // 元位置 5..9s に置く (両者は重ならない = スクショの初期状態)。
+        auto* src      = tm.addTrack("Vocals", false);
+        auto* srcLane  = src->getLane(0);
+        auto* existing = srcLane->addClip(juce::File("/tmp/existing.wav"), 0.0, 2.0,
+                                          fmt, src->getThumbnailCache());
+        auto* srcClip  = srcLane->addClip(juce::File("/tmp/move.wav"), 5.0, 4.0,
+                                          fmt, src->getThumbnailCache());
+        srcClip->setGain(1.3f);
+        srcClip->setName("Vocals");
+        const double origStart = srcClip->getStartPosition();   // 5.0 (掴む前の位置)
+
+        // ドラッグで掴むクリップを左 (0.5s) かつ下 (空き領域) へ動かした状態を模す。
+        // この時点で srcClip は「ドラッグ後の位置」(既存クリップ 0..2 と重なる) になっている。
+        srcClip->setStartPosition(0.5);
+
+        // 新トラックへ置くクリップはドロップ位置 (0.5) のまま取得
+        EditActions::ClipParams p;
+        p.file = srcClip->getFile();   p.startPos   = srcClip->getStartPosition();   // 0.5
+        p.duration = srcClip->getDuration(); p.fileOffset = srcClip->getFileOffset();
+        p.gain = srcClip->getGain();   p.name = srcClip->getName();
+        p.colour = srcClip->getColour();
+
+        // 修正の肝: 元クリップはドラッグ分を巻き戻してから削除させる
+        // (これが無いと undo が 0.5 = 既存クリップに重なる位置へ戻してしまう)。
+        srcClip->setStartPosition(origStart);   // 5.0 へ復元
+
+        auto* nt       = tm.addTrack(p.name, false);
+        auto* destLane = nt->getLane(0);
+
+        juce::UndoManager um;
+        int willRemove = 0;
+        auto noChange = [] {};
+
+        // 1 トランザクション: TrackAdd(no-op) → ClipDelete(元から) → ClipAdd(新トラックへ)
+        um.beginNewTransaction("Move to New Track");
+        um.perform(new EditActions::TrackAddAction(tm, nt,
+            [&](Track*) { ++willRemove; }, noChange));
+        um.perform(new EditActions::ClipDeleteAction(srcLane, srcClip, noChange));
+        um.perform(new EditActions::ClipAddAction(destLane, p, fmt,
+                                                  nt->getThumbnailCache(), noChange));
+
+        // 適用後: 2 トラック・ソースは既存クリップのみ・新トラックにドロップ位置 (0.5) のクリップ
+        expect(tm.getTrackCount() == 2, "new track added");
+        expect((int) srcLane->clips.size() == 1 && srcLane->clips[0].get() == existing,
+               "source keeps only the pre-existing clip");
+        expect((int) destLane->clips.size() == 1, "clip added to new track");
+        {
+            auto* moved = destLane->clips[0].get();
+            expect(std::abs(moved->getStartPosition() - 0.5) < 1e-9, "new clip lands at drop position");
+            expect(std::abs((double) moved->getGain() - 1.3) < 1e-6, "moved clip keeps gain");
+        }
+
+        // Undo: ソースへ同一インスタンスが復帰し、位置は ORIGINAL (5.0) = 既存クリップに重ならない
+        expect(um.undo(), "undo the whole transaction");
+        expect(tm.getTrackCount() == 1 && tm.indexOf(nt) == -1, "new track removed by undo");
+        expect((int) srcLane->clips.size() == 2, "both clips back on source");
+        expect(srcClip->getStartPosition() > 4.999 && srcClip->getStartPosition() < 5.001,
+               "source clip restored to ORIGINAL position (5.0), not the dragged 0.5");
+        expect(srcClip->getStartPosition() >= existing->getEndPosition(),
+               "restored source clip does NOT overlap the pre-existing clip");
+        expect(willRemove == 1, "willRemove fired once on undo (track removed)");
+
+        // Redo: 新トラックインスタンスが元の位置へ復帰し、クリップが再びドロップ位置へ移る
+        expect(um.redo(), "redo the whole transaction");
+        expect(tm.getTrackCount() == 2 && tm.indexOf(nt) == 1,
+               "same new track restored at original index");
+        expect((int) srcLane->clips.size() == 1, "source back to only the pre-existing clip");
+        expect((int) nt->getLane(0)->clips.size() == 1,
+               "clip back on new track (destLane valid across undo/redo)");
+
+        // もう一度 Undo して初期状態へ (べき等・原位置維持)
+        expect(um.undo(), "undo again");
+        expect(tm.getTrackCount() == 1 && (int) srcLane->clips.size() == 2,
+               "back to initial: one track with existing + restored clip");
+    }
+
     // ── TrackDeleteAction: 削除の Undo/Redo (複数・同一インスタンス復帰・元位置再構成) ──
     void testTrackDeleteAction()
     {

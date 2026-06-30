@@ -248,6 +248,10 @@ private:
     // ラウドネス適用 + リフレッシュ。複数ドロップも 1 つの進捗ウィンドウにまとまる。
     void importAudioFilesAtDrop(const juce::Array<juce::File>& sources,
                                 double dropTime, int targetTrackIdx);
+    // クリップを全トラックより下の空き領域へドロップした時: 新規トラックを作って移す。
+    // TrackAdd + ClipDelete + ClipAdd を 1 トランザクションに積み Cmd+Z 1 回で戻す。
+    void moveClipToNewTrack(const EditActions::ClipParams& p, bool stereo,
+                            Lane* srcLane, AudioClip* srcClip);
     // ファイル単体のラウドネスを測定し、target に合わせる track vol(dB) を outVolDb に返す。
     // 測定不能なら false (autoNormalizeOnImport の判定は呼び出し側)。
     bool computeLoudnessTargetVol(const juce::File& file, double fileOffset,

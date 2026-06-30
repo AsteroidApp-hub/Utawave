@@ -248,6 +248,10 @@ public:
     std::function<void(class MidiClip* /*clip*/, Track* /*track*/)> onMidiClipDoubleClicked;
     // MIDI クリップを破棄する直前に通知 (開いているピアノロールを閉じる等)
     std::function<void(class MidiClip* /*clip*/)> onMidiClipWillBeRemoved;
+    // クリップを全トラックより下の空き領域へドロップした時: 新規トラックを作って移す。
+    // MainComponent が Undo (TrackAdd + ClipDelete + ClipAdd) を 1 トランザクションで配線する。
+    std::function<void(const EditActions::ClipParams& /*p*/, bool /*stereo*/,
+                       Lane* /*srcLane*/, AudioClip* /*srcClip*/)> onMoveClipToNewTrack;
     // 波形ファイルが差し替わった時 (キー変更等) に MainComponent 側で
     // 完了までポーリングして波形を再描画させるためのコールバック
     std::function<void()> onWaveformRefreshNeeded;

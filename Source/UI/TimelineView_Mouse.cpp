@@ -1205,6 +1205,59 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
         Lane*  destLane  = nullptr;
         int    destLaneIdx = 0, destTrackIdx = -1;
 
+        // 移動するクリップのパラメータを取得する共通ヘルパ。端のフェードがソースレーンでの
+        // クロスフェード由来 (= その端に別クリップが重なっていた) なら、移動先には相手が
+        // いない/別の相手なので「元の巨大フェード」を持ち込まず小さな既定値に戻す
+        // (コピー/複製と同じ作法)。別トラック移動と新規トラック移動の双方で使う。
+        auto buildMovedClipParams = [](AudioClip* clip, Lane* srcLane)
+        {
+            EditActions::ClipParams p;
+            p.file       = clip->getFile();
+            p.startPos   = clip->getStartPosition();
+            p.duration   = clip->getDuration();
+            p.fileOffset = clip->getFileOffset();
+            auto edgeOverlapsNeighbor = [](Lane* lane, AudioClip* self, double edgeTime)
+            {
+                if (!lane) return false;
+                for (auto& cp : lane->clips)
+                {
+                    auto* o = cp.get();
+                    if (o == self) continue;
+                    if (o->getStartPosition() < edgeTime - 0.001
+                        && o->getEndPosition() > edgeTime + 0.001)
+                        return true;
+                }
+                return false;
+            };
+            const double minEdgeFade = juce::jmin(0.010, clip->getDuration() * 0.5);
+            p.fadeIn  = edgeOverlapsNeighbor(srcLane, clip, clip->getStartPosition())
+                            ? minEdgeFade : clip->getFadeInSecs();
+            p.fadeOut = edgeOverlapsNeighbor(srcLane, clip, clip->getEndPosition())
+                            ? minEdgeFade : clip->getFadeOutSecs();
+            p.gain    = clip->getGain();
+            p.name    = clip->getName();
+            p.colour  = clip->getColour();
+            return p;
+        };
+
+        // クリップを「ドラッグ前の位置」へ巻き戻してから移動用パラメータを取得するヘルパ。
+        // これで 2 点を正す:
+        //  (1) フェードのリセット判定 (buildMovedClipParams の edgeOverlapsNeighbor) を
+        //      ドラッグ後の一時的な重なりではなく「元の隣接関係」で行う (本物のフェードを
+        //      ドラッグ中の通過で誤って 10ms に消さない)。
+        //  (2) 元クリップを ClipDelete の前に元位置へ戻すので、undo が元クリップを元の位置へ
+        //      正しく戻す (ドラッグ後の位置に戻して既存波形へ上乗せされる不具合を防ぐ)。
+        // 返す startPos はドロップ位置 (= 移動先での配置位置) を尊重する。
+        auto rewindAndBuildParams = [&](AudioClip* clip, Lane* clipLane)
+        {
+            const double droppedStart = clip->getStartPosition();   // ドラッグ後 = ドロップ位置
+            for (auto& s : preDragStates)
+                if (s.clip == clip) { s.restore(); break; }         // 元位置へ巻き戻す
+            EditActions::ClipParams pp = buildMovedClipParams(clip, clipLane);  // 元位置基準
+            pp.startPos = droppedStart;                             // 配置はドロップ位置
+            return pp;
+        };
+
         for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
         {
             auto* track = trackManager.getTrack(ti);
@@ -1235,45 +1288,46 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             }
         }
 
+        // 全トラックより下の空き領域へドロップ → 新規トラックを作ってそこへ移す
+        // (単一クリップのみ対象。複数選択ドラッグは従来どおり元の位置へ戻す)。
+        // トラック生成 + Undo 配線は MainComponent が担う (onMoveClipToNewTrack)。
+        if (!destTrack && selectedClip.valid() && extraSelections.empty()
+            && onMoveClipToNewTrack)
+        {
+            int lastBottom = area2.getY() - scrollY;
+            const int tc = trackManager.getTrackCount();
+            if (tc > 0)
+            {
+                const int li = tc - 1;
+                lastBottom = area2.getY() + trackManager.getTrackY(li) - scrollY
+                             + trackManager.getTrack(li)->getTotalHeight();
+            }
+            if (mouseY >= lastBottom)
+            {
+                // 新トラックへはドロップ位置に置き、元クリップは元位置へ巻き戻してから削除させる
+                // (rewindAndBuildParams が両方を担う)。これで undo は元の位置へ正しく戻る。
+                EditActions::ClipParams p = rewindAndBuildParams(selectedClip.clip,
+                                                                 selectedClip.lane);
+                const bool stereo = selectedClip.track != nullptr
+                                        && selectedClip.track->isStereo();
+                onMoveClipToNewTrack(p, stereo, selectedClip.lane, selectedClip.clip);
+                dragMode = DragMode::None;
+                preDragStates.clear();
+                return;
+            }
+        }
+
         // 別レーン/トラックへ移動
         if (destTrack && destLane && destLane != selectedClip.lane)
         {
             // 元から削除して移動先に新規作成（Undo は元に戻す ClipDeleteAction + ClipAddAction の組み合わせ）
             if (undoManager) undoManager->beginNewTransaction("Move to Track");
 
-            // 現在のクリップのパラメータを取得
-            EditActions::ClipParams p;
-            p.file       = selectedClip.clip->getFile();
-            p.startPos   = selectedClip.clip->getStartPosition();
-            p.duration   = selectedClip.clip->getDuration();
-            p.fileOffset = selectedClip.clip->getFileOffset();
-            // 端のフェードがソースレーンでのクロスフェード由来 (= その端に別クリップが重なって
-            // いた) なら、移動先には相手がいない/別の相手なので「元の巨大フェード」を持ち込まず
-            // 小さな既定値に戻す (コピー/複製と同じ作法)。これをしないと元のクロスフェード長
-            // ぶんの巨大な X が移動先で描かれてしまう。
-            auto edgeOverlapsNeighbor = [](Lane* lane, AudioClip* self, double edgeTime)
-            {
-                if (!lane) return false;
-                for (auto& cp : lane->clips)
-                {
-                    auto* o = cp.get();
-                    if (o == self) continue;
-                    if (o->getStartPosition() < edgeTime - 0.001
-                        && o->getEndPosition() > edgeTime + 0.001)
-                        return true;
-                }
-                return false;
-            };
-            const double minEdgeFade = juce::jmin(0.010, selectedClip.clip->getDuration() * 0.5);
-            p.fadeIn     = edgeOverlapsNeighbor(selectedClip.lane, selectedClip.clip,
-                                                selectedClip.clip->getStartPosition())
-                           ? minEdgeFade : selectedClip.clip->getFadeInSecs();
-            p.fadeOut    = edgeOverlapsNeighbor(selectedClip.lane, selectedClip.clip,
-                                                selectedClip.clip->getEndPosition())
-                           ? minEdgeFade : selectedClip.clip->getFadeOutSecs();
-            p.gain       = selectedClip.clip->getGain();
-            p.name       = selectedClip.clip->getName();
-            p.colour     = selectedClip.clip->getColour();
+            // パラメータ取得 + 元クリップをドラッグ前位置へ巻き戻す (端のクロスフェード由来フェードは
+            // 既定へ戻す)。巻き戻しにより、別トラックへ移動した後の undo が元クリップを「ドラッグ後の
+            // 位置」ではなく元の位置へ戻す (斜めドラッグで既存波形へ上乗せされる不具合を防ぐ)。
+            EditActions::ClipParams p = rewindAndBuildParams(selectedClip.clip,
+                                                             selectedClip.lane);
 
             if (undoManager)
             {

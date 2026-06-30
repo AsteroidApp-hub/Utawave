@@ -410,6 +410,12 @@ MainComponent::MainComponent()
     {
         scheduleWaveformRefresh();
     };
+    // クリップを全トラックより下の空き領域へドロップ → 新規トラックを作って移す
+    timelineView.onMoveClipToNewTrack = [this](const EditActions::ClipParams& p, bool stereo,
+                                               Lane* srcLane, AudioClip* srcClip)
+    {
+        moveClipToNewTrack(p, stereo, srcLane, srcClip);
+    };
 
     timelineView.onImportMidi = [this](const juce::File& src, double dropTime)
     {

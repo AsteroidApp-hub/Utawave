@@ -115,30 +115,40 @@ MainComponent::convertImportSourcesWithProgress(const juce::Array<juce::File>& s
 void MainComponent::importAudioFilesAtDrop(const juce::Array<juce::File>& sources,
                                            double dropTime, int targetTrackIdx)
 {
-    juce::ignoreUnused(dropTime);
     auto items = convertImportSourcesWithProgress(sources);
+    if (items.empty()) return;
 
-    // 配置: ドロップした対象トラック (targetTrackIdx) は尊重するが、時間位置は常に
-    // プロジェクト先頭 (0 秒) 固定にする。歌い手用途で「カラオケ音源を頭から並べる」が
-    // 定番のため、ドロップ位置 (dropTime) ではなく頭に置く (Cmd+I と同じ挙動)。
-    // 既存トラックが無効 / クリックトラックなら新規作成して順に下のトラックへ。
-    const double placeAt = 0.0;
+    // 配置ルール:
+    //  ・単一ファイルを既存トラックへドロップ → そのトラックの Lane 0 のドロップ位置へ置く
+    //    (テイクレーンへ退避せず、波形を置いた位置にそのまま置く)
+    //  ・複数ファイル → マルチトラック取り込みとみなし、全て新規トラックへ取り込む
+    //    (各ファイルを別トラックの先頭に揃えて並べる)
+    //  ・ドロップ先がクリック / MIDI トラック等で無効な場合も新規トラックへ
+    const bool multiTrackImport = items.size() > 1;
+
+    Track* targetTrack = nullptr;
+    if (!multiTrackImport
+        && targetTrackIdx >= 0 && targetTrackIdx < trackManager.getTrackCount())
+    {
+        Track* t = trackManager.getTrack(targetTrackIdx);
+        if (t && !t->isClickTrack() && !t->isMidiTrack())
+            targetTrack = t;
+    }
+
     bool added = false;
-    int  created = 0;
     for (auto& it : items)
     {
-        Track* t  = nullptr;
-        int    idx = targetTrackIdx + created;
-        if (targetTrackIdx >= 0 && idx >= 0 && idx < trackManager.getTrackCount())
-            t = trackManager.getTrack(idx);
-        if (!t || t->isClickTrack())
+        if (targetTrack)
         {
-            t = trackManager.addTrack(it.name, it.stereo);
-            ++created;
+            // 既存トラックの Lane 0 のドロップ位置へ (頭固定にせずドロップ位置を尊重)
+            targetTrack->addClipToLane0(it.file, juce::jmax(0.0, dropTime), it.dur);
+            if (it.hasVol) targetTrack->setVolume(it.volDb);
+            added = true;
         }
-        if (t)
+        else if (Track* t = trackManager.addTrack(it.name, it.stereo))
         {
-            t->addClip(it.file, placeAt, it.dur);
+            // 新規トラックは先頭 (0 秒) に揃える (カラオケ音源 / マルチトラックの定番)
+            t->addClip(it.file, 0.0, it.dur);
             if (it.hasVol) t->setVolume(it.volDb);   // ラウドネス調整 (変換時に測定済み)
             added = true;
         }
@@ -148,6 +158,44 @@ void MainComponent::importAudioFilesAtDrop(const juce::Array<juce::File>& source
     audioEngine.preparePlayback(trackManager);
     if (added) scheduleWaveformRefresh();
     if (added) markProjectDirty();
+}
+
+void MainComponent::moveClipToNewTrack(const EditActions::ClipParams& p, bool stereo,
+                                       Lane* srcLane, AudioClip* srcClip)
+{
+    if (!srcLane || !srcClip) return;
+
+    // 新規トラックを作成 (クリップ名 / ソースのモノ・ステレオを継承)
+    juce::String name = p.name.isNotEmpty() ? p.name
+                        : p.file.getFileNameWithoutExtension();
+    Track* nt = trackManager.addTrack(name, stereo);
+    if (!nt) return;
+    Lane* destLane = nt->getLane(0);
+    if (!destLane) return;
+
+    // editChangeCb 相当: refresh + 再生スナップショット無効化 (再生中も他トラックを止めない)
+    auto onChange = [this]
+    {
+        markProjectDirty();
+        trackHeaderPanel.refresh();
+        timelineView.refresh();
+        audioEngine.invalidatePlayback();
+    };
+
+    // 1 トランザクションに: トラック追加 → ソースから削除 → 新トラック Lane 0 へ追加。
+    // undo は逆順 (ClipAdd 取消 → ClipDelete 取消 = ソースへ復帰 → TrackAdd 取消 = トラック除去)。
+    undoManager.beginNewTransaction("Move to New Track");
+    pushTrackAddUndo(nt, /*newTransaction=*/false);
+    undoManager.perform(new EditActions::ClipDeleteAction(srcLane, srcClip, onChange));
+    undoManager.perform(new EditActions::ClipAddAction(
+        destLane, p, nt->getFormatManager(), nt->getThumbnailCache(), onChange));
+
+    trackHeaderPanel.refresh();
+    timelineView.refresh();
+    audioEngine.preparePlayback(trackManager);
+    scheduleWaveformRefresh();
+    statusBar.setTrackCount(trackManager.getTrackCount());
+    markProjectDirty();
 }
 
 std::vector<MainComponent::ImportedItem> MainComponent::convertImportSources(

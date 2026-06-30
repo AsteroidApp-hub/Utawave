@@ -117,6 +117,8 @@ public:
     Lane*       getLane(int i)       { return lanes[(size_t)i].get(); }
     const Lane* getLane(int i) const { return lanes[(size_t)i].get(); }
     AudioClip*  addClip(const juce::File& file, double startPos, double dur);
+    // Lane 0 の指定位置へ直接クリップを追加 (D&D 取り込み用・既存クリップと重なってもよい)
+    AudioClip*  addClipToLane0(const juce::File& file, double startPos, double dur);
 
     // ── MIDI クリップ ──
     int        getMidiClipCount()  const { return (int)midiClips.size(); }

@@ -282,6 +282,13 @@ AudioClip* Track::addClip(const juce::File& file, double startPos, double dur)
     return lanes.back()->addClip(file, startPos, dur, formatManager, thumbnailCache);
 }
 
+AudioClip* Track::addClipToLane0(const juce::File& file, double startPos, double dur)
+{
+    if (lanes.empty())
+        lanes.push_back(std::make_unique<Lane>());
+    return lanes[0]->addClip(file, startPos, dur, formatManager, thumbnailCache);
+}
+
 int Track::getTotalHeight() const
 {
     // メイン部 + レーン部（独立にリサイズ可能）
