@@ -843,20 +843,29 @@ void TrackHeaderView::paint(juce::Graphics& g)
             drawBar(meterX, y, meterW, juce::jmax(dbL, dbR), col, overThreshDb, overCol);
         };
 
+        // Peak は -3dB 超を赤 (クリッピング近傍) で点灯。緑/赤の境界をここに固定
+        const float peakOverThreshDb = -3.0f;
+
         drawMeter(peakY, inPeakL, inPeakR, juce::Colour(0xff44dd88),
-                  -3.0f, juce::Colour(0xffd04444));
+                  peakOverThreshDb, juce::Colour(0xffd04444));
         drawMeter(vuY,   inVUL,   inVUR,   juce::Colour(0xff5599cc),
                   vuReferenceLevel, AppColours::meterYellow);
 
-        // 0 VU 基準線（VU メータ上に短い縦線、モノ/ステレオ共通で 1 本）
-        if (vuReferenceLevel > -60.0f && vuReferenceLevel < 0.0f)
+        // メータ上に基準となる縦線を引くヘルパ（モノ/ステレオ共通で 1 本）
+        auto drawRefLine = [&](int y, float thresholdDb, juce::Colour col)
         {
-            const float refNorm = juce::jlimit(0.0f, 1.0f, (vuReferenceLevel + 60.0f) / 60.0f);
+            if (thresholdDb <= -60.0f || thresholdDb >= 0.0f) return;
+            const float refNorm = juce::jlimit(0.0f, 1.0f, (thresholdDb + 60.0f) / 60.0f);
             const int refX = meterX + (int)(refNorm * meterW);
-            g.setColour(AppColours::accent.withAlpha(0.7f));
-            g.drawLine((float) refX, (float) (vuY - 1),
-                       (float) refX, (float) (vuY + meterH + 1), 1.0f);
-        }
+            g.setColour(col);
+            g.drawLine((float) refX, (float) (y - 1),
+                       (float) refX, (float) (y + meterH + 1), 1.0f);
+        };
+
+        // Peak の緑/赤 境界線（-3dB）
+        drawRefLine(peakY, peakOverThreshDb, AppColours::accent.withAlpha(0.7f));
+        // 0 VU 基準線
+        drawRefLine(vuY, vuReferenceLevel, AppColours::accent.withAlpha(0.7f));
 
         g.setColour(AppColours::textDim);
         g.setFont(juce::FontOptions(9.0f));
