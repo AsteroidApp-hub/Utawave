@@ -317,7 +317,8 @@ void MainComponent::showShortcutsDialog()
             { u8"Space",                  u8"再生 / 停止" },
             { u8"S",                      u8"停止" },
             { u8"R",                      u8"録音 開始 / 停止 (パンチイン対応)" },
-            { u8"Cmd+Shift+R",            u8"遡及録音を確定" },
+            // Cmd+Shift+R (遡及録音を確定) はキーバインドとして残しているが、初心者が
+            // 迷わないよう一覧からは非表示 (要望次第で復活)。実装は MainComponent_Commands.cpp
             { u8"L",                      u8"ループ再生 ON / OFF" },
             { u8"Option+C",               u8"メトロノーム (CLICK) ON / OFF" },
             { u8"P",                      u8"範囲選択/選択クリップをルーラー範囲に設定" },

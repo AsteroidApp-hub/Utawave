@@ -21,7 +21,7 @@ void MainComponent::showPreferences()
                        backupCountLabel, vuRefLabel, loudnessLabel;
         juce::ComboBox languageCombo, bitsCombo, autoSaveCombo, backupCountCombo, vuRefCombo, loudnessCombo;
         std::function<void(int)>   onLanguageChanged;   // 1=日本語, 2=English
-        juce::ToggleButton followSelBtn, retroBtn, rtzBtn, autoNormBtn, zoomMouseBtn, peakGuardBtn, zeroCrossBtn, stripMetaBtn;
+        juce::ToggleButton followSelBtn, rtzBtn, autoNormBtn, zoomMouseBtn, peakGuardBtn, zeroCrossBtn, stripMetaBtn;
         juce::ToggleButton showMidiExportBtn;   // 初期状態 / コールバックは showPreferences 側で設定 (アプリ全体設定)
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton tooltipsBtn;         // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)
@@ -41,7 +41,6 @@ void MainComponent::showPreferences()
         juce::Component content;
         std::function<void(int)>   onBitsChanged;
         std::function<void(bool)>  onFollowSelChanged;
-        std::function<void(bool)>  onRetroChanged;
         std::function<void(bool)>  onRtzChanged;
         std::function<void(int)>   onAutoSaveChanged;
         std::function<void(int)>   onBackupCountChanged;
@@ -63,7 +62,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onMulticoreChanged;
         std::function<void()>      onResetDefaults;
 
-        PrefsDlg(int curBits, bool curFollowSel, bool curRetro, bool curRtz,
+        PrefsDlg(int curBits, bool curFollowSel, bool curRtz,
                  int curAutoSaveMin, int curMaxBackups, float curVuRefDb, float curLoudnessTargetLufs,
                  bool curAutoNorm, bool curZoomMouse, bool curPeakGuard, bool curZeroCross,
                  bool curStripMeta)
@@ -192,14 +191,9 @@ void MainComponent::showPreferences()
             addAndMakeVisible(tooltipsBtn);
 
             // 録音フロー
-            retroBtn.setButtonText(platformShortcutText(
-                tr(u8"再生中バックグラウンド録音 (遡及録音 Cmd+Shift+R で確定)")));
-            retroBtn.setToggleState(curRetro, juce::dontSendNotification);
-            retroBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
-            retroBtn.onClick = [this] {
-                if (onRetroChanged) onRetroChanged(retroBtn.getToggleState());
-            };
-            addAndMakeVisible(retroBtn);
+            // 「再生中バックグラウンド録音 (遡及録音)」のトグルは UI から撤去 (初心者が迷うため・
+            //  常時 ON 運用)。機能と Cmd+Shift+R は残しているので、要望があれば retroBtn を復活し
+            //  appSettings.retrospectiveEnabled に再配線するだけで戻せる。
 
             // 録音レイテンシ補正 (アプリ全体設定。初期状態 / 文言は showPreferences 側で設定)
             recCompBtn.setButtonText(
@@ -462,7 +456,6 @@ void MainComponent::showPreferences()
             midiPagingBtn.setBounds(14, y, w - 28, 24); y += 28;
             tooltipsBtn.setBounds(14, y, w - 28, 24); y += 32;
             recLabel.setBounds(14, y, w - 28, 22); y += 26;
-            retroBtn.setBounds(14, y, w - 28, 24); y += 28;
             recCompBtn.setBounds(14, y, w - 28, 24); y += 26;
             recCompOffsetLabel.setBounds(14, y, 250, 24);
             recCompOffsetSlider.setBounds(270, y, w - 270 - 14, 24); y += 34;
@@ -502,14 +495,13 @@ void MainComponent::showPreferences()
         }
 
         // 全 UI コントロールの表示を curXxx の値に同期させる (Reset 用)
-        void syncUiToValues(int curBits, bool curFollowSel, bool curRetro, bool curRtz,
+        void syncUiToValues(int curBits, bool curFollowSel, bool curRtz,
                             int curAutoSaveMin, int curMaxBackups, float curVuRefDb, float curLoudnessLufs,
                             bool curAutoNorm, bool curZoomMouse, bool curPeakGuard, bool curZeroCross,
                             bool curStripMeta)
         {
             bitsCombo.setSelectedId(curBits == 24 ? 24 : 32, juce::dontSendNotification);
             followSelBtn.setToggleState(curFollowSel, juce::dontSendNotification);
-            retroBtn   .setToggleState(curRetro, juce::dontSendNotification);
             rtzBtn     .setToggleState(curRtz,   juce::dontSendNotification);
             zoomMouseBtn.setToggleState(curZoomMouse, juce::dontSendNotification);
             zeroCrossBtn.setToggleState(curZeroCross, juce::dontSendNotification);
@@ -565,7 +557,6 @@ void MainComponent::showPreferences()
 
     auto* dlg = new PrefsDlg(appSettings.resampleOutputBits,
                               appSettings.playheadFollowsSelection,
-                              appSettings.retrospectiveEnabled,
                               appSettings.returnToStartOnStop,
                               appSettings.autoSaveIntervalMinutes,
                               appSettings.maxBackups,
@@ -600,10 +591,6 @@ void MainComponent::showPreferences()
     dlg->onFollowSelChanged = [this](bool v) {
         appSettings.playheadFollowsSelection = v;
         timelineView.setAppSettings(appSettings);
-        markProjectDirty();
-    };
-    dlg->onRetroChanged = [this](bool v) {
-        appSettings.retrospectiveEnabled = v;
         markProjectDirty();
     };
     dlg->onRtzChanged = [this](bool v) {
@@ -786,7 +773,6 @@ void MainComponent::showPreferences()
         // ダイアログの UI を新しい値に同期
         dlg->syncUiToValues(appSettings.resampleOutputBits,
                             appSettings.playheadFollowsSelection,
-                            appSettings.retrospectiveEnabled,
                             appSettings.returnToStartOnStop,
                             appSettings.autoSaveIntervalMinutes,
                             appSettings.maxBackups,
