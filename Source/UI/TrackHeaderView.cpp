@@ -4,6 +4,7 @@
 #include "TrackHeaderView.h"
 #include "../Localisation.h"
 #include "../AppColours.h"
+#include "Meter.h"
 #include "../VST/PluginChain.h"
 #include "../Audio/LufsMeter.h"
 
@@ -566,14 +567,27 @@ void TrackHeaderView::updateInputLevels(float peakL, float peakR, float vuL, flo
     const float newVUL   = smoothVU  (inVUL,   vuL);
     const float newVUR   = smoothVU  (inVUR,   vuR);
 
-    // 変化が小さければ repaint を省略 (dB で 0.3 未満の差は人間には知覚しづらい)
+    // クリップ検出は「生のピーク」で行う (平滑化で 0dBFS 到達が均されると見落とすため)。
+    // 0 dBFS 以上に達したら一定時間 赤を保持して、瞬間的なクリップも視認できるようにする。
+    // 保持は MainComponent の 20Hz タイマーが停止後にメータ更新を打ち切る猶予 (idleMeterTicks<30
+    // = 1500ms) より必ず短くする。同値/超過だと、停止直前に鳴ったクリップの赤を消す最後の repaint が
+    // 更新打ち切りの後に来て、赤が消えず残ってしまう (両者を等しくしない = ここを 1500 未満に保つ)。
+    constexpr juce::uint32 kPeakClipHoldMs = 1200;
+    if (peakL >= MeterDraw::kRedDb || peakR >= MeterDraw::kRedDb)
+        peakClipUntilMs = juce::Time::getMillisecondCounter() + kPeakClipHoldMs;
+    const bool clipNow = juce::Time::getMillisecondCounter() < peakClipUntilMs;
+
+    // 変化が小さく、かつクリップ表示状態も変わらなければ repaint を省略
+    // (dB で 0.3 未満の差は知覚しづらい / クリップの点灯・消灯時は必ず描き直す)
     auto closeEnough = [](float a, float b) { return std::abs(a - b) < 0.3f; };
-    if (closeEnough(newPeakL, inPeakL) && closeEnough(newPeakR, inPeakR)
+    if (clipNow == peakClipShown
+        && closeEnough(newPeakL, inPeakL) && closeEnough(newPeakR, inPeakR)
         && closeEnough(newVUL, inVUL)   && closeEnough(newVUR, inVUR))
         return;
 
     inPeakL = newPeakL; inPeakR = newPeakR;
     inVUL   = newVUL;   inVUR   = newVUR;
+    peakClipShown = clipNow;
     repaint(0, 58, juce::jmin(getWidth(), controlsWidth), 20);
 }
 
@@ -843,11 +857,34 @@ void TrackHeaderView::paint(juce::Graphics& g)
             drawBar(meterX, y, meterW, juce::jmax(dbL, dbR), col, overThreshDb, overCol);
         };
 
-        // Peak は -3dB 超を赤 (クリッピング近傍) で点灯。緑/赤の境界をここに固定
-        const float peakOverThreshDb = -3.0f;
+        // Peak メーター: 緑 (< -6dB) → 黄 (-6〜0dB の警告域) → 0 dBFS 到達で右端に赤クリップ表示。
+        // 「赤 = 実際に割れた (クリップ)」「黄 = クリップ手前」で他 DAW / アプリ縦メーターと同基準
+        // (MeterDraw::kYellowDb / kRedDb)。クリップは updateInputLevels が一定時間保持する。
+        auto drawPeakMeter = [&](int y, float dbL, float dbR)
+        {
+            g.setColour(juce::Colour(0xff1a1a1a));
+            g.fillRect(meterX, y, meterW, meterH);
+            const int levelW  = (int)(norm(juce::jmax(dbL, dbR)) * meterW);
+            if (levelW > 0)
+            {
+                const int yellowX = (int)(norm(MeterDraw::kYellowDb) * meterW);  // -6dB 位置
+                g.setColour(AppColours::meterGreen);
+                g.fillRect(meterX, y, juce::jmin(levelW, yellowX), meterH);      // 緑: 〜-6dB
+                if (levelW > yellowX)                                            // 黄: -6dB〜
+                {
+                    g.setColour(AppColours::meterYellow);
+                    g.fillRect(meterX + yellowX, y, levelW - yellowX, meterH);
+                }
+            }
+            if (peakClipShown)                                                   // 赤: クリップ保持中
+            {
+                const int clipW = juce::jmax(3, meterW / 36);   // 右端の小さな赤ブロック
+                g.setColour(AppColours::meterRed);
+                g.fillRect(meterX + meterW - clipW, y, clipW, meterH);
+            }
+        };
 
-        drawMeter(peakY, inPeakL, inPeakR, juce::Colour(0xff44dd88),
-                  peakOverThreshDb, juce::Colour(0xffd04444));
+        drawPeakMeter(peakY, inPeakL, inPeakR);
         drawMeter(vuY,   inVUL,   inVUR,   juce::Colour(0xff5599cc),
                   vuReferenceLevel, AppColours::meterYellow);
 
@@ -862,8 +899,8 @@ void TrackHeaderView::paint(juce::Graphics& g)
                        (float) refX, (float) (y + meterH + 1), 1.0f);
         };
 
-        // Peak の緑/赤 境界線（-3dB）
-        drawRefLine(peakY, peakOverThreshDb, AppColours::accent.withAlpha(0.7f));
+        // Peak の緑/黄 境界線（-6dB = クリップ手前の警告域の始まり）
+        drawRefLine(peakY, MeterDraw::kYellowDb, AppColours::accent.withAlpha(0.7f));
         // 0 VU 基準線
         drawRefLine(vuY, vuReferenceLevel, AppColours::accent.withAlpha(0.7f));
 

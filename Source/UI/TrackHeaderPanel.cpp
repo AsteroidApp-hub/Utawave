@@ -626,6 +626,18 @@ void TrackHeaderPanel::updateInputLevels(std::function<float(int)> peakGetter,
         auto* track = trackManager.getTrack((int)i);
         if (!track || track->isClickTrack()) continue;
 
+        // ミュート中は出力が無音なのでメータも無音へ落とす。再生中にミュートすると、
+        // エンジンはそのトラックをスキップしメータ値が固まる (更新されない) ため、UI 側で
+        // -96 を供給して減衰させ「ミュートでメータがリセット」される挙動にする。
+        // (R / 入力モニタは入力レベル表示なのでこの対象外 = 声の入力は見えたまま)
+        const bool showOutput = track->isMidiTrack()
+                             || (!track->isRecArmed() && !track->isInputMonitor());
+        if (showOutput && track->isMuted())
+        {
+            headerViews[i]->updateInputLevels(-96.0f, -96.0f, -96.0f, -96.0f);
+            continue;
+        }
+
         // MIDI トラックは入力ではなくトラック出力（シンセ出力）をメータ表示
         if (track->isMidiTrack())
         {

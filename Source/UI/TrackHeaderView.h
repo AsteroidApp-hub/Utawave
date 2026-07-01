@@ -187,6 +187,9 @@ private:
     float inPeakL { -96.0f }, inPeakR { -96.0f };
     float inVUL   { -96.0f }, inVUR   { -96.0f };
     float vuReferenceLevel { -18.0f };
+    // クリップ表示: 実際に 0 dBFS 以上へ達したら一定時間赤を保持 (瞬間的なクリップの見落とし防止)
+    juce::uint32 peakClipUntilMs { 0 };   // 赤クリップ表示の保持期限 (ms・0=非表示)
+    bool         peakClipShown   { false };// 直近に赤クリップを描いたか (repaint 判定用)
     float loudnessTargetLufs { -24.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrackHeaderView)
