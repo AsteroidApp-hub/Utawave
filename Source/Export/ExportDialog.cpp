@@ -238,16 +238,15 @@ ExportDialog::ExportDialog(const Context& ctx) : context(ctx)
     tracksViewport.setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
     addAndMakeVisible(tracksViewport);
 
-    selectAllBtn.onClick = [this]
+    // ヘッダの全体チェックボックス: クリック後の状態を全トラックへ一括適用 (ON=全選択 / OFF=全解除)
+    masterToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+    masterToggle.onClick = [this]
     {
-        for (auto* b : trackToggles) b->setToggleState(true, juce::dontSendNotification);
+        const bool target = masterToggle.getToggleState();
+        for (auto* b : trackToggles) b->setToggleState(target, juce::dontSendNotification);
+        syncMasterToggle();
     };
-    deselectAllBtn.onClick = [this]
-    {
-        for (auto* b : trackToggles) b->setToggleState(false, juce::dontSendNotification);
-    };
-    addAndMakeVisible(selectAllBtn);
-    addAndMakeVisible(deselectAllBtn);
+    addAndMakeVisible(masterToggle);
 
     folderEditor.setText(context.defaultFolder.getFullPathName(), juce::dontSendNotification);
     folderEditor.setJustification(juce::Justification::centredLeft);
@@ -337,6 +336,7 @@ void ExportDialog::rebuildTrackList()
     }
 
     layoutTrackRows();
+    syncMasterToggle();   // 初期状態 (既定は全 ON) を全体チェックへ反映
 }
 
 void ExportDialog::layoutTrackRows()
@@ -398,6 +398,7 @@ void ExportDialog::mouseDown(const juce::MouseEvent& e)
     dragPaintTarget = ! trackToggles[row]->getToggleState();   // 開始行を反転した状態を塗る
     dragPaintActive = true;
     trackToggles[row]->setToggleState(dragPaintTarget, juce::dontSendNotification);
+    syncMasterToggle();
 }
 
 void ExportDialog::mouseDrag(const juce::MouseEvent& e)
@@ -409,12 +410,24 @@ void ExportDialog::mouseDrag(const juce::MouseEvent& e)
     const int row = yInContent / kTrackRowH;
     if (row >= 0 && row < trackToggles.size()
         && trackToggles[row]->getToggleState() != dragPaintTarget)
+    {
         trackToggles[row]->setToggleState(dragPaintTarget, juce::dontSendNotification);
+        syncMasterToggle();
+    }
 }
 
 void ExportDialog::mouseUp(const juce::MouseEvent&)
 {
     dragPaintActive = false;
+}
+
+void ExportDialog::syncMasterToggle()
+{
+    // 全トラックが ON のときだけ全体チェックを ON にする (1 つでも OFF なら OFF)
+    bool all = trackToggles.size() > 0;
+    for (auto* b : trackToggles)
+        if (! b->getToggleState()) { all = false; break; }
+    masterToggle.setToggleState(all, juce::dontSendNotification);
 }
 
 std::vector<int> ExportDialog::getSelectedTrackIndices() const
@@ -453,11 +466,10 @@ void ExportDialog::updateModeVisibility()
     mixMonoBtn.setVisible(!trackMode);
     mixStereoBtn.setVisible(!trackMode);
 
-    // トラック書き出し: トラック一覧 + 全選択/解除
+    // トラック書き出し: トラック一覧 + ヘッダの全体チェック
     tracksLabel.setVisible(trackMode);
     tracksViewport.setVisible(trackMode);
-    selectAllBtn.setVisible(trackMode);
-    deselectAllBtn.setVisible(trackMode);
+    masterToggle.setVisible(trackMode);
 
     resized();
     repaint();  // 旧モードのコンポーネント描画残り（縁のはみ出し）を全面再描画で消す
@@ -618,14 +630,13 @@ void ExportDialog::resized()
 
     if (modeTrackBtn.getToggleState())
     {
-        // トラック書き出しモード: トラック一覧
-        tracksLabel.setBounds(r.removeFromTop(16));
+        // トラック書き出しモード: ヘッダ (ラベル + 全体チェック) + トラック一覧
+        auto headerRow = r.removeFromTop(22);
+        // トグルの文字は高さ依存 (LookAndFeel_V4: 高さ×0.75・上限15px)。ラベル「書き出すトラック」
+        // (12px) に合わせて高さ16へ抑え、行内で縦中央に置く。
+        masterToggle.setBounds(headerRow.removeFromRight(120).withSizeKeepingCentre(120, 16));
+        tracksLabel.setBounds(headerRow);   // 12px ラベルは行内で縦中央に揃う
         r.removeFromTop(6);
-        auto btnRow = r.removeFromBottom(28);
-        deselectAllBtn.setBounds(btnRow.removeFromRight(80));
-        btnRow.removeFromRight(8);
-        selectAllBtn.setBounds(btnRow.removeFromRight(80));
-        r.removeFromBottom(6);
 
         // 枠は使える領域いっぱいに角丸で描く。内側のビューポートは行高の倍数に丸めて
         // 半端な行が見切れないようにし、余りは枠下端の内側パディングとして残す。

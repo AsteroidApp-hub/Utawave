@@ -57,6 +57,7 @@ private:
     bool resolveRange(double& start, double& end) const;
     void rebuildTrackList();
     void layoutTrackRows();
+    void syncMasterToggle();   // 全体チェックを個別チェックの状態 (全 ON か) に同期
     void updateModeVisibility();
     void updateRangeVisibility();   // ルーラー範囲モードのときだけ範囲表示ラベルを出す
     std::vector<int> getSelectedTrackIndices() const;
@@ -154,8 +155,9 @@ private:
     juce::OwnedArray<juce::TextButton>   trackStereoBtns;
     juce::OwnedArray<juce::TextButton>   trackPreBtns;
     juce::OwnedArray<juce::TextButton>   trackPostBtns;
-    juce::TextButton selectAllBtn   { tr(u8"全選択") };
-    juce::TextButton deselectAllBtn { tr(u8"全解除") };
+    // ヘッダの全体チェックボックス: ON で全選択 / OFF で全解除。個別チェックの状態に追従して
+    // 全チェック時のみ ON になる (syncMasterToggle)。
+    juce::ToggleButton masterToggle { tr(u8"すべて選択") };
 
     // チェックボックスのドラッグ塗り替え状態
     bool dragPaintActive { false };   // 塗り替えドラッグ中か
