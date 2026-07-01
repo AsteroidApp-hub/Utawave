@@ -45,6 +45,11 @@ public:
     void resized() override;
     void paint(juce::Graphics& g) override;
     void paintOverChildren(juce::Graphics& g) override;
+    // トラックのチェックボックス上をドラッグして、通過した行のチェックをまとめて塗り替える
+    // (下へなぞると連続でチェックが入る/外れる)。トグルは各行に addMouseListener 済み。
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseUp  (const juce::MouseEvent&) override;
 
 private:
     void chooseFolder();
@@ -151,6 +156,10 @@ private:
     juce::OwnedArray<juce::TextButton>   trackPostBtns;
     juce::TextButton selectAllBtn   { tr(u8"全選択") };
     juce::TextButton deselectAllBtn { tr(u8"全解除") };
+
+    // チェックボックスのドラッグ塗り替え状態
+    bool dragPaintActive { false };   // 塗り替えドラッグ中か
+    bool dragPaintTarget { false };   // 塗る対象の状態 (開始行を反転した値)
 
     // 共通: 出力フォルダ
     juce::Label      folderLabel;

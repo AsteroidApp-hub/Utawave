@@ -299,6 +299,10 @@ void ExportDialog::rebuildTrackList()
         auto* sel = new juce::ToggleButton(ti.name);
         sel->setToggleState(true, juce::dontSendNotification);
         sel->setColour(juce::ToggleButton::textColourId, ti.colour.brighter(0.4f));
+        // 自己トグルは無効化し、切替はダイアログの mouseDown/mouseDrag が制御する
+        // (クリックで反転 / ドラッグで通過行をまとめて塗り替え)。ダブルトグルを防ぐため。
+        sel->setClickingTogglesState(false);
+        sel->addMouseListener(this, false);
         trackToggles.add(sel);
         tracksContent.addAndMakeVisible(sel);
 
@@ -382,6 +386,35 @@ void ExportDialog::layoutTrackRows()
         trackPreBtns[i]   ->setBounds(preRect);
         trackToggles[i]   ->setBounds(nameRow);
     }
+}
+
+// ── チェックボックスのドラッグ塗り替え ──
+// トグルは各行に addMouseListener(this) 済みなので、チェックボックス上での押下・ドラッグは
+// ここへ届く (mouse は開始トグルが capture するため、ドラッグ中は他の行の上でもここに来る)。
+void ExportDialog::mouseDown(const juce::MouseEvent& e)
+{
+    const int row = trackToggles.indexOf(dynamic_cast<juce::ToggleButton*>(e.eventComponent));
+    if (row < 0) return;   // チェックボックス以外 (Pre/Post 等・空きエリア) は無視
+    dragPaintTarget = ! trackToggles[row]->getToggleState();   // 開始行を反転した状態を塗る
+    dragPaintActive = true;
+    trackToggles[row]->setToggleState(dragPaintTarget, juce::dontSendNotification);
+}
+
+void ExportDialog::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! dragPaintActive) return;
+    // ドラッグ位置を tracksContent 座標へ変換し、その Y にある行を塗る (X は問わない)。
+    const int yInContent = e.getEventRelativeTo(&tracksContent).getPosition().getY();
+    if (yInContent < 0) return;
+    const int row = yInContent / kTrackRowH;
+    if (row >= 0 && row < trackToggles.size()
+        && trackToggles[row]->getToggleState() != dragPaintTarget)
+        trackToggles[row]->setToggleState(dragPaintTarget, juce::dontSendNotification);
+}
+
+void ExportDialog::mouseUp(const juce::MouseEvent&)
+{
+    dragPaintActive = false;
 }
 
 std::vector<int> ExportDialog::getSelectedTrackIndices() const
