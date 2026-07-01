@@ -436,50 +436,66 @@ void MainComponent::showPreferences()
             viewport.setScrollBarsShown(/*vertical*/ true, /*horizontal*/ false);
             addAndMakeVisible(viewport);
 
-            setSize(480, 520);   // 従来 (940〜998) の約半分。項目はスクロールで見る
+            setSize(520, 560);   // 少し広め+高めにして余白を確保。項目はスクロールで見る
         }
 
-        // 設定項目を幅 w で縦に並べ、コンテンツの総高さを返す (座標は content 相対)
+        // 設定項目を幅 w で縦に並べ、コンテンツの総高さを返す (座標は content 相対)。
+        // 窮屈にならないよう、行間・セクション間・左右マージンを広めに取る。
         int layoutContent(int w)
         {
-            int y = 14;
-            languageLabel.setBounds(14, y, w - 28, 22); y += 26;
-            languageCombo.setBounds(14, y, w - 28, 26); y += 36;
-            bitsLabel.setBounds(14, y, w - 28, 22); y += 26;
-            bitsCombo.setBounds(14, y, w - 28, 26); y += 32;
-            stripMetaBtn.setBounds(14, y, w - 28, 24); y += 32;
-            behaviorLabel.setBounds(14, y, w - 28, 22); y += 26;
-            followSelBtn.setBounds(14, y, w - 28, 24); y += 28;
-            rtzBtn.setBounds      (14, y, w - 28, 24); y += 28;
-            zoomMouseBtn.setBounds(14, y, w - 28, 24); y += 28;
-            zeroCrossBtn.setBounds(14, y, w - 28, 24); y += 28;
-            midiPagingBtn.setBounds(14, y, w - 28, 24); y += 28;
-            tooltipsBtn.setBounds(14, y, w - 28, 24); y += 32;
-            recLabel.setBounds(14, y, w - 28, 22); y += 26;
-            recCompBtn.setBounds(14, y, w - 28, 24); y += 26;
-            recCompOffsetLabel.setBounds(14, y, 250, 24);
-            recCompOffsetSlider.setBounds(270, y, w - 270 - 14, 24); y += 34;
-            monInsBtn.setBounds(14, y, w - 28, 24); y += 28;
-            diskStreamBtn.setBounds(14, y, w - 28, 24); y += 28;
-            multicoreBtn.setBounds(14, y, w - 28, 24); y += 32;
-            autoSaveLabel.setBounds(14, y, w - 28, 22); y += 26;
-            autoSaveCombo.setBounds(14, y, w - 28, 26); y += 32;
-            backupCountLabel.setBounds(14, y, w - 28, 22); y += 26;
-            backupCountCombo.setBounds(14, y, w - 28, 26); y += 32;
-            vuRefLabel.setBounds(14, y, w - 28, 22); y += 26;
-            vuRefCombo.setBounds(14, y, w - 28, 26); y += 32;
-            loudnessLabel.setBounds(14, y, w - 28, 22); y += 26;
-            loudnessCombo.setBounds(14, y, w - 28, 26); y += 28;
-            autoNormBtn.setBounds(14, y, w - 28, 24); y += 32;
-            exportLabel.setBounds(14, y, w - 28, 22); y += 26;
-            peakGuardBtn.setBounds(14, y, w - 28, 24); y += 28;
-            showMidiExportBtn.setBounds(14, y, w - 28, 24); y += 32;
+            const int mx   = 22;          // 左右マージン (旧 14)
+            const int cw   = w - mx * 2;  // コントロール幅
+            const int gRow = 12;          // チェック行どうしの余白 (旧 4)
+            const int gLbl = 7;           // ラベルと直下コントロールの余白
+            const int gSec = 22;          // セクション見出しの前に空ける余白
+
+            auto label = [&](juce::Label& l, int y)        { l.setBounds(mx, y, cw, 22); return y + 22 + gLbl; };
+            auto check = [&](juce::ToggleButton& b, int y) { b.setBounds(mx, y, cw, 24); return y + 24 + gRow; };
+            auto combo = [&](juce::ComboBox& c, int y)     { c.setBounds(mx, y, cw, 28); return y + 28 + gRow; };
+
+            int y = 22;
+            // ── 一般 (言語 / インポート) ──
+            y = label(languageLabel, y);  y = combo(languageCombo, y);
+            y = label(bitsLabel, y);      y = combo(bitsCombo, y);
+            y = check(stripMetaBtn, y);
+
+            // ── 編集動作 ──
+            y += gSec; y = label(behaviorLabel, y);
+            y = check(followSelBtn, y);
+            y = check(rtzBtn, y);
+            y = check(zoomMouseBtn, y);
+            y = check(zeroCrossBtn, y);
+            y = check(midiPagingBtn, y);
+            y = check(tooltipsBtn, y);
+
+            // ── 録音フロー ──
+            y += gSec; y = label(recLabel, y);
+            y = check(recCompBtn, y);
+            recCompOffsetLabel.setBounds(mx, y, 250, 24);
+            recCompOffsetSlider.setBounds(mx + 256, y, cw - 256, 24); y += 24 + gRow;
+            y = check(monInsBtn, y);
+            y = check(diskStreamBtn, y);
+            y = check(multicoreBtn, y);
+
+            // ── 保存 / メータ / 音量 ──
+            y += gSec; y = label(autoSaveLabel, y);    y = combo(autoSaveCombo, y);
+            y = label(backupCountLabel, y);            y = combo(backupCountCombo, y);
+            y = label(vuRefLabel, y);                  y = combo(vuRefCombo, y);
+            y = label(loudnessLabel, y);               y = combo(loudnessCombo, y);
+            y = check(autoNormBtn, y);
+
+            // ── 書き出し ──
+            y += gSec; y = label(exportLabel, y);
+            y = check(peakGuardBtn, y);
+            y = check(showMidiExportBtn, y);
+
             if (adsUi)
             {
-                startupLabel.setBounds(14, y, w - 28, 22); y += 26;
-                showAdsBtn.setBounds(14, y, w - 28, 24); y += 32;
+                // ── 起動画面 ──
+                y += gSec; y = label(startupLabel, y);
+                y = check(showAdsBtn, y);
             }
-            return y + 6;
+            return y + 12;
         }
 
         enum { kFooterH = 46 };   // 下部の固定ボタン帯 (リセット / 閉じる)。ローカルクラスのため enum 定数
