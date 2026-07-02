@@ -55,7 +55,8 @@ Track::Track(const juce::String& trackName, juce::AudioFormatManager& fmt,
 Track::~Track() = default;
 
 // ── ライブ録音レーン管理 ──────────────────────────────────────────
-// 録音は常に Lane 0。録音停止時、Lane 0 内で重なるクリップを sub-lane へ退避。
+// 録音は常に Lane 0。停止時は新録音を Lane 0 に置き (既存クリップはパンチイントリム)、
+// 新録音自体だけを Take レーンへバックアップする。
 
 void Track::startLiveRecording(double startPosSecs, double bufferLeadSecs)
 {
@@ -84,61 +85,11 @@ AudioClip* Track::finishLiveRecording(const juce::File& file, double startPos, d
         return nullptr;
     }
 
-    double endPos = startPos + dur;
-
-    // Lane 0 の重なるクリップを Take レーンにコピー（バックアップ）
-    // ※ Lane 0 からは移動しない → パンチイン連続性を維持
-    // ※ (ファイル, fileOffset, 尺) が完全一致する Take レーンクリップがあればスキップ。
-    //    (ファイル名だけで判定すると、同一録音を分割して fileOffset 違いで複数配置している
-    //     ケースで片方しかバックアップされないため、3 タプルで比較する)
-    {
-        constexpr double kEps = 1e-4;
-        auto alreadyBackedUp = [&](const AudioClip& src) -> bool
-        {
-            for (int li = 1; li < (int)lanes.size(); ++li)
-                for (auto& c : lanes[(size_t)li]->clips)
-                    if (c->getFile() == src.getFile()
-                        && std::abs(c->getFileOffset() - src.getFileOffset()) < kEps
-                        && std::abs(c->getDuration()   - src.getDuration())   < kEps)
-                        return true;
-            return false;
-        };
-
-        std::vector<AudioClip*> toBackup;
-        for (auto& c : lanes[0]->clips)
-            if (c->getStartPosition() < endPos && c->getEndPosition() > startPos
-                && !alreadyBackedUp(*c))   // バックアップ済みはスキップ
-                toBackup.push_back(c.get());
-
-        for (auto* orig : toBackup)
-        {
-            double cs = orig->getStartPosition(), ce = orig->getEndPosition();
-            int dest = -1;
-            for (int li = 1; li < (int)lanes.size(); ++li)
-                if (!lanes[(size_t)li]->overlaps(cs, ce)) { dest = li; break; }
-            if (dest < 0) { lanes.push_back(std::make_unique<Lane>()); dest = (int)lanes.size() - 1; }
-            auto* bk = lanes[(size_t)dest]->addClip(orig->getFile(), cs, ce - cs,
-                                                    formatManager, thumbnailCache);
-            // 退避クリップは元クリップの忠実なコピーにする。特に fileOffset を
-            // 引き継がないと、分割やパンチイン由来で fileOffset>0 の元クリップが
-            // ファイル先頭 (offset 0) から描画/再生されて波形が元と食い違う
-            // (テイクに入った波形だけ違って見える原因)。dedup も (file, fileOffset,
-            // duration) で行うため、正しい fileOffset を入れないと重複退避も起きる。
-            if (bk)
-            {
-                bk->setFileOffset  (orig->getFileOffset());
-                bk->setGain        (orig->getGain());
-                if (orig->getName().isNotEmpty()) bk->setName(orig->getName());
-                if (orig->hasCustomColour()) bk->setColour(orig->getColour());
-                bk->setFadeInCurve (orig->getFadeInCurve());
-                bk->setFadeOutCurve(orig->getFadeOutCurve());
-                bk->setFadeInSecs  (orig->getFadeInSecs());
-                bk->setFadeOutSecs (orig->getFadeOutSecs());
-                for (auto& gp : orig->getGainPoints())
-                    bk->getGainPointsRW().push_back(gp);
-            }
-        }
-    }
+    // Lane 0 の重なる既存クリップはテイクレーンへ退避しない (上塗り・要望 2026-07)。
+    // 各録音は録音時に自分自身を backupToTakeLane (下) で 1 回バックアップしており
+    // テイク履歴はそれで揃う。ここで重なりクリップを再退避すると、パンチインで
+    // トリム済みの断片が (file, fileOffset, duration) 違いの部分クリップとして
+    // テイクリストに混入していた (dedup 3 つ組をすり抜けるため)。
 
     // Lane 0 に新クリップを追加（既存クリップと重なってOK = パンチイン）
     auto* clip = lanes[0]->addClip(file, startPos, dur, formatManager, thumbnailCache);

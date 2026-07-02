@@ -8,7 +8,8 @@
 //       内包→消去 / またぎ→左右分割 (right の fileOffset 再計算・両端 30ms フェード) /
 //       左端のみ重複→末尾トリム / 右端のみ重複→開始押し出し+fileOffset 前進 / 非重複→不変 /
 //       新クリップに 30ms フェード / 残り ≤0.01s は消去
-//   ・finishLiveRecording のテイク退避 ((file, fileOffset, duration) 3 つ組 dedup) と lane0 配置
+//   ・finishLiveRecording の lane0 配置と新録音自身のテイクバックアップ
+//       (上書きされた既存クリップ / トリム断片はテイクレーンへ退避しない)
 //   ・LiveRecordingBuffer (遅延確保・ピーク蓄積・reset・尺算術)
 //
 // trimAndCrossfadeOnLane0 は位置/フェード/fileOffset を操作するだけでデコードしないため
@@ -42,10 +43,8 @@ public:
         testPunchRightOverlap();
         testPunchNonOverlap();
         testPunchTinyRemainderErased();
-        testFinishLiveRecordingBackup();
-        testFinishLiveRecordingBackupPreservesOffset();
+        testFinishLiveRecordingNoDisplacedBackup();
         testFinishLiveRecordingThumbnailsMatch();
-        testFinishLiveRecordingDedup();
         testFinishLiveRecordingWithFileOffset();
         testLatencyCompensation();
         testLatencyCompensationFloor();
@@ -317,18 +316,33 @@ public:
         return n;
     }
 
-    // ── finishLiveRecording: 既存クリップをテイクレーンに退避し、lane0 に新録音を置く ──
-    void testFinishLiveRecordingBackup()
+    // テイクレーン (lane >= 1) 上の、指定ファイルを参照するクリップ総数 (断片も含む)
+    int countClipsForFile(Track* t, const juce::File& file)
     {
-        beginTest("finishLiveRecording: displaced clip backed up to a take lane; new clip on lane 0");
+        int n = 0;
+        for (int li = 1; li < t->getLaneCount(); ++li)
+            for (auto& c : t->getLane(li)->clips)
+                if (c->getFile() == file)
+                    ++n;
+        return n;
+    }
+
+    // ── finishLiveRecording: 上書きされた Lane 0 の既存クリップはテイクレーンへ退避しない ──
+    // (上塗り・要望 2026-07 の回帰テスト)。各録音は録音時に自分自身をバックアップするので
+    // テイク履歴はそれで揃う。旧実装は重なりクリップを再退避しており、パンチインでトリム
+    // 済みの断片が (file, fileOffset, duration) 違いの部分クリップとしてテイクに混入していた。
+    void testFinishLiveRecordingNoDisplacedBackup()
+    {
+        beginTest("finishLiveRecording: overwritten lane0 clips are NOT backed up to take lanes");
         juce::AudioFormatManager fmt; fmt.registerBasicFormats();
         TrackManager tm(fmt);
         auto* t = tm.addTrack();
         auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
                        .getChildFile("UtawaveRecTests");
         dir.createDirectory();
-        auto wavOld = writeWav(dir, "old.wav", 48000.0, 4.0);
-        auto wavNew = writeWav(dir, "new.wav", 48000.0, 2.0);
+        auto wavOld  = writeWav(dir, "old.wav",  48000.0, 4.0);
+        auto wavNew  = writeWav(dir, "new.wav",  48000.0, 2.0);
+        auto wavNew2 = writeWav(dir, "new2.wav", 48000.0, 2.0);
         expect(wavNew.existsAsFile(), "test WAV written");
 
         addLane0(t, wavOld, 0.0, 4.0);             // existing recording on lane 0
@@ -340,73 +354,24 @@ public:
         for (auto& c : t->getLane(0)->clips) if (c.get() == rec) newInLane0 = true;
         expect(newInLane0, "new recording lives on lane 0 (punch-in continuity)");
 
-        expect(t->getLaneCount() >= 2, "a take lane was created for the backup");
-        expect(countBackups(t, wavOld, 0.0, 4.0) >= 1, "displaced old clip backed up to a take lane");
+        expect(countClipsForFile(t, wavOld) == 0,
+               "overwritten lane0 clip is NOT copied to a take lane");
+        expect(countBackups(t, wavNew, 0.0, 2.0) == 1,
+               "the new recording itself is backed up once");
 
-        dir.deleteRecursively();
-    }
+        // 2 回目のパンチイン: 1 回目でトリム済みの lane0 断片も退避されない
+        // (断片が部分クリップとしてテイクに混入していた旧挙動の回帰テスト)
+        t->startLiveRecording(1.5);
+        t->finishLiveRecording(wavNew2, 1.5, 2.0);   // punch [1.5,3.5] over rec1 [1,3]
 
-    // 退避クリップが元の fileOffset / gain を引き継ぐ (テイクの波形が元と一致する) ことの回帰テスト。
-    // 旧実装は fileOffset を捨てて 0 で退避していたため、分割/パンチイン由来で fileOffset>0 の
-    // 元クリップを退避するとテイク側だけファイル先頭から描画/再生され波形が食い違っていた。
-    void testFinishLiveRecordingBackupPreservesOffset()
-    {
-        beginTest("finishLiveRecording: backup preserves the source clip fileOffset and gain");
-        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
-        TrackManager tm(fmt);
-        auto* t = tm.addTrack();
-        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                       .getChildFile("UtawaveRecTests3");
-        dir.createDirectory();
-        auto wavOld = writeWav(dir, "old.wav", 48000.0, 8.0);
-        auto wavNew = writeWav(dir, "new.wav", 48000.0, 2.0);
-
-        // fileOffset>0 の既存クリップ (分割 / パンチイン由来を模す): [2,6] が file の 1.5s 目から
-        auto* old = addLane0(t, wavOld, 2.0, 4.0, /*fo=*/1.5);
-        old->setGain(0.5f);
-
-        t->startLiveRecording(3.0);
-        t->finishLiveRecording(wavNew, 3.0, 2.0);   // punch [3,5] (既存 [2,6] の内側)
-
-        // 退避は (file, fileOffset=1.5, dur=4.0) で見つかる。旧バグでは offset 0 で退避されていた
-        expect(countBackups(t, wavOld, 1.5, 4.0) >= 1,
-               "backup keeps the source clip fileOffset (not reset to 0)");
-        expect(countBackups(t, wavOld, 0.0, 4.0) == 0,
-               "backup is NOT stored at fileOffset 0 (the old bug)");
-
-        // gain も引き継ぐ (描画振幅・再生音量を元と一致させる)
-        bool gainCopied = false;
-        for (int li = 1; li < t->getLaneCount(); ++li)
-            for (auto& c : t->getLane(li)->clips)
-                if (c->getFile() == wavOld && approxEq(c->getFileOffset(), 1.5, 1e-3))
-                    gainCopied = approxEq(c->getGain(), 0.5, 1e-4);
-        expect(gainCopied, "backup copies the source clip gain");
-
-        dir.deleteRecursively();
-    }
-
-    void testFinishLiveRecordingDedup()
-    {
-        beginTest("finishLiveRecording: identical (file,fileOffset,duration) backup is not duplicated");
-        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
-        TrackManager tm(fmt);
-        auto* t = tm.addTrack();
-        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                       .getChildFile("UtawaveRecTests2");
-        dir.createDirectory();
-        auto wavOld = writeWav(dir, "old.wav", 48000.0, 4.0);
-        auto wavNew = writeWav(dir, "new.wav", 48000.0, 2.0);
-
-        addLane0(t, wavOld, 0.0, 4.0);                 // existing on lane 0
-        t->backupToTakeLane(wavOld, 0.0, 4.0);         // 同一 3 つ組のバックアップを先に take レーンへ
-        const int before = countBackups(t, wavOld, 0.0, 4.0);
-        expect(before == 1, "one pre-existing backup");
-
-        t->startLiveRecording(1.0);
-        t->finishLiveRecording(wavNew, 1.0, 2.0);
-
-        const int after = countBackups(t, wavOld, 0.0, 4.0);
-        expect(after == before, "duplicate 3-tuple backup is skipped (not duplicated)");
+        expect(countClipsForFile(t, wavOld) == 0,
+               "trimmed fragments of the original clip stay out of take lanes");
+        expect(countClipsForFile(t, wavNew) == 1,
+               "take lanes keep only recording 1's own full backup (no trimmed fragments)");
+        expect(countBackups(t, wavNew, 0.0, 2.0) == 1,
+               "recording 1's backup is still the untouched full take");
+        expect(countBackups(t, wavNew2, 0.0, 2.0) == 1,
+               "recording 2 is backed up once");
 
         dir.deleteRecursively();
     }
