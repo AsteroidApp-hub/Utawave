@@ -53,6 +53,35 @@ public:
     // (歌詞テキスト自体はプロジェクトごとに .uta へ保存)。load 時に妥当範囲へクランプ。
     int lyricsFontSize { 16 };
 
+    // 画面全体の表示倍率 (1.0 = 等倍)。高解像度/大画面のモニタで文字やレイアウトが小さく
+    // 見えるとき、アプリ全体を拡大して見やすくする (juce::Desktop::setGlobalScaleFactor)。
+    // ハードウェア (モニタ) 依存のためプロジェクトではなくアプリ全体で記憶する。
+    // load 時に妥当範囲 (0.75〜2.0) へクランプ。
+    double uiScale { 1.0 };
+    static constexpr double minUiScale { 0.75 };
+    static constexpr double maxUiScale { 2.0 };
+
+    // ユーザーが環境設定で表示倍率を明示的に選んだか (既定: 未設定)。
+    // false の間は起動時にディスプレイ幅から自動決定する (autoUiScaleForMainDisplay)。
+    // 一度ユーザーが選ぶと true になり、以降は uiScale を尊重する (モニタが変わっても勝手に変えない)。
+    bool uiScaleUserSet { false };
+
+    // 自動判定に使うディスプレイの論理幅 (px)。取得できなければ 0。
+    // macOS は主ディスプレイの [NSScreen frame] のポイント幅、Windows/Linux は論理幅。
+    // 複数モニタでは最も広いディスプレイを採用する (外部の大画面で開く想定)。
+    static int autoScaleDisplayWidth();
+
+    // autoScaleDisplayWidth() から推奨表示倍率を求める (1920 幅で 125% など)。
+    // autoScaleDisplayWidth 側で globalScaleFactor を掛け戻しているため、スケール適用後に
+    // 呼んでも安定する (適用→読み直しで倍率が崩れない)。
+    static double autoUiScaleForMainDisplay();
+
+    // 実効表示倍率。ユーザー未設定なら自動判定、設定済みなら保存値。
+    double resolvedUiScale() const
+    {
+        return uiScaleUserSet ? uiScale : autoUiScaleForMainDisplay();
+    }
+
     // 広告機能のコンパイル時マスタースイッチ。公開ソースの既定は OFF (起動画面は 2 列・通信なし)。
     // 公式配布ビルドのみ CMake の UTAWAVE_ADS_ENABLED=1 で有効化する (詳細は CMakeLists / CLAUDE.md)。
     static bool adsCompiledIn();

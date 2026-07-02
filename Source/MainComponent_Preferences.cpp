@@ -17,9 +17,10 @@ void MainComponent::showPreferences()
     class PrefsDlg : public juce::Component
     {
     public:
-        juce::Label    languageLabel, bitsLabel, behaviorLabel, recLabel, autoSaveLabel,
+        juce::Label    languageLabel, uiScaleLabel, bitsLabel, behaviorLabel, recLabel, autoSaveLabel,
                        backupCountLabel, vuRefLabel, loudnessLabel;
-        juce::ComboBox languageCombo, bitsCombo, autoSaveCombo, backupCountCombo, vuRefCombo, loudnessCombo;
+        juce::ComboBox languageCombo, uiScaleCombo, bitsCombo, autoSaveCombo, backupCountCombo, vuRefCombo, loudnessCombo;
+        std::function<void(double)> onUiScaleChanged;   // 画面の表示倍率 (アプリ全体設定。初期状態は showPreferences 側)
         std::function<void(int)>   onLanguageChanged;   // 1=日本語, 2=English
         juce::ToggleButton followSelBtn, rtzBtn, autoNormBtn, zoomMouseBtn, peakGuardBtn, zeroCrossBtn, stripMetaBtn;
         juce::ToggleButton showMidiExportBtn;   // 初期状態 / コールバックは showPreferences 側で設定 (アプリ全体設定)
@@ -101,6 +102,27 @@ void MainComponent::showPreferences()
                 if (onLanguageChanged) onLanguageChanged(languageCombo.getSelectedId());
             };
             addAndMakeVisible(languageCombo);
+
+            // 画面全体の表示倍率 (アプリ全体設定)。高解像度/大画面で小さく見えるときに拡大する。
+            // ID = パーセント (100/110/125/150/175/200)。初期選択は showPreferences 側で設定。
+            setupLabel(uiScaleLabel, tr(u8"画面の表示倍率 (文字やボタンが小さすぎる/大きすぎる時に調整)"),
+                       13.0f, juce::Colours::white);
+            uiScaleCombo.addItem("80%", 80);
+            uiScaleCombo.addItem("90%", 90);
+            uiScaleCombo.addItem(tr(u8"100% (等倍)"), 100);
+            uiScaleCombo.addItem("110%", 110);
+            uiScaleCombo.addItem("125%", 125);
+            uiScaleCombo.addItem("150%", 150);
+            uiScaleCombo.addItem("175%", 175);
+            uiScaleCombo.addItem("200%", 200);
+            uiScaleCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
+            uiScaleCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+            uiScaleCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
+            uiScaleCombo.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff555555));
+            uiScaleCombo.onChange = [this] {
+                if (onUiScaleChanged) onUiScaleChanged(uiScaleCombo.getSelectedId() / 100.0);
+            };
+            addAndMakeVisible(uiScaleCombo);
 
             setupLabel(bitsLabel, tr(u8"インポート時のリサンプル出力"), 13.0f, juce::Colours::white);
             setupLabel(behaviorLabel, tr(u8"編集動作"), 13.0f, juce::Colours::white);
@@ -456,6 +478,7 @@ void MainComponent::showPreferences()
             int y = 22;
             // ── 一般 (言語 / インポート) ──
             y = label(languageLabel, y);  y = combo(languageCombo, y);
+            y = label(uiScaleLabel, y);   y = combo(uiScaleCombo, y);
             y = label(bitsLabel, y);      y = combo(bitsCombo, y);
             y = check(stripMetaBtn, y);
 
@@ -680,6 +703,25 @@ void MainComponent::showPreferences()
         appPrefs.save();
         applyTooltipVisibility();
     };
+    // 画面の表示倍率 (アプリ全体設定。ハードウェア依存のためプロジェクト設定ではない)。
+    // 即時に適用 (setGlobalScaleFactor) + 保存。次回起動でも Main.cpp が同じ倍率で復元する。
+    auto uiScaleToId = [](double s) -> int {
+        const int opts[] = { 80, 90, 100, 110, 125, 150, 175, 200 };
+        const int pct = (int) std::round(s * 100.0);
+        int best = 100, bestDiff = 1 << 30;
+        for (int o : opts) { int d = std::abs(o - pct);
+                             if (d < bestDiff) { bestDiff = d; best = o; } }
+        return best;
+    };
+    // 初期選択は実効倍率 (ユーザー未設定なら自動判定値) を表示する。
+    dlg->uiScaleCombo.setSelectedId(uiScaleToId(appPrefs.resolvedUiScale()), juce::dontSendNotification);
+    dlg->onUiScaleChanged = [this](double scale) {
+        appPrefs.uiScale = juce::jlimit(AppPreferences::minUiScale,
+                                        AppPreferences::maxUiScale, scale);
+        appPrefs.uiScaleUserSet = true;   // 以降は自動判定せずこの値を尊重
+        appPrefs.save();
+        juce::Desktop::getInstance().setGlobalScaleFactor((float) appPrefs.uiScale);
+    };
     // 起動画面の広告表示 (アプリ全体設定)。広告がコンパイル時有効なビルドのみ。即時保存。反映は次回起動画面表示時
     if (AppPreferences::adsCompiledIn())
     {
@@ -733,7 +775,7 @@ void MainComponent::showPreferences()
         appPrefs.save();
         audioEngine.setMulticoreAudioEnabled(v);
     };
-    dlg->onResetDefaults = [this, dlg]
+    dlg->onResetDefaults = [this, dlg, uiScaleToId]
     {
         // AppSettings の各フィールドをデフォルト値 (構造体の初期化子) に揃える
         const AppSettings def;
@@ -768,7 +810,10 @@ void MainComponent::showPreferences()
         appPrefs.monitorThroughInserts = defPrefs.monitorThroughInserts;
         appPrefs.diskStreaming      = defPrefs.diskStreaming;
         appPrefs.multicoreAudio     = defPrefs.multicoreAudio;
+        appPrefs.uiScale            = defPrefs.uiScale;
+        appPrefs.uiScaleUserSet     = defPrefs.uiScaleUserSet;   // 自動判定へ戻す
         appPrefs.save();
+        juce::Desktop::getInstance().setGlobalScaleFactor((float) appPrefs.resolvedUiScale());
         menuItemsChanged();
         applyMidiPagingToOpenEditors();
         audioEngine.setRecordingLatencyComp(appPrefs.recLatencyAutoComp,
@@ -785,6 +830,7 @@ void MainComponent::showPreferences()
         dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
         dlg->diskStreamBtn.setToggleState(appPrefs.diskStreaming, juce::dontSendNotification);
         dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);
+        dlg->uiScaleCombo.setSelectedId(uiScaleToId(appPrefs.resolvedUiScale()), juce::dontSendNotification);
 
         // ダイアログの UI を新しい値に同期
         dlg->syncUiToValues(appSettings.resampleOutputBits,

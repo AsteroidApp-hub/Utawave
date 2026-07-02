@@ -50,6 +50,11 @@ public:
         // スロットルし、再生バー (onVBlank) が数秒ごとに一瞬止まって見える (音は実時間スレッドで無傷)。
         disableAppNap();
         Localisation::install(Localisation::getSavedLanguage());
+        // 画面全体の表示倍率をアプリ設定から適用 (高解像度/大画面で小さく見える対策)。
+        // ユーザーが未設定なら主ディスプレイの幅から自動決定する (1920 幅 → 125% など)。
+        // ウィンドウ生成前に設定して、起動画面から正しい倍率で表示されるようにする。
+        juce::Desktop::getInstance().setGlobalScaleFactor(
+            (float) AppPreferences::load().resolvedUiScale());
         mainWindow.reset(new MainWindow(getApplicationName()));
 
         // 前回クラッシュのログが残っていれば、起動画面表示後に同意ダイアログを出す
