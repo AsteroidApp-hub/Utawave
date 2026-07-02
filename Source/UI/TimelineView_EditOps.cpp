@@ -636,7 +636,7 @@ void TimelineView::applyCrossfadeToSelection(FadeOpMode mode)
     {
         undoManager->beginNewTransaction();
         undoManager->perform(new EditActions::ClipsPropertyAction(
-            std::move(oldStates), std::move(newStates), editChangeCb));
+            std::move(oldStates), std::move(newStates), editChangeCb, clipAliveValidator()));
     }
     else
     {

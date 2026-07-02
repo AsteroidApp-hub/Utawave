@@ -577,6 +577,12 @@ private:
     juce::Point<int> rubberBandEnd;
     bool isClipInSelection(const AudioClip* clip) const;
     bool clipStillExists(AudioClip* clip) const;  // 全レーンを走査して生存確認 (UAF 防止)
+    // ClipsPropertyAction 用の生存チェック (undo/redo 時に破棄済みクリップを restore しない)。
+    // ClipsPropertyAction を生成する全経路で必ず渡すこと (v0.5.6 redo UAF クラッシュの再発防止)
+    EditActions::ClipValidator clipAliveValidator()
+    {
+        return [this](AudioClip* c) { return clipStillExists(c); };
+    }
     // 波形クリップの右クリックメニュー (構築 + 結果ハンドラ。mouseDown から抽出)
     void showAudioClipContextMenu(const ClipRef& rcRef, const juce::MouseEvent& e);
     bool midiClipStillExists(MidiClip* clip, Track* owner) const;  // track と clip の両方を生存確認

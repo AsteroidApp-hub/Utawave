@@ -590,7 +590,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 newStates.push_back(ns);
                 undoManager->beginNewTransaction();
                 undoManager->perform(new EditActions::ClipsPropertyAction(
-                    std::move(preDragStates), std::move(newStates), editChangeCb));
+                    std::move(preDragStates), std::move(newStates), editChangeCb, clipAliveValidator()));
             }
             preDragStates.clear();
             dragMode = DragMode::None;
@@ -628,7 +628,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 newStates.push_back(ns);
                 undoManager->beginNewTransaction();
                 undoManager->perform(new EditActions::ClipsPropertyAction(
-                    std::move(preDragStates), std::move(newStates), editChangeCb));
+                    std::move(preDragStates), std::move(newStates), editChangeCb, clipAliveValidator()));
             }
             preDragStates.clear();
             // ドラッグせず、追加だけ。再クリックで掴んで調整する流れ
@@ -1441,7 +1441,8 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                     }
                     if (!trimBefore.empty())
                         undoManager->perform(new EditActions::ClipsPropertyAction(
-                            std::move(trimBefore), std::move(trimAfter), editChangeCb));
+                            std::move(trimBefore), std::move(trimAfter), editChangeCb,
+                            clipAliveValidator()));
                     for (auto* c : covered)
                         undoManager->perform(new EditActions::ClipDeleteAction(
                             destLane, c, editChangeCb));
@@ -1812,7 +1813,8 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                 undoManager->beginNewTransaction();
                 if (!befores.empty())
                     undoManager->perform(new EditActions::ClipsPropertyAction(
-                        std::move(befores), std::move(afters), editChangeCb));
+                        std::move(befores), std::move(afters), editChangeCb,
+                        clipAliveValidator()));
                 // 覆われたクリップが (別の dragged clip により) ドラッグ前にトリムされていた場合、
                 // ClipDeleteAction はその時点のインスタンスを退避するため、削除前に before 状態へ
                 // 戻しておくと undo で元の形状のまま復活する (削除されるので最終状態には影響しない)。

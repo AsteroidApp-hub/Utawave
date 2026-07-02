@@ -14,6 +14,13 @@ namespace EditActions
 // クリップを即破棄せず参照中スナップショットの寿命に合わせて回収させる。
 using ClipSink = std::function<void(std::vector<std::unique_ptr<AudioClip>>&&)>;
 
+// ClipState::restore 前の生存確認 (UAF 防止)。ClipState は AudioClip* を生ポインタで保持する
+// ため、履歴中の後続アクションがインスタンスを再生成する系 (LaneSnapshotAction / ClipSplitAction /
+// StripSilenceAction の生成クリップは undo/redo でインスタンスが変わる) と組むと、undo/redo で
+// 破棄済みクリップを restore しかねない (v0.5.6 Windows 実クラッシュ: redo → setName の String UAF)。
+// TimelineView::clipStillExists (全レーン走査) を繋ぐ。
+using ClipValidator = std::function<bool(AudioClip*)>;
+
 // ───────────────────────── 汎用スナップショット ─────────────────────────
 // 任意の値型 T を before/after で差し替える Undo Action。
 // 「状態をまるごと差し替える」系の編集 (マーカー / テンポ・拍子変更 / 曲全体の BPM /
@@ -116,34 +123,38 @@ struct ClipState
 };
 
 // 複数クリップのプロパティ変更（移動・リサイズ・フェード・クロスフェード）
+// clipAliveCb (生存チェック) は必須引数。本番経路は TimelineView::clipAliveValidator() を渡す。
+// nullptr は「対象クリップの寿命を呼び出し側が保証する」テスト等の限定用途のみ (明示させるため
+// デフォルト引数にしない。PluginActions の ChainResolver と同じ作法)
 class ClipsPropertyAction : public juce::UndoableAction
 {
 public:
     ClipsPropertyAction(std::vector<ClipState> oldS,
                         std::vector<ClipState> newS,
-                        std::function<void()> onChangeCb)
+                        std::function<void()> onChangeCb,
+                        ClipValidator clipAliveCb)
         : oldStates(std::move(oldS)),
           newStates(std::move(newS)),
-          onChange(std::move(onChangeCb)) {}
+          onChange(std::move(onChangeCb)),
+          clipAlive(std::move(clipAliveCb)) {}
 
-    bool perform() override
-    {
-        for (auto& s : newStates) s.restore();
-        if (onChange) onChange();
-        return true;
-    }
-
-    bool undo() override
-    {
-        for (auto& s : oldStates) s.restore();
-        if (onChange) onChange();
-        return true;
-    }
+    bool perform() override { return applyStates(newStates); }
+    bool undo()    override { return applyStates(oldStates); }
 
 private:
+    bool applyStates(const std::vector<ClipState>& states)
+    {
+        for (auto& s : states)
+            if (clipAlive == nullptr || clipAlive(s.clip))  // 破棄済みクリップは触らない (UAF 防止)
+                s.restore();
+        if (onChange) onChange();
+        return true;
+    }
+
     std::vector<ClipState> oldStates;
     std::vector<ClipState> newStates;
     std::function<void()>  onChange;
+    ClipValidator          clipAlive;
 };
 
 // クリップ追加（コピー＆ペースト・複製で使用、undo で削除）

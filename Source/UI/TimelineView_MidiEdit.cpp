@@ -288,7 +288,8 @@ void TimelineView::finishNameEditing(bool commit)
                 undoManager->perform(new EditActions::ClipsPropertyAction(
                     std::vector<EditActions::ClipState>{ oldS },
                     std::vector<EditActions::ClipState>{ newS },
-                    [this] { if (editChangeCb) editChangeCb(); repaint(); }));
+                    [this] { if (editChangeCb) editChangeCb(); repaint(); },
+                    clipAliveValidator()));
             }
             else if (editChangeCb) editChangeCb();
         }

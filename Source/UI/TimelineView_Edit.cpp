@@ -143,7 +143,7 @@ void TimelineView::deleteSelectedCrossfade()
     {
         undoManager->beginNewTransaction();
         undoManager->perform(new EditActions::ClipsPropertyAction(
-            { oldA, oldB }, { newA, newB }, editChangeCb));
+            { oldA, oldB }, { newA, newB }, editChangeCb, clipAliveValidator()));
     }
     else if (editChangeCb) editChangeCb();
 
@@ -326,6 +326,7 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
             for (auto* p : pasted) if (p == c) { isPasted = true; break; }
             if (!isPasted) targets.push_back(c);
         }
+        const auto clipAlive = clipAliveValidator();  // ループ外で 1 回構築 (各アクションへはコピー)
         for (auto* c : targets)
         {
             const Plan plan = planInsertOverlap(c->getStartPosition(), c->getEndPosition(),
@@ -351,7 +352,8 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
                 after.duration = plan.leftDuration;
                 after.fadeOut  = (plan.leftFadeOut > 0.001) ? plan.leftFadeOut
                                                             : juce::jmin(before.fadeOut, plan.leftDuration * 0.5);
-                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+                undoManager->perform(new EditActions::ClipsPropertyAction(
+                    { before }, { after }, editChangeCb, clipAlive));
                 leftXfOut = juce::jmax(leftXfOut, plan.insFadeIn);
             }
             else // RightCut
@@ -362,7 +364,8 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
                 after.duration   = plan.rightDuration;
                 after.fadeIn     = (plan.rightFadeIn > 0.001) ? plan.rightFadeIn
                                                               : juce::jmin(before.fadeIn, plan.rightDuration * 0.5);
-                undoManager->perform(new EditActions::ClipsPropertyAction({ before }, { after }, editChangeCb));
+                undoManager->perform(new EditActions::ClipsPropertyAction(
+                    { before }, { after }, editChangeCb, clipAlive));
                 rightXfOut = juce::jmax(rightXfOut, plan.insFadeOut);
             }
 
@@ -1040,7 +1043,7 @@ void TimelineView::nudgeSelectedClips(double seconds)
         {
             undoManager->beginNewTransaction("Nudge");
             undoManager->perform(new EditActions::ClipsPropertyAction(
-                std::move(oldStates), std::move(newStates), editChangeCb));
+                std::move(oldStates), std::move(newStates), editChangeCb, clipAliveValidator()));
         }
     }
     repaint();

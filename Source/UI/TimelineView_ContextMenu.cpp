@@ -182,7 +182,7 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                 {
                     undoManager->beginNewTransaction();
                     undoManager->perform(new EditActions::ClipsPropertyAction(
-                        std::move(oldS), std::move(newS), editChangeCb));
+                        std::move(oldS), std::move(newS), editChangeCb, clipAliveValidator()));
                 }
                 repaint();
                 return;
@@ -336,7 +336,8 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                             {
                                 tv->undoManager->beginNewTransaction();
                                 tv->undoManager->perform(new EditActions::ClipsPropertyAction(
-                                    { oldS }, { newS }, tv->editChangeCb));
+                                    { oldS }, { newS }, tv->editChangeCb,
+                                    tv->clipAliveValidator()));
                             }
                             tv->repaint();
                         });

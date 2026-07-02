@@ -55,6 +55,7 @@ public:
     void runTest() override
     {
         testClipsProperty();
+        testClipsPropertyValidator();
         testRestoreOrderClamp();
         testClipAdd();
         testClipDelete();
@@ -84,7 +85,7 @@ public:
         EditActions::ClipState newS; newS.capture(c);
         expect(oldS.differsFrom(newS), "name-only change -> differsFrom true");
 
-        EditActions::ClipsPropertyAction act({ oldS }, { newS }, nullptr);
+        EditActions::ClipsPropertyAction act({ oldS }, { newS }, nullptr, nullptr);
         act.perform();
         expect(c->getName() == juce::String("After"), "perform -> new name");
         act.undo();
@@ -135,7 +136,7 @@ public:
         EditActions::ClipState newS; newS.capture(c);
 
         int changes = 0;
-        EditActions::ClipsPropertyAction act({ oldS }, { newS }, [&] { ++changes; });
+        EditActions::ClipsPropertyAction act({ oldS }, { newS }, [&] { ++changes; }, nullptr);
 
         act.perform();
         expect(approxEq(c->getStartPosition(), 2.0, 1e-9) && approxEq(c->getDuration(), 3.0, 1e-9),
@@ -159,6 +160,53 @@ public:
         expect(changes == 3, "onChange fired on perform/undo/redo");
     }
 
+    // ── ClipsPropertyAction: 生存バリデータが破棄済みクリップの restore をスキップ ──
+    // v0.5.6 Windows 実クラッシュ (redo → 破棄済み AudioClip::setName の String UAF) の回帰テスト。
+    // 履歴中の後続アクション (LaneSnapshotAction 等) がインスタンスを再生成すると、
+    // ClipsPropertyAction の生ポインタは undo/redo 時に破棄済みになり得る。
+    void testClipsPropertyValidator()
+    {
+        beginTest("ClipsPropertyAction: validator skips destroyed clips (redo UAF regression)");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        juce::AudioThumbnailCache cache(8);
+        Lane lane;
+        auto* a = lane.addClip(juce::File("/tmp/val_a.wav"), 0.0, 2.0, fmt, cache);
+        auto* b = lane.addClip(juce::File("/tmp/val_b.wav"), 3.0, 2.0, fmt, cache);
+
+        a->setName("A-old"); b->setName("B-old");
+        EditActions::ClipState oldA; oldA.capture(a);
+        EditActions::ClipState oldB; oldB.capture(b);
+        a->setName("A-new"); a->setGain(0.7f);
+        b->setName("B-new"); b->setGain(0.6f);
+        EditActions::ClipState newA; newA.capture(a);
+        EditActions::ClipState newB; newB.capture(b);
+
+        // clipStillExists と同じ作法のレーン走査バリデータ (呼ばれた回数も数える)
+        int queries = 0;
+        auto validator = [&lane, &queries](AudioClip* c)
+        {
+            ++queries;
+            for (auto& cp : lane.clips)
+                if (cp.get() == c) return true;
+            return false;
+        };
+        EditActions::ClipsPropertyAction act({ oldA, oldB }, { newA, newB },
+                                             nullptr, validator);
+
+        // クリップ A を破棄 (LaneSnapshotAction による再生成を模す)。act は dangling a を保持
+        lane.clips.erase(lane.clips.begin());
+        expect(lane.clips.size() == 1 && lane.clips[0].get() == b, "clip A destroyed, B remains");
+
+        act.perform();   // redo 相当: A はスキップ (UAF しない)、B だけ restore
+        expect(queries == 2, "validator queried for both clips");
+        expect(b->getName() == juce::String("B-new"), "perform -> live clip restored");
+
+        act.undo();      // undo も同様に A をスキップ
+        expect(b->getName() == juce::String("B-old"), "undo -> live clip restored to old");
+        expect(approxEq(b->getGain(), oldB.gain, 1e-6), "undo -> live clip gain restored");
+        expect(queries == 4, "validator queried on undo too");
+    }
+
     // ── ClipState::restore の順序 (duration を fade より先に復元) を区別するケース ──
     // 旧 fadeIn が「復元後の duration では valid だが、途中の (小さい) duration ではクリップされる」
     // 値を使うことで、duration→fade の順序でないと正しく復元できないことを検証する。
@@ -179,7 +227,7 @@ public:
         c->setDuration(1.0);
         EditActions::ClipState newS; newS.capture(c);
 
-        EditActions::ClipsPropertyAction act({ oldS }, { newS }, nullptr);
+        EditActions::ClipsPropertyAction act({ oldS }, { newS }, nullptr, nullptr);
         act.perform();   // new (dur 1.0, fadeIn 0.5)
         expect(approxEq(c->getDuration(), 1.0, 1e-9) && approxEq(c->getFadeInSecs(), 0.5, 1e-9),
                "new state: dur 1.0, fadeIn clamped to 0.5");
