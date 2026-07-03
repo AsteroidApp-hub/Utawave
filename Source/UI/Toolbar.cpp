@@ -327,7 +327,8 @@ TransportBar::TransportBar()
     snapBtn.setColour(juce::TextButton::textColourOffId,  AppColours::textDim);
     snapBtn.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
     snapBtn.setButtonText("GRID: Off");
-    snapBtn.setTooltip(tr(u8"グリッドスナップ（クリックで Off/Bar/Beat 切替）"));
+    snapBtn.setTooltip(platformShortcutText(tr(
+        u8"クリップの移動・リサイズや範囲選択をグリッド線に吸着します（クリックで間隔を選択・リサイズ中は Cmd で一時解除）")));
     snapBtn.setWantsKeyboardFocus(false);
     snapBtn.onClick = [this] {
         juce::PopupMenu m;
