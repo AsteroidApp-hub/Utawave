@@ -4,6 +4,7 @@
 #include "TimelineView.h"
 #include "../Localisation.h"
 #include "../AppColours.h"
+#include "GridSnapMath.h"
 #include "../Tracks/MidiClip.h"
 #include "../Edit/SilenceDetector.h"
 #include "../Audio/BpmDetector.h"
@@ -1062,7 +1063,9 @@ void TimelineView::repaintRecordingArea()
         const int trackTop = area.getY() + trackManager.getTrackY(ti) - scrollY;
         const int trackH   = tr->getTotalHeight();
         const double startSecs = tr->getRecordingStartPos();
-        const double durSecs   = juce::jmax(0.0,
+        // 録音バーの右端は再生バーに追従する (drawTrackRows の isLiveLane ブロックと同じ)。
+        // バッファ由来の長さも max で含め、負リード (内容を遅く描く) でも取りこぼさない
+        const double durSecs   = juce::jmax(0.0, playheadSecs - startSecs,
             tr->getLiveBuffer().getDurationSeconds(sampleRate) - tr->getLiveBufferLeadSecs());
         int x1 = (int)(startSecs * bps * pixelsPerBeat - scrollX) - 2;
         int x2 = (int)((startSecs + durSecs) * bps * pixelsPerBeat - scrollX) + 6;
@@ -1109,9 +1112,13 @@ void TimelineView::addToSelection(const ClipRef& ref)
 
 double TimelineView::snapTime(double secs) const
 {
-    const double unit = snapModeUnitSecs(appSettings.snapMode, bpm);
-    if (unit <= 0.0) return secs;  // SnapMode::Off
-    return std::round(secs / unit) * unit;
+    // 変拍子/途中テンポ変更対応: 描画グリッド (drawTrackRows) と同じ歩進で
+    // 「小節頭 + 小節内サブグリッド」へスナップする (GridSnapMath に一本化)。
+    // 旧実装の固定間隔 round は 5/4 等の小節頭に吸着できなかった
+    return GridSnapMath::snapToGrid(secs, appSettings.snapMode, bpm,
+                                    appSettings.bpmChanges,
+                                    appSettings.meterNumerator,
+                                    appSettings.meterChanges);
 }
 
 void TimelineView::setPlayheadPosition(double seconds)
