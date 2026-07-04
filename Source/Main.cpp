@@ -108,6 +108,9 @@ public:
             // (次回プロジェクトを開いた時に同じサイズで開けるように)
             persistWindowSizeIfMain();
 
+            // 最大化のまま固定サイズの起動画面に戻ると枠が最大化のまま残るので解除する
+            if (isFullScreen()) setFullScreen(false);
+
             // 広告枠はコンパイル時フラグ (UTAWAVE_ADS_ENABLED) が ON かつユーザー設定が ON の時だけ。
             // 公開ソースの既定はフラグ OFF なので従来どおり 2 列表示になる。
             const bool showAds = AppPreferences::load().adsEffective();
@@ -140,6 +143,12 @@ public:
             // 前回保存したウィンドウサイズを復元 (無ければデフォルト 1280x800)
             const auto ws = WindowState::load();
             centreWithSize(ws.width, ws.height);
+#if JUCE_WINDOWS
+            // Windows はプロジェクトを開いたら最大化で表示する。保存サイズの復元だと
+            // 画面より大きい時にタイトルバーが上に食い込み、毎回手で直す手間があった。
+            // 復元サイズは「元に戻す」(最大化解除) 時の枠として上で設定済み
+            setFullScreen(true);
+#endif
 
             if (isNew)
                 mc->createNewProject(projectFile, sampleRate, bitDepth);
@@ -161,6 +170,9 @@ public:
         void persistWindowSizeIfMain()
         {
             if (dynamic_cast<MainComponent*>(getContentComponent()) == nullptr) return;
+            // 最大化 (Windows) / フルスクリーン中のサイズは保存しない。
+            // 保存すると次回の「元に戻す」枠まで画面いっぱいになってしまう
+            if (isFullScreen()) return;
             WindowState ws;
             ws.width  = getWidth();
             ws.height = getHeight();
