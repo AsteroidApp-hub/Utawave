@@ -65,9 +65,11 @@ public:
     }
 
     // Draw peaks as a waveform into bounds
+    // verticalZoom: 波形振幅の縦ズーム (Shift+Option+スクロール)。確定クリップの描画
+    // (drawClipWaveform) と同じ係数を掛け、録音中と録音後で波形の見た目を一致させる
     void draw(juce::Graphics& g, juce::Rectangle<int> bounds,
               juce::Colour colour, double startSeconds, double totalSeconds,
-              double sampleRate) const
+              double sampleRate, float verticalZoom = 1.0f) const
     {
         if (peaksStorage == nullptr) return;
         const int count = getPeakCount();
@@ -106,7 +108,9 @@ public:
             for (int pi = i0; pi <= i1; ++pi)
                 maxVal = std::max(maxVal, peaksStorage[(size_t) pi]);
 
-            const float halfH = juce::jmax(0.5f, maxVal * 0.5f * boundsH);
+            // ズーム超過分はレーン高で頭打ち (確定クリップの jlimit(topY,botY) と同じ挙動)
+            const float halfH = juce::jlimit(0.5f, 0.5f * boundsH,
+                                             maxVal * verticalZoom * 0.5f * boundsH);
             const float xF    = (float)(bounds.getX() + px);
             wavePath.startNewSubPath(xF, cyF - halfH);
             wavePath.lineTo       (xF, cyF + halfH);

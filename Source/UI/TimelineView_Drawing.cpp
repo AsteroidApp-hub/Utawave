@@ -1328,11 +1328,13 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
                 g.setColour(track->getColour().withAlpha(0.25f));
                 g.fillRoundedRectangle(liveRect.toFloat(), 2.0f);
 
-                // リアルタイム波形 (lead 以降のみ)
+                // リアルタイム波形 (lead 以降のみ)。振幅は確定クリップと同じ縦ズーム係数で
+                // スケールする (新規録音はクリップゲイン 1.0 なので waveformZoom のみ)
                 if (lb.getPeakCount() > 0 && durSecs > 0.0)
                     lb.draw(g, liveRect.reduced(2, 4),
                             track->getColour().brighter(0.9f),
-                            lead, durSecs, sampleRate);
+                            lead, durSecs, sampleRate,
+                            juce::jlimit(0.05f, 4.0f, (float)waveformZoom));
 
                 // 録音中を示す赤枠
                 g.setColour(AppColours::recRed.withAlpha(0.9f));
