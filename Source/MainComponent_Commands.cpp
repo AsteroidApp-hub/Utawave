@@ -231,6 +231,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         && !key.getModifiers().isAltDown()
         && (key.getKeyCode() == 'p' || key.getKeyCode() == 'P'))
     {
+        // 録音中のルーラー範囲変更は禁止 (ロケーター操作 / LOOP トグルと同じ凍結ルール)
+        if (isRecording) return true;
         double s = 0.0, e = 0.0;
         if (timelineView.getRangeForRulerFromSelection(s, e) && e > s)
         {
