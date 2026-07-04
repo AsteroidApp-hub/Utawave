@@ -46,19 +46,19 @@ bool RecordingManager::startRecording(double recStartSec, double playFromSec,
     // 録音開始時点の補正量を確定 (停止時のクリップ配置で使う)
     activeLatencyComp = audioEngine.getRecordingLatencyCompSecs();
 
-    // 遡及録音アクティブ + アーム中トラックがそれと同じなら、Punch From Retro モードへ
-    // 既存の retro writer をそのまま使い続け、stop 時に1つのクリップ（offset付き）として配置
+    // 遡及録音アクティブ + そのトラックがアーム中なら、Punch From Retro モードへ。
+    // 既存の retro writer をそのまま使い続け、stop 時に 1 つのクリップ（offset付き）として
+    // 配置する。他にアーム中のトラックがあれば下の通常ループで R 位置からの writer を作り
+    // 同時録音する (旧実装は retroTrack だけで early return しており、再生中のパンチインでは
+    // 2 本目以降のアームトラックが無警告で録音されない不具合があった)
     if (retroActive && retroTrack != nullptr && retroTrack->isRecArmed()
         && !loopRecording)
     {
         punchFromRetro = true;
         punchInRecStart = recStartSec;
-        recording = true;
         // R 押下時点からライブ波形オーバーレイを表示開始
         retroTrack->startLiveRecording(recStartSec);
         audioEngine.setRetrospectiveLiveBuffer(&retroTrack->getLiveBuffer());
-        audioEngine.setRecordingActive(true, recStartSec);
-        return true;
     }
 
     // カウントイン/プリロール区間も遡及的に録る: 書き込みは再生開始位置 (playFromSec) から
@@ -76,6 +76,7 @@ bool RecordingManager::startRecording(double recStartSec, double playFromSec,
     {
         auto* track = trackManager.getTrack(i);
         if (!track->isRecArmed()) continue;
+        if (punchFromRetro && track == retroTrack) continue;   // retro writer が担当
 
         auto file   = createRecordingFile(track->getName());
         auto stream = std::make_unique<juce::FileOutputStream>(file);
@@ -155,10 +156,10 @@ bool RecordingManager::startRecording(double recStartSec, double playFromSec,
     }
 
     // パンチイン録音開始時刻 (ミュート位置) と書き込み開始位置を AudioEngine に通知
-    if (!activeRecordings.empty())
+    if (!activeRecordings.empty() || punchFromRetro)
         audioEngine.setRecordingActive(true, recStartSec, writeFrom);
 
-    recording = !activeRecordings.empty();
+    recording = punchFromRetro || !activeRecordings.empty();
     return recording;
 }
 
@@ -169,6 +170,7 @@ void RecordingManager::stopRecording(double endPositionSeconds)
     audioEngine.setRecordingActive(false);
 
     // ── Punch From Retro: retro ライターをそのまま終了し、offset 付きクリップで配置 ──
+    // (他のアームトラックが併走録音していれば activeRecordings 側にあり、下の通常処理で配置)
     if (punchFromRetro)
     {
         audioEngine.setRetrospectiveTarget(nullptr);
@@ -215,8 +217,7 @@ void RecordingManager::stopRecording(double endPositionSeconds)
         retroFile     = juce::File();
         retroActive   = false;
         punchFromRetro = false;
-        recording = false;
-        return;
+        // return しない: 併走した通常録音 (activeRecordings) を下で配置する
     }
 
     audioEngine.setRecordingTarget(nullptr, nullptr);

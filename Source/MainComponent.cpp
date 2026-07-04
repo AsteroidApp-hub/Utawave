@@ -231,17 +231,10 @@ MainComponent::MainComponent()
         trackHeaderPanel.setScrollY(y);
     };
 
-    // ルーラークリック → プレイヘッドシーク
+    // ルーラークリック → プレイヘッドシーク (seekTo が遡及キャプチャの取り直しも行う)
     timelineView.onSeek = [this](double seconds)
     {
-        audioEngine.setPosition(seconds);
-        playPosition  = seconds;
-        playStartPos  = seconds;  // RTZ 基準も更新
-        int bar1, beat1;
-        appSettings.barAndBeatAtTime(seconds, bar1, beat1);
-        toolbar.setTimePosition(seconds, bar1, beat1);
-        // 再生中・停止中ともに即座にビジュアルを更新（timerCallback の遅延を回避）
-        timelineView.setPlayheadPosition(seconds);
+        seekTo(seconds);
     };
 
     // Master fader
@@ -361,8 +354,13 @@ MainComponent::MainComponent()
         appSettings.useMarkerColors = v;
         timelineView.setAppSettings(appSettings);
     };
+    // 録音中のルーラー範囲 (ロケーター) 変更は禁止: エンジンのループラップは範囲の
+    // atomic を毎ブロック見るが、ループ録音のテイクスライスは録音開始時のスナップショット
+    // を使うため、途中で範囲が変わると全テイクが累積的にずれる。通常録音中にラップ範囲を
+    // 作る/動かすのも尺計算 (停止位置 − 開始位置) を壊すので、停止まで一律に無視する
     ruler.onSetLoopStart = [this](double t)
     {
+        if (isRecording) return;
         loopStartSecs = t;
         if (loopEndSecs <= loopStartSecs) loopEndSecs = loopStartSecs + 1.0;
         loopActive = true;
@@ -371,6 +369,7 @@ MainComponent::MainComponent()
     };
     ruler.onSetLoopEnd = [this](double t)
     {
+        if (isRecording) return;
         loopEndSecs = t;
         if (loopEndSecs < loopStartSecs) std::swap(loopStartSecs, loopEndSecs);
         loopActive = true;
@@ -381,6 +380,7 @@ MainComponent::MainComponent()
     {
         // ルーラー範囲のドラッグでは範囲だけを更新（ループ再生は LOOP ボタンで切替）。
         // 選択範囲とは独立 (ルーラー帯のみ更新)。
+        if (isRecording) return;
         loopStartSecs = s;
         loopEndSecs   = e;
         timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
@@ -459,6 +459,10 @@ MainComponent::MainComponent()
 
     toolbar.onLoopToggle = [this](bool v)
     {
+        // 録音中の LOOP 切替は禁止: 通常録音中に ON にするとラップで位置が巻き戻り
+        // 尺計算が壊れ、ループ録音中に OFF にするとテイクスライスの前提が崩れる。
+        // ボタンは setClickingTogglesState でクリック時に自前トグル済みなので表示を戻す
+        if (isRecording) { toolbar.setLoopActive(loopActive); return; }
         loopActive = v && (loopEndSecs > loopStartSecs + 0.001);
         timelineView.setRulerRange(loopStartSecs, loopEndSecs, loopActive);
         audioEngine.setLoopRange(loopStartSecs, loopEndSecs, loopActive);
@@ -1086,6 +1090,10 @@ void MainComponent::timerCallback()
             else
             {
                 lastLoopWrapCount = wraps;
+                // 遡及キャプチャは「連続再生」前提の対応付けがラップで壊れるため、
+                // 現在位置 (ループ頭直後) から取り直す (シーク時と同じ作法)。これで
+                // ラップ後の Cmd+Shift+R 確定やパンチインが正しい位置に配置される
+                restartRetrospectiveAt(playPosition);
             }
         }
     }
@@ -1386,8 +1394,14 @@ void MainComponent::togglePlay()
 
 void MainComponent::seekTo(double seconds)
 {
+    // 録音中はシーク禁止 (ルーラークリック / N・B / マーカージャンプ等の全経路)。
+    // 録音の尺は「停止位置 − 開始位置」のタイムライン差分で、書き込みゲートも
+    // タイムラインの連続前進を前提にしているため、シークするとテイクがずれる
+    if (isRecording) return;
+
     const double t = juce::jmax(0.0, seconds);
     audioEngine.setPosition(t);
+    restartRetrospectiveAt(t);
     playPosition = t;
     playStartPos = t;   // RTZ 基準も更新
     int bar1, beat1;
@@ -1422,6 +1436,25 @@ void MainComponent::stopTransport()
     {
         // RTZ OFF: 停止位置でピアノロール再生バーも揃える
         propagatePlayheadToPianoRolls(audioEngine.getCurrentPositionSeconds());
+    }
+}
+
+void MainComponent::restartRetrospectiveAt(double t)
+{
+    // 録音中は対象外 (遡及キャプチャは録音開始で Punch From Retro へ移行済みか破棄済み)
+    if (isRecording || !recordingMgr.hasRetrospective()) return;
+
+    recordingMgr.stopRetrospective(false, t);   // 破棄 (ファイルも消える)
+
+    if (!isPlaying || !appSettings.retrospectiveEnabled) return;
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+    {
+        auto* trk = trackManager.getTrack(i);
+        if (trk != nullptr && trk->isRecArmed())
+        {
+            recordingMgr.startRetrospective(trk, t);
+            break;
+        }
     }
 }
 

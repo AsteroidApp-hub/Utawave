@@ -106,6 +106,11 @@ private:
     // 再生位置を seconds へ移動し、エンジン / ツールバー / タイムライン / ピアノロールを同期する。
     // (N/B の小節移動、マーカー移動、ルーラークリック等の共通処理)
     void seekTo(double seconds);
+    // 再生中の遡及キャプチャ (バックグラウンド録音) を破棄して位置 t から取り直す。
+    // 遡及ファイルは「サンプル 0 = キャプチャ開始位置からの連続再生」前提でタイムラインへ
+    // 対応付けるため、シークすると対応が壊れ、その後のパンチイン (Punch From Retro) や
+    // Cmd+Shift+R の確定クリップが移動前の位置基準で置かれてずれる。シーク時に必ず呼ぶ。
+    void restartRetrospectiveAt(double t);
     void startRecording();
     void stopRecording();
     void toggleRecord();
