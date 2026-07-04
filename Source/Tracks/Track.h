@@ -201,9 +201,11 @@ public:
     // ループ録音のラップ後、ライブ波形オーバーレイの表示開始をループ頭へ進める (表示専用。
     // liveBuffer 自体は AudioEngine がラップ時に reset 済み)
     void   setRecordingStartPos(double s)        { recordingStartPos = s; }
-    // liveBuffer 先頭の非表示先行録音分 (カウントイン/プリロール)。ラップ後は 0 に戻す
+    // liveBuffer 先頭の非表示先行録音分 (カウントイン/プリロール + レイテンシ補正)。
+    // 負値も可: 補正が負 (録音を後ろへずらす設定) のとき、内容をその分遅い位置に描いて
+    // 確定クリップの配置 (compensateLatency が start を後ろへ動かす) と一致させる
     double getLiveBufferLeadSecs()         const { return liveBufferLeadSecs; }
-    void   setLiveBufferLeadSecs(double s)       { liveBufferLeadSecs = juce::jmax(0.0, s); }
+    void   setLiveBufferLeadSecs(double s)       { liveBufferLeadSecs = s; }
 
     // 分割などの編集操作から参照するためにfriend宣言
     juce::AudioFormatManager&  getFormatManager()  { return formatManager; }

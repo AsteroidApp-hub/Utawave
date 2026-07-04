@@ -1301,16 +1301,17 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
             if (isLiveLane)
             {
                 // ── ライブ録音中の波形をオーバーレイ ──
-                // バッファ先頭の lead (カウントイン/プリロールの遡及録音分) は表に出さず、
-                // R 押下位置 (recordingStartPos) から lead 以降の内容だけを描く
+                // バッファ先頭の lead (カウントイン/プリロール + レイテンシ補正分) は表に
+                // 出さず、R 押下位置 (recordingStartPos) から lead 以降の内容だけを描く。
+                // 右端 (録音バーの伸び) はバッファ蓄積量でなく再生バーに追従させる:
+                // 補正込み表示では最新 comp 秒ぶんの内容がまだバッファに届いていないため、
+                // バッファ由来の右端だと再生バーから comp だけ離れて見える (±300ms 設定で
+                // 顕著)。枠は再生バーまで伸ばし、未到達部分は波形なし (draw が末尾で打ち切る)
                 auto& lb = track->getLiveBuffer();
 
                 const double lead = track->getLiveBufferLeadSecs();
                 double startSecs = track->getRecordingStartPos();
-                const double bufSecs = lb.getPeakCount() > 0
-                                       ? lb.getDurationSeconds(sampleRate)
-                                       : 0.0;
-                const double durSecs = juce::jmax(0.0, bufSecs - lead);
+                const double durSecs = juce::jmax(0.0, playheadSecs - startSecs);
                 int liveX = (int)positionToX(startSecs);
                 int liveW = durSecs > 0.0
                             ? juce::jmax(2, (int)(durSecs * (bpm / 60.0) * pixelsPerBeat))

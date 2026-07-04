@@ -100,7 +100,14 @@ public:
         for (int px = pxStart; px < pxEnd; ++px)
         {
             double p0 = startPeak + px * peaksPerPixel;
+            // まだ書き込まれていない領域は描かない (クランプすると末尾ピークが右へ
+            // 引き伸ばされる)。レイテンシ補正込み表示では枠の右端 (再生バー) より
+            // 内容が comp ぶん遅れて届くため、この打ち切りが波形の先端になる
+            if (p0 >= (double) count) break;
             double p1 = p0 + peaksPerPixel;
+            // 内容開始前の領域も描かない (startSeconds が負 = 負のレイテンシ補正で
+            // 内容を遅く描くケース。クランプすると先頭ピークが左へ引き伸ばされる)
+            if (p1 <= 0.0) continue;
             int i0 = juce::jlimit(0, count - 1, (int)p0);
             int i1 = juce::jlimit(0, count - 1, (int)p1);
 

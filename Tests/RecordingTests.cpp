@@ -596,9 +596,11 @@ public:
         expect(approxEq(t->getRecordingStartPos(), 5.0, 1e-9), "display start moves to loop head");
         expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "lead replaced after wrap");
 
-        // 負のリードは 0 にクランプ / リード無し開始は 0
+        // 負のリードは保持される (負のレイテンシ補正 = 内容をその分遅い位置に描き、
+        // 確定クリップの後ろずらし配置と一致させる) / リード無し開始は 0
         t->setLiveBufferLeadSecs(-1.0);
-        expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "negative lead clamps to 0");
+        expect(approxEq(t->getLiveBufferLeadSecs(), -1.0, 1e-9),
+               "negative lead preserved (content drawn later)");
         t->startLiveRecording(3.0);
         expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "default start has no lead");
     }
@@ -634,11 +636,13 @@ public:
         expect(approxEq(t->getLiveBufferLeadSecs(), 0.52, 1e-9), "lead = preRec + comp");
         rm.stopRecording(1.005);   // 極小尺 → クリップ配置なしで終了
 
-        // ── 負の comp は Track 側で 0 クランプ (従来同様の近似表示・安全) ──
+        // ── 負の comp は負リードとして保持 (内容を遅く描き、確定クリップの
+        //    後ろずらし配置と一致させる) ──
         engine.setRecordingLatencyComp(false, -10.0);
         ok = rm.startRecording(2.0, 2.0);
         expect(ok, "recording starts with negative comp");
-        expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "negative comp clamps lead to 0");
+        expect(approxEq(t->getLiveBufferLeadSecs(), -0.01, 1e-9),
+               "negative comp becomes negative lead");
         rm.stopRecording(2.005);
 
         // ── ループ録音: ラップ後の lead は comp (カウントインのリードは落ちるが補正は残る) ──

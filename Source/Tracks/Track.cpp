@@ -61,7 +61,7 @@ Track::~Track() = default;
 void Track::startLiveRecording(double startPosSecs, double bufferLeadSecs)
 {
     recordingStartPos  = startPosSecs;
-    liveBufferLeadSecs = juce::jmax(0.0, bufferLeadSecs);
+    liveBufferLeadSecs = bufferLeadSecs;   // 負も可 (負のレイテンシ補正 = 内容を遅く描く)
     liveBuffer.reset();
 
     if (lanes.empty())
