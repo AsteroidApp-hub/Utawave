@@ -450,7 +450,9 @@ private:
     // メトロノーム
     std::atomic<bool>   metronomeEnabled    { false };
     std::atomic<double> metronomeBpm        { 120.0 };
-    std::atomic<float>  metronomeVolume     { 0.5f };
+    // 既定は -7 dB 相当 (decibelsToGain(-7)*0.5)。トラック同期式 volume = decibelsToGain(dB)*0.5 の
+    // 逆写像で設定ダイアログには -7.0 dB と表示される。旧既定 0.5 (= 0 dB) はクリック音が大きすぎた
+    std::atomic<float>  metronomeVolume     { 0.223342f };
     std::atomic<float>  metronomePan        { 0.0f };
     std::atomic<int>    metronomeSound      { 0 };
     std::atomic<int>    metronomeBeatsPerBar { 4 };
