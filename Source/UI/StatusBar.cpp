@@ -99,11 +99,8 @@ void StatusBar::paint(juce::Graphics& g)
 
     // ── 右端: ショートカット一覧へのヒント (クリックで開く) ──
     {
-       #if JUCE_MAC
-        const juce::String keyHint = juce::String::fromUTF8("\xE2\x8C\x98/");  // ⌘/
-       #else
-        const juce::String keyHint = "Ctrl+/";
-       #endif
+        // Mac は ⌘/ ・非 Mac は Ctrl+/ (メニューのショートカット列と同じ変換ヘルパに集約)
+        const juce::String keyHint = platformMenuShortcut(juce::String::fromUTF8(u8"⌘/"));
         const juce::String hint = keyHint + "  " + tr(u8"ショートカット");
         const int hw = 138;
         helpHintBounds = juce::Rectangle<int>(getWidth() - hw, 0, hw, getHeight());

@@ -44,3 +44,18 @@ inline juce::String platformShortcutText(juce::String text)
     return text.replace("Cmd", "Ctrl").replace("Option", "Alt");
    #endif
 }
+
+// メニューのショートカット列 (shortcutKeyDescription) 等の Mac 記号表記 (⌘ / ⇧ / ⌥) を
+// プラットフォームに合わせる。Mac はそのまま、非 Mac は Ctrl+ / Shift+ / Alt+ 表記へ置換。
+// 複合記号 (⇧⌘) を先に置換すること。例: "⇧⌘S" → Windows では "Ctrl+Shift+S"
+inline juce::String platformMenuShortcut(juce::String macSymbols)
+{
+   #if JUCE_MAC
+    return macSymbols;
+   #else
+    return macSymbols.replace(juce::String::fromUTF8(u8"⇧⌘"), "Ctrl+Shift+")
+                     .replace(juce::String::fromUTF8(u8"⌘"),  "Ctrl+")
+                     .replace(juce::String::fromUTF8(u8"⌥"),  "Alt+")
+                     .replace(juce::String::fromUTF8(u8"⇧"),  "Shift+");
+   #endif
+}

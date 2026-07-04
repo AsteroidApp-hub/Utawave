@@ -31,10 +31,10 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     if (topLevelMenuIndex == 0)  // ファイル
     {
         addItem(m, 1, tr(u8"新規プロジェクト..."), "");
-        addItem(m, 2, tr(u8"開く..."),                tr(u8"⌘O"));
+        addItem(m, 2, tr(u8"開く..."),                platformMenuShortcut(juce::String::fromUTF8(u8"⌘O")));
         m.addSeparator();
-        addItem(m, 3, tr(u8"保存"),                    tr(u8"⌘S"));
-        addItem(m, 4, tr(u8"別名で保存..."),         tr(u8"⇧⌘S"));
+        addItem(m, 3, tr(u8"保存"),                    platformMenuShortcut(juce::String::fromUTF8(u8"⌘S")));
+        addItem(m, 4, tr(u8"別名で保存..."),         platformMenuShortcut(juce::String::fromUTF8(u8"⇧⌘S")));
         {
             // プロジェクトの保存先フォルダを Finder / Explorer で開く。未保存 (保存先が無い) は非活性。
             juce::PopupMenu::Item item;
@@ -44,10 +44,10 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
             m.addItem(item);
         }
         m.addSeparator();
-        addItem(m, 9, tr(u8"オーディオを読み込む..."), tr(u8"⌘I"));
+        addItem(m, 9, tr(u8"オーディオを読み込む..."), platformMenuShortcut(juce::String::fromUTF8(u8"⌘I")));
         addItem(m, 8, tr(u8"MIDI を読み込む..."),     "");
         m.addSeparator();
-        addItem(m, 6, tr(u8"書き出し..."),           tr(u8"⌘E"));
+        addItem(m, 6, tr(u8"書き出し..."),           platformMenuShortcut(juce::String::fromUTF8(u8"⌘E")));
         // 設定で ON のときだけ表示する MIDI 書き出し (普段使わない想定の機能)。
         // MIDI トラックが 1 つも無ければ非活性にする (メニューは開く度に再構築されるため
         // トラック追加/削除に追従する)。
@@ -69,7 +69,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     else if (topLevelMenuIndex == 1)  // ヘルプ
     {
         addItem(m, 102, tr(u8"使い方ドキュメント..."), "");
-        addItem(m, 101, tr(u8"ショートカット一覧..."), tr(u8"⌘/"));
+        addItem(m, 101, tr(u8"ショートカット一覧..."), platformMenuShortcut(juce::String::fromUTF8(u8"⌘/")));
         m.addSeparator();
         addItem(m, 103, tr(u8"開発を支援する (寄付)..."), "");
         addItem(m, 100, tr(u8"Utawave について..."), "");
