@@ -188,6 +188,10 @@ public:
     // 指定範囲を Take レーンへバックアップ (重ならない既存レーンを探し、無ければ新規作成)
     AudioClip* backupToTakeLane(const juce::File& file, double startPos, double dur,
                                  double fileOffset = 0.0);
+    // [start, end) と重ならない最初のテイクレーン (index >= max(1, minLaneIdx)) を返す。
+    // 無ければ新規レーンを作成してその index を返す。ループ録音のテイク配置と
+    // backupToTakeLane が共用する (空きテイクレーンの再利用を一箇所に集約)
+    int findFreeTakeLaneIndex(double start, double end, int minLaneIdx = 1);
     // Lane 0 内で newClip と重なるクリップをトリムし、境界に最小クロスフェードを作る
     void trimAndCrossfadeOnLane0(AudioClip* newClip, double startPos, double dur);
     bool       hasLiveRecording()          const { return liveRecordingLaneIdx >= 0; }

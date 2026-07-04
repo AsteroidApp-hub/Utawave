@@ -119,8 +119,11 @@ private:
         juce::int64 wallStartMs { 0 };
         // リアルタイムに作成済みのテイク数（ループラップ毎に増える）
         int  takesAddedRealtime { 0 };
-        // 採番開始のレーン index
-        int  takeStartLaneIdx   { 1 };
+        // この録音セッションで最後にテイクを置いたレーン index (0 = 未配置)。
+        // 各テイクは findFreeTakeLaneIndex(…, lastTakeLaneIdx + 1) で「空いている既存
+        // テイクレーンを再利用しつつ、セッション内では必ず下方向へ積む」(テイクの
+        // 上から下 = 時系列順を保ち、stopRecording の Undo のレーン昇順前提とも整合)
+        int  lastTakeLaneIdx    { 0 };
         // リアルタイムに追加された AudioClip 群（停止時にサムネイルを再読込する）
         std::vector<class AudioClip*> realtimeClips;
     };

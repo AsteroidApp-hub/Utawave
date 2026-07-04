@@ -206,17 +206,21 @@ void Track::trimAndCrossfadeOnLane0(AudioClip* newClip, double startPos, double 
     newClip->setFadeOutSecs(rightFade);
 }
 
+int Track::findFreeTakeLaneIndex(double start, double end, int minLaneIdx)
+{
+    if (lanes.empty())
+        lanes.push_back(std::make_unique<Lane>());   // Lane 0 はテイクレーンにしない
+    const int first = juce::jmax(1, minLaneIdx);
+    for (int li = first; li < (int)lanes.size(); ++li)
+        if (!lanes[(size_t)li]->overlaps(start, end)) return li;
+    lanes.push_back(std::make_unique<Lane>());
+    return (int)lanes.size() - 1;
+}
+
 AudioClip* Track::backupToTakeLane(const juce::File& file, double startPos, double dur,
                                     double fileOffset)
 {
-    int dest = -1;
-    for (int li = 1; li < (int)lanes.size(); ++li)
-        if (!lanes[(size_t)li]->overlaps(startPos, startPos + dur)) { dest = li; break; }
-    if (dest < 0)
-    {
-        lanes.push_back(std::make_unique<Lane>());
-        dest = (int)lanes.size() - 1;
-    }
+    const int dest = findFreeTakeLaneIndex(startPos, startPos + dur);
     auto* clip = lanes[(size_t)dest]->addClip(file, startPos, dur, formatManager, thumbnailCache);
     if (clip && fileOffset > 0.0) clip->setFileOffset(fileOffset);
     return clip;

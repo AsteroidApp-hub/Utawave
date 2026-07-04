@@ -23,6 +23,7 @@
 #include "../Source/Tracks/AudioClip.h"
 #include "../Source/Recording/LiveRecordingBuffer.h"
 #include "../Source/Recording/RecordingManager.h"
+#include "../Source/Audio/AudioEngine.h"
 
 namespace
 {
@@ -51,6 +52,10 @@ public:
         testLiveRecordingBuffer();
         testLoopTakeSlice();
         testLiveRecordingLead();
+        testLiveOverlayLeadIncludesComp();
+        testFindFreeTakeLane();
+        testLoopTakeLaneReuse();
+        testLoopLastTakeOnLane0();
     }
 
     // lane0 に直接クリップを足す (overlaps チェック無しでそのまま lane0 に入る)
@@ -583,17 +588,215 @@ public:
         expect(approxEq(t->getRecordingStartPos(), 8.0, 1e-9), "display start = R position");
         expect(approxEq(t->getLiveBufferLeadSecs(), 2.0, 1e-9), "lead = count-in duration");
 
-        // ループラップ後相当: 表示をループ頭へ、リードは 0 へ (2 周目以降はリード無し)
+        // ループラップ後相当: 表示をループ頭へ、リードを差し替え
+        // (実運用の値は RecordingManager が決める。補正込みの値は下の
+        //  testLiveOverlayLeadIncludesComp で検証)
         t->setRecordingStartPos(5.0);
         t->setLiveBufferLeadSecs(0.0);
         expect(approxEq(t->getRecordingStartPos(), 5.0, 1e-9), "display start moves to loop head");
-        expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "lead cleared after wrap");
+        expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "lead replaced after wrap");
 
         // 負のリードは 0 にクランプ / リード無し開始は 0
         t->setLiveBufferLeadSecs(-1.0);
         expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "negative lead clamps to 0");
         t->startLiveRecording(3.0);
         expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "default start has no lead");
+    }
+
+    // ── ライブ波形リードにレイテンシ補正が乗る (RecordingManager 経由・改修 2026-07) ──
+    // 確定クリップの fileOffset には補正量 comp が乗る (頭がトリムされる) ため、録音中の
+    // 表示リードにも同じ comp を足す。これで録音中と確定後の波形位置が一致する。
+    // 3 経路: 通常録音開始 (preRec + comp) / ループラップ後 (comp) /
+    // Punch From Retro (retro 開始時にスナップショットした retroLatencyComp)。
+    // AudioEngine はデバイス無しで構築し、補正は手動オフセット (auto OFF) で与える。
+    void testLiveOverlayLeadIncludesComp()
+    {
+        beginTest("live overlay lead includes latency comp (normal / wrap / punch-from-retro)");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveRecLeadTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+
+        // ── 通常録音: lead = 先行録音分 (preRec) + comp ──
+        engine.setRecordingLatencyComp(false, 20.0);   // comp = 0.020s (手動のみ)
+        bool ok = rm.startRecording(1.0, 0.5);          // R=1.0 / 再生 0.5 から (preRec 0.5)
+        expect(ok, "normal recording starts");
+        expect(approxEq(t->getRecordingStartPos(), 1.0, 1e-9), "display start = R position");
+        expect(approxEq(t->getLiveBufferLeadSecs(), 0.52, 1e-9), "lead = preRec + comp");
+        rm.stopRecording(1.005);   // 極小尺 → クリップ配置なしで終了
+
+        // ── 負の comp は Track 側で 0 クランプ (従来同様の近似表示・安全) ──
+        engine.setRecordingLatencyComp(false, -10.0);
+        ok = rm.startRecording(2.0, 2.0);
+        expect(ok, "recording starts with negative comp");
+        expect(approxEq(t->getLiveBufferLeadSecs(), 0.0, 1e-9), "negative comp clamps lead to 0");
+        rm.stopRecording(2.005);
+
+        // ── ループ録音: ラップ後の lead は comp (カウントインのリードは落ちるが補正は残る) ──
+        engine.setRecordingLatencyComp(false, 30.0);   // comp = 0.030s
+        ok = rm.startRecording(6.0, 6.0, true, 5.0, 10.0);
+        expect(ok, "loop recording starts");
+        expect(approxEq(t->getLiveBufferLeadSecs(), 0.03, 1e-9), "loop take1 lead = comp");
+        rm.onLoopWrap();
+        expect(approxEq(t->getRecordingStartPos(), 5.0, 1e-9), "after wrap display at loop head");
+        expect(approxEq(t->getLiveBufferLeadSecs(), 0.03, 1e-9), "after wrap lead = comp (not 0)");
+        rm.stopRecording(6.01);
+
+        // ── Punch From Retro: lead = retro 開始時のスナップショット (R 押下時の値ではない) ──
+        engine.setRecordingLatencyComp(false, 40.0);   // retro 開始時 comp = 0.040s
+        ok = rm.startRetrospective(t, 2.0);
+        expect(ok, "retrospective starts");
+        engine.setRecordingLatencyComp(false, 10.0);   // R 押下時は別の値に変えておく
+        ok = rm.startRecording(3.0, 3.0);              // retro アクティブ + アーム済み → パンチ
+        expect(ok, "punch-from-retro starts");
+        expect(approxEq(t->getRecordingStartPos(), 3.0, 1e-9), "punch display start = R position");
+        expect(approxEq(t->getLiveBufferLeadSecs(), 0.04, 1e-9),
+               "punch lead = retro comp snapshot");
+        rm.stopRecording(3.005);
+
+        tmpDir.deleteRecursively();
+    }
+
+    // ── 空きテイクレーン検索 (Track::findFreeTakeLaneIndex) ──
+    void testFindFreeTakeLane()
+    {
+        beginTest("findFreeTakeLaneIndex: reuse first free lane / minLaneIdx / create new");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        auto* t = tm.addTrack();
+        const juce::File dummy("/tmp/utawave_takelane.wav");
+
+        // lane1 = [5,10] のクリップ持ち / lane2 = 空
+        t->ensureLane(2);
+        t->getLane(1)->addClip(dummy, 5.0, 5.0, t->getFormatManager(), t->getThumbnailCache());
+
+        expect(t->findFreeTakeLaneIndex(5.0, 10.0) == 2, "overlapping lane1 skipped -> lane2");
+        expect(t->findFreeTakeLaneIndex(12.0, 13.0) == 1, "non-overlapping span reuses lane1");
+        expect(t->findFreeTakeLaneIndex(10.0, 12.0) == 1, "touching boundary (end==start) is free");
+
+        // minLaneIdx で下方向を強制 (空きの lane2 を飛ばして新規 lane3)
+        const int before = t->getLaneCount();
+        const int idx = t->findFreeTakeLaneIndex(5.0, 10.0, 3);
+        expect(idx == 3 && t->getLaneCount() == before + 1, "minLaneIdx forces new lane below");
+
+        // minLaneIdx < 1 は 1 に切り上げ (Lane 0 はテイクレーンにしない)
+        expect(t->findFreeTakeLaneIndex(12.0, 13.0, -5) == 1, "minLaneIdx clamps to 1");
+    }
+
+    // ── ループ録音のテイクレーン再利用 (改修 2026-07 の回帰テスト) ──
+    // 旧実装は「クリップを持つ最後のレーンの次」から採番していたため、ループ範囲外に
+    // クリップがあるだけの空きレーンを飛ばして毎回新規レーンを作っていた。新実装は
+    // 通常録音の backupToTakeLane と同じく重ならない既存レーンを再利用する。
+    // セッション内では lastTakeLaneIdx + 1 から探すので必ず下方向へ積まれる
+    // (テイクの上から下 = 時系列順・Undo のレーン昇順前提を維持)。
+    void testLoopTakeLaneReuse()
+    {
+        beginTest("loop recording reuses free take lanes before creating new ones");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveTakeLaneTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+        const juce::File dummy("/tmp/utawave_takelane2.wav");
+
+        // lane1 = ループ範囲外 [20,21] のみ (= ループ録音にとって空き) /
+        // lane2 = ループ範囲内 [5,8] を持つ (= 使用中)
+        t->ensureLane(2);
+        t->getLane(1)->addClip(dummy, 20.0, 1.0, t->getFormatManager(), t->getThumbnailCache());
+        t->getLane(2)->addClip(dummy, 5.0, 3.0, t->getFormatManager(), t->getThumbnailCache());
+
+        // ループ [5,10]・6.0 から録音開始 (comp はデバイス無し + 手動 0 = 0)
+        bool ok = rm.startRecording(6.0, 6.0, true, 5.0, 10.0);
+        expect(ok, "loop recording starts");
+
+        // Take 1 [6,10) はループ範囲外クリップしかない lane1 を再利用 (旧実装は lane3 新規)
+        rm.onLoopWrap();
+        expect(t->getLaneCount() == 3, "take1 reuses lane1 (no new lane)");
+        expect((int) t->getLane(1)->clips.size() == 2, "take1 lands in lane1");
+        expect(clipAtStart(t->getLane(1), 6.0) != nullptr, "take1 at recording start");
+
+        // Take 2 [5,10) は lane2 が使用中なので新規 lane3 へ (下方向へ積む)
+        rm.onLoopWrap();
+        expect(t->getLaneCount() == 4, "take2 creates lane3");
+        expect((int) t->getLane(3)->clips.size() == 1, "take2 lands in new lane3");
+        auto* take2 = clipAtStart(t->getLane(3), 5.0);
+        expect(take2 != nullptr && approxEq(take2->getDuration(), 5.0, 1e-6)
+               && approxEq(take2->getFileOffset(), 4.0, 1e-6),
+               "take2 geometry: loop head, full loop dur, offset = first pass");
+        expect((int) t->getLane(2)->clips.size() == 1, "busy lane2 untouched");
+
+        rm.stopRecording(10.0);
+        tmpDir.deleteRecursively();
+    }
+
+    // ── ループ録音停止で最後のテイクが Lane 0 にも置かれる (要望 2026-07 の回帰テスト) ──
+    // 旧実装はテイクレーンに入るだけで Lane 0 が空のままだった。新実装は最後に配置した
+    // テイクと同内容 (file/start/dur/fileOffset) を Lane 0 へ置き、パンチインと同じ作法
+    // (trimAndCrossfadeOnLane0) で既存クリップをトリムする。
+    void testLoopLastTakeOnLane0()
+    {
+        beginTest("loop recording places the last take on lane0 at stop");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveLane0TakeTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+        const juce::File dummy("/tmp/utawave_lane0take.wav");
+
+        // Lane 0 に既存クリップ [0,20] (オケ的な下地) を置いておく → 停止時にトリムされる
+        auto* pre = addLane0(t, dummy, 0.0, 20.0);
+        expect(pre != nullptr, "pre-existing lane0 clip");
+
+        // ループ [5,10]・6.0 から録音開始、2 周分をリアルタイム配置 (comp = 0)
+        bool ok = rm.startRecording(6.0, 6.0, true, 5.0, 10.0);
+        expect(ok, "loop recording starts");
+        rm.onLoopWrap();   // take1 [6,10)
+        rm.onLoopWrap();   // take2 [5,10) fileOffset 4
+        rm.stopRecording(10.0);
+
+        // Lane 0: 最後のテイク (take2) と同ジオメトリのクリップが置かれ、既存クリップは
+        // パンチイン同様に左右へトリムされる (左 [0,~5.03] / take2 [5,10) / 右 [~9.97,20])
+        auto* lane0 = t->getLane(0);
+        expect((int) lane0->clips.size() == 3, "lane0 = left piece + last take + right piece");
+        auto* placed = clipAtStart(lane0, 5.0);
+        expect(placed != nullptr && approxEq(placed->getDuration(), 5.0, 1e-6)
+               && approxEq(placed->getFileOffset(), 4.0, 1e-6),
+               "lane0 clip = last take geometry (loop head, loop dur, offset = first pass)");
+        auto* left = clipAtStart(lane0, 0.0);
+        expect(left != nullptr && left->getEndPosition() < 5.0 + kXfade + 1e-6,
+               "left piece trimmed to punch boundary");
+
+        // テイクレーン側にも同じテイクが残っている (lane0 への配置はコピー)
+        auto* take2 = clipAtStart(t->getLane(2), 5.0);
+        expect(take2 != nullptr && approxEq(take2->getFileOffset(), 4.0, 1e-6),
+               "take2 remains in take lane");
+
+        tmpDir.deleteRecursively();
     }
 };
 
