@@ -291,8 +291,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     const double bps = bpm / 60.0;
     dragStartSecs = (e.x + scrollX) / (bps * pixelsPerBeat);
 
-    // 空白部クリック (Alt = 分割モードなので空白では何もしない)
-    if (!ref.valid() && !e.mods.isCommandDown() && !e.mods.isShiftDown() && !e.mods.isAltDown())
+    // 空白部クリック (Alt = 分割モードなので空白では何もしない)。
+    // Cmd は「グリッドスナップの一時解除」修飾として通す (Cmd+ドラッグで自由位置の範囲選択)
+    if (!ref.valid() && !e.mods.isShiftDown() && !e.mods.isAltDown())
     {
         // 範囲ツール (Selection or Both) なら時間範囲選択を開始
         if (appSettings.toolMode == ToolMode::Selection
@@ -324,9 +325,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             // 既存範囲はクリア（mouseDrag で新規設定される）
             if (loopEndTV > loopStartTV + 0.001 && onSetSelectionRange)
                 onSetSelectionRange(0.0, 0.0);
-            // 再生バー追従
+            // 再生バー追従 (Cmd 押下中はスナップを一時解除)
             if (appSettings.playheadFollowsSelection && onSeek)
-                onSeek(snapTime(dragStartSecs));
+                onSeek(e.mods.isCommandDown() ? dragStartSecs : snapTime(dragStartSecs));
             repaint();
             return;
         }
@@ -497,9 +498,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     {
         selectionFocusTrackIdx = ref.trackIdx;
         selectionFocusLaneIdx  = ref.laneIdx;
-        // 再生バー追従: ドラッグ開始位置にシーク
+        // 再生バー追従: ドラッグ開始位置にシーク (Cmd 押下中はスナップを一時解除)
         if (appSettings.playheadFollowsSelection && onSeek)
-            onSeek(snapTime(dragStartSecs));
+            onSeek(e.mods.isCommandDown() ? dragStartSecs : snapTime(dragStartSecs));
     }
     // クリップを単純にクリック（Move/Selection以外の通常選択）した場合も、
     // 設定が ON なら再生バーをクリップ先頭に移動
@@ -1006,12 +1007,18 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
         }
         case DragMode::Selection:
         {
-            // クリップ上半分のドラッグで選択範囲（ループ範囲）を更新
+            // クリップ上半分のドラッグで選択範囲（ループ範囲）を更新。
+            // Cmd (Mac)/Ctrl 押下中はグリッドスナップを一時解除して自由位置で選択
+            // (リサイズと同じ操作感。ドラッグ途中の押下/解放にも追従する)
+            const bool noSnap = e.mods.isCommandDown();
             double t1 = dragStartSecs;
             double t2 = curSec;
             if (t1 > t2) std::swap(t1, t2);
-            t1 = snapTime(t1);
-            t2 = snapTime(t2);
+            if (!noSnap)
+            {
+                t1 = snapTime(t1);
+                t2 = snapTime(t2);
+            }
             if (onSetSelectionRange) onSetSelectionRange(t1, t2);
             break;
         }
