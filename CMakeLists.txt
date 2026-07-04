@@ -342,6 +342,7 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/LocalisationTests.cpp
         Tests/AudioFileImporterTests.cpp
         Tests/AppStorageTests.cpp
+        Tests/AppPreferencesTests.cpp
         Tests/AdServiceTests.cpp
         Tests/UpdateCheckerTests.cpp
         Tests/CrashReporterTests.cpp
@@ -376,6 +377,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/Project/CrashReporter.cpp
         Source/Project/RecentProjects.cpp
         Source/Project/WindowState.cpp
+        Source/Project/AppPreferences.cpp
         Source/Project/BackupManager.cpp
         Source/Project/ProjectManager.cpp
         Source/VST/PluginManager.cpp

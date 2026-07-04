@@ -234,7 +234,7 @@ void MainComponent::showPreferences()
             setupLabel(recCompOffsetLabel, tr(u8"追加の録音補正 (ms, +で手前へ)"),
                        13.0f, juce::Colours::white);
             recCompOffsetSlider.setSliderStyle(juce::Slider::LinearBar);
-            recCompOffsetSlider.setRange(-200.0, 300.0, 1.0);
+            recCompOffsetSlider.setRange(-300.0, 300.0, 1.0);
             recCompOffsetSlider.setTextValueSuffix(" ms");
             // 設定ページのスクロール中にホイールが値を変えてしまう誤操作を防ぐ
             // (無効化するとホイールは素通りして Viewport のスクロールに使われる)

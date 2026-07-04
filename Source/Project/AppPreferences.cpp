@@ -58,7 +58,7 @@ AppPreferences AppPreferences::load()
         p.showAds            = xml->getBoolAttribute("showAds", p.showAds);
         p.midiPagingEnabled  = xml->getBoolAttribute("midiPagingEnabled", p.midiPagingEnabled);
         p.recLatencyAutoComp = xml->getBoolAttribute("recLatencyAutoComp", p.recLatencyAutoComp);
-        p.recLatencyManualMs = juce::jlimit(-500.0, 500.0,
+        p.recLatencyManualMs = juce::jlimit(-300.0, 300.0,
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
