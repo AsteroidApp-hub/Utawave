@@ -1282,7 +1282,8 @@ void MainComponent::syncInputMonitorStateToEngine()
     }
     audioEngine.setInputMonitoringActive(anyMonitoring);
     audioEngine.setAnyTrackRecArmed(anyRecArmed);
-    audioEngine.setMonitorReverbSend(monRev);
+    // 再生時の送りと同じ二乗テーパーを通す (モニターの返しだけ効きが強くならないように)
+    audioEngine.setMonitorReverbSend(Track::reverbSendGain(monRev));
     // 返し音に INS を通すか (アプリ全体設定)。OFF のときはドライ返しのまま (nullptr を渡す)。
     // 入力チャンネル / mono・stereo / pan / 音量 は chain の有無に依らず常に渡す (返しの定位用)。
     audioEngine.setMonitorChain(appPrefs.monitorThroughInserts ? monChain : nullptr,

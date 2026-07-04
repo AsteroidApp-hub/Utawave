@@ -60,6 +60,10 @@ public:
     // 簡易リバーブセンド量 (0..1)。0 で完全ドライ、1 で全幅ウェット。
     float getReverbSend() const { return reverbSend; }
     void  setReverbSend(float s) { reverbSend = juce::jlimit(0.0f, 1.0f, s); }
+    // Rev スライダー値 → 実際の送りゲイン (オーディオテーパー)。リニアだと少し上げた
+    // だけでウェットが強すぎるため二乗カーブで右へ行くほど徐々に増やす (0 / 1 は不変)。
+    // 送りを消費する全経路 (再生 2 箇所 + 入力モニター) はこの関数を通すこと
+    static float reverbSendGain(float slider) { return slider * slider; }
 
     // State
     bool isMuted()            const { return muted; }

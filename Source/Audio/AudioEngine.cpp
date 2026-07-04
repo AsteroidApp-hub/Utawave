@@ -1931,8 +1931,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 if (workBuffer.getNumChannels() >= 2 && trackBuf.getNumChannels() >= 2)
                     workBuffer.addFrom(1, 0, trackBuf, 1, 0, numSamples, gR);
 
-                // 簡易リバーブ送り (post-fader / post-pan)
-                const float rs = track ? track->getReverbSend() : 0.0f;
+                // 簡易リバーブ送り (post-fader / post-pan)。スライダー値は二乗テーパーで
+                // 送りゲイン化する (低位置での効き過ぎ防止・Track::reverbSendGain に一元化)
+                const float rs = track ? Track::reverbSendGain(track->getReverbSend()) : 0.0f;
                 if (rs > 0.0001f)
                 {
                     if (!reverbBufCleared) { reverbSendBuf.clear(); reverbBufCleared = true; }
@@ -2128,7 +2129,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             if (workBuffer.getNumChannels() >= 2 && trackBuf.getNumChannels() >= 2)
                 workBuffer.addFrom(1, 0, trackBuf, 1, 0, numSamples, gR);
 
-            const float rs = mp.track->getReverbSend();
+            const float rs = Track::reverbSendGain(mp.track->getReverbSend());
             if (rs > 0.0001f)
             {
                 if (!reverbBufCleared) { reverbSendBuf.clear(); reverbBufCleared = true; }
