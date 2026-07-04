@@ -1046,17 +1046,25 @@ void MainComponent::timerCallback()
     else
         ++idleMeterTicks;
 
-    if (meterActive || idleMeterTicks < 30)
+    // 猶予はエンジンの VU バリスティクス (時定数 300ms・表示床 -60dB 到達 ≈ 2.1s) が
+    // 落ち切る長さ (3s)。最終 tick はバーを床へスナップして消灯を確定する。旧実装は
+    // 1.5s で更新を打ち切っていたため、減衰途中の値 (≈ -43dB) でマスター VU の点灯が
+    // 残ったままになっていた。ピークホールドの表示は保持する (RESET ボタンで消せる)
+    constexpr int kMeterIdleGraceTicks = 60;   // 20Hz × 60 = 3s
+    if (meterActive || idleMeterTicks <= kMeterIdleGraceTicks)
     {
+        const bool snapFloor = !meterActive && idleMeterTicks >= kMeterIdleGraceTicks;
         masterPanel.setLevels(
-            audioEngine.getPeakL(), audioEngine.getPeakR(),
-            audioEngine.getVUL(),   audioEngine.getVUR(),
+            snapFloor ? -96.0f : audioEngine.getPeakL(),
+            snapFloor ? -96.0f : audioEngine.getPeakR(),
+            snapFloor ? -96.0f : audioEngine.getVUL(),
+            snapFloor ? -96.0f : audioEngine.getVUR(),
             audioEngine.getPeakHoldL(), audioEngine.getPeakHoldR());
 
         // 入力レベルメータ（各トラック）
         trackHeaderPanel.updateInputLevels(
-            [this](int ch){ return audioEngine.getInputPeak(ch); },
-            [this](int ch){ return audioEngine.getInputVU(ch);   });
+            [this, snapFloor](int ch){ return snapFloor ? -96.0f : audioEngine.getInputPeak(ch); },
+            [this, snapFloor](int ch){ return snapFloor ? -96.0f : audioEngine.getInputVU(ch);   });
     }
 
     // Transport position（再生バー自体の描画は onVBlank 側。ここは数値表示・ループ検出）
