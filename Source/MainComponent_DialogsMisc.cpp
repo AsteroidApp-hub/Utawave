@@ -635,7 +635,26 @@ void MainComponent::showExportDialog()
             Job job;
             job.opts       = options;
             job.opts.stems = false;
-            // mix-down: 選択トラックだけをミックスして1ファイルに（selectedTrackIndices をそのまま渡す）
+            // mix-down: 選択トラックだけをミックスして 1 ファイルに。
+            // エンジンは明示的なトラック指定があると Mute を無視する (ステムでミュート中の
+            // トラックも単体で書き出せるようにするため) ので、2 ミックスでは「聞こえている
+            // ものが書き出される」ようここでミュート中トラックを除外する
+            auto& inc = job.opts.selectedTrackIndices;
+            inc.erase(std::remove_if(inc.begin(), inc.end(), [this](int ti)
+                      {
+                          auto* t = trackManager.getTrack(ti);
+                          return t != nullptr && t->isMuted();
+                      }), inc.end());
+            if (inc.empty())
+            {
+                // 空リストをエンジンへ渡すと「フィルタ無し = 全トラック」になるため必ずここで止める
+                juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                    .withIconType(juce::MessageBoxIconType::WarningIcon)
+                    .withTitle(tr(u8"書き出し対象なし"))
+                    .withMessage(tr(u8"選択されたトラックがすべてミュートされています。\nミュートを解除するか、他のトラックを選択してください。"))
+                    .withButton("OK"), nullptr);
+                return;
+            }
             auto base = options.baseName.isEmpty() ? projectStem : options.baseName;
             auto outF = folder.getChildFile(base + extStr);
             if (options.autoRename && outF.existsAsFile())
