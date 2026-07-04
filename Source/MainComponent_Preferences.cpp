@@ -32,7 +32,12 @@ void MainComponent::showPreferences()
         juce::ToggleButton diskStreamBtn;       // ディスクストリーミング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton multicoreBtn;        // オーディオのマルチコア処理 (アプリ全体設定。初期状態は showPreferences 側)
         juce::Label        recCompOffsetLabel;
-        juce::Slider       recCompOffsetSlider; // 追加の手動オフセット (ms)
+        // ダブルクリックで数値を直接入力できるスライダー (追加の手動オフセット ms 用)
+        struct TypeInSlider : juce::Slider
+        {
+            void mouseDoubleClick (const juce::MouseEvent&) override { showTextBox(); }
+        };
+        TypeInSlider       recCompOffsetSlider;
         juce::Label        exportLabel, startupLabel;
         const bool         adsUi { AppPreferences::adsCompiledIn() };  // 広告がコンパイル時有効な時だけ UI を出す
         juce::TextButton closeBtn, resetBtn;
@@ -231,6 +236,10 @@ void MainComponent::showPreferences()
             recCompOffsetSlider.setSliderStyle(juce::Slider::LinearBar);
             recCompOffsetSlider.setRange(-200.0, 300.0, 1.0);
             recCompOffsetSlider.setTextValueSuffix(" ms");
+            // 設定ページのスクロール中にホイールが値を変えてしまう誤操作を防ぐ
+            // (無効化するとホイールは素通りして Viewport のスクロールに使われる)
+            recCompOffsetSlider.setScrollWheelEnabled(false);
+            recCompOffsetSlider.setTooltip(tr(u8"ダブルクリックで数値を入力"));
             recCompOffsetSlider.setColour(juce::Slider::trackColourId, juce::Colour(0xff3a5a3a));
             recCompOffsetSlider.setColour(juce::Slider::backgroundColourId, juce::Colour(0xff3a3a3a));
             recCompOffsetSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
