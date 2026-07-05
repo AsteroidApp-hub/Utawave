@@ -58,12 +58,16 @@ public:
     // ・includeTracks が空でない場合、その index に含まれるトラックのみ描画
     //   （Solo/Mute は無視。書き出しダイアログで明示的に選んだ前提）
     // ・includeTracks が空の場合、Solo/Mute を考慮した通常のミックスダウン
-    // ・クリックトラックは常に除外
+    // ・CLICK トラック (メトロノーム合成): includeClick=true なら混ぜる (呼び出し側が
+    //   「鳴っている状態か = 非ミュート + ソロ規則」を判定して渡す。2 ミックスは明示
+    //   トラックリストを渡すため、この明示フラグが唯一の経路)。includeTracks が空の
+    //   通常ミックスダウンでは非ミュート + ソロ規則で自動判定する
     void renderOfflineRange(double startSec, double endSec,
                             juce::AudioBuffer<float>& outBuffer,
                             std::function<void(double)> progress = {},
                             const std::vector<int>& includeTracks = {},
-                            bool preFader = false);
+                            bool preFader = false,
+                            bool includeClick = false);
 
     // ── 実時間レンダリング (Realtime capture) ──
     // オーディオデバイスのコールバック経由で実時間にミックス出力を録る。

@@ -233,6 +233,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testPlaybackRendersClip();
         testNotPlayingIsSilent();
         testMuteAndSolo();
+        testSoloSilencesClick();
         testMultiTrackClipIndexRouting();
         testClearPlaybackBarrier();
         testDeferredDestructionRebuild();
@@ -436,6 +437,50 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         tb->setSoloed(true);
         runBlocks(s.engine, 3, &pl, &pr);
         expect(std::abs(pl - 0.2f) < 0.01f, "solo silences the other track (~0.2)");
+    }
+
+    // ── ソロ中は CLICK (メトロノーム) も黙る (要望 2026-07 の回帰テスト) ──
+    // 旧実装はメトロノーム合成にソロ規則が無く、他トラックをソロにしても
+    // クリックだけ鳴り続けていた。クリック自身をソロにした場合は鳴る。
+    void testSoloSilencesClick()
+    {
+        beginTest("solo on another track silences the click (metronome)");
+        auto wav = tempDir.getChildFile("clk_solo.wav");
+        expect(writeMonoConstWav(wav, (int)(2 * kSR), 0.5f), "source write");
+
+        Scene s;
+        auto* inst  = s.addConstTrack(wav, 2.0);
+        auto* click = s.tm->addClickTrack();
+        click->setVolume(0.0f);   // クリック基本音量 = 0.5 (gain 1.0 × 0.5)
+        s.start();                // preparePlayback で metronomeEnabled = 非ミュート
+        s.engine.play();
+
+        // (A) inst をソロ: クリックは鳴らず、出力は定数 0.5 のみ
+        //     (拍 0 のクリックがソロブロックで抑止されることも兼ねて先に検証)
+        inst->setSoloed(true);
+        float pl = 0, pr = 0;
+        runBlocks(s.engine, 10, &pl, &pr);
+        expect(std::abs(pl - 0.5f) < 0.005f, "solo blocks the click (const 0.5 only)");
+
+        // (B) ソロ解除: 次の拍 (0.5s) からクリックが混ざり、ピークが定数を超える
+        inst->setSoloed(false);
+        runBlocks(s.engine, 60, &pl, &pr);   // ~0.64s ぶん = 拍 0.5s を跨ぐ
+        expect(pl > 0.55f, "click audible again after unsolo");
+
+        // (C) CLICK 自身をソロ: クリックだけが鳴る = 拍でピークが立ち、拍間は無音
+        //     (CLICK のソロが anySolo に含まれず inst が鳴り続けていたバグの回帰テスト)
+        click->setSoloed(true);
+        float maxPk = 0.0f, minPk = 1.0e9f;
+        for (int i = 0; i < 60; ++i)
+        {
+            float a = 0, b = 0;
+            runBlocks(s.engine, 1, &a, &b);
+            maxPk = juce::jmax(maxPk, a);
+            minPk = juce::jmin(minPk, a);
+        }
+        expect(maxPk > 0.3f,  "click audible when click itself is soloed");
+        expect(minPk < 0.01f, "instrument silenced by click solo (quiet between beats)");
+        click->setSoloed(false);
     }
 
     void testMultiTrackClipIndexRouting()

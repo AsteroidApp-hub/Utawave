@@ -1300,11 +1300,59 @@ void AudioEngine::fillPlayHead(EnginePlayHead& ph, double posSecs, double sr,
               looping, loopStartPpq, loopEndPpq);
 }
 
+// posStart より前にあった Program Change / Control Change / Pitch Bend /
+// Channel Pressure の「最後の値」をブロック先頭 (sample 0) へ再送する。
+// シーク直後の再生 (needsStateRefresh) と書き出しの開始ブロックで共用する。
+// CC 全部 → PC → PB → CP の順 (PC で音色が変わってから CC が効く事故を避ける)。
+// events はタイムスタンプ昇順前提 (MidiPlayback::events)。確保はスタックのみ (audio 安全)
+static void appendMidiStateResend(juce::MidiBuffer& mb,
+                                  const std::vector<juce::MidiMessage>& events,
+                                  double posStart)
+{
+    // channel ごとに: 最後の PC、各 CC の最終値、最後の Pitch Bend、最後の Channel Pressure
+    std::array<int, 16> lastPC;            lastPC.fill(-1);
+    std::array<int, 16> lastPitchBend;    lastPitchBend.fill(-1);
+    std::array<int, 16> lastChanPressure; lastChanPressure.fill(-1);
+    // CC は (channel * 128 + ccNum) でキー化
+    std::array<int, 16 * 128> lastCC;     lastCC.fill(-1);
+
+    for (const auto& m : events)
+    {
+        if (m.getTimeStamp() >= posStart) break;
+        const int ch = m.getChannel() - 1;
+        if (ch < 0 || ch >= 16) continue;
+        if (m.isProgramChange())
+            lastPC[(size_t)ch] = m.getProgramChangeNumber();
+        else if (m.isController())
+            lastCC[(size_t)(ch * 128 + m.getControllerNumber())] = m.getControllerValue();
+        else if (m.isPitchWheel())
+            lastPitchBend[(size_t)ch] = m.getPitchWheelValue();
+        else if (m.isChannelPressure())
+            lastChanPressure[(size_t)ch] = m.getChannelPressureValue();
+    }
+
+    for (int ch = 0; ch < 16; ++ch)
+        for (int cc = 0; cc < 128; ++cc)
+            if (lastCC[(size_t)(ch * 128 + cc)] >= 0)
+                mb.addEvent(juce::MidiMessage::controllerEvent(ch + 1, cc,
+                                lastCC[(size_t)(ch * 128 + cc)]), 0);
+    for (int ch = 0; ch < 16; ++ch)
+        if (lastPC[(size_t)ch] >= 0)
+            mb.addEvent(juce::MidiMessage::programChange(ch + 1, lastPC[(size_t)ch]), 0);
+    for (int ch = 0; ch < 16; ++ch)
+        if (lastPitchBend[(size_t)ch] >= 0)
+            mb.addEvent(juce::MidiMessage::pitchWheel(ch + 1, lastPitchBend[(size_t)ch]), 0);
+    for (int ch = 0; ch < 16; ++ch)
+        if (lastChanPressure[(size_t)ch] >= 0)
+            mb.addEvent(juce::MidiMessage::channelPressureChange(ch + 1,
+                            lastChanPressure[(size_t)ch]), 0);
+}
+
 void AudioEngine::renderOfflineRange(double startSec, double endSec,
                                       juce::AudioBuffer<float>& outBuffer,
                                       std::function<void(double)> progress,
                                       const std::vector<int>& includeTracks,
-                                      bool preFader)
+                                      bool preFader, bool includeClick)
 {
     if (endSec <= startSec || currentSampleRate <= 0.0) return;
 
@@ -1324,6 +1372,34 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 
     juce::AudioBuffer<float> blockBuf(2, blockSize);
 
+    // MIDI トラック書き出し用のローカルシンセ (trackIdx → 実体・ブロックを跨いでボイス状態を
+    // 保持)。snapshot の synths は audio thread (停止中のプレビュー MIDI) と共有のため、
+    // 書き出しスレッドから触ると状態が壊れる。書き出し専用に別インスタンスを起こす
+    std::unordered_map<int, std::unique_ptr<InternalSynth>> offlineSynths;
+    juce::MidiBuffer offlineMidi;
+
+    // ── リバーブ送りバス (Rev スライダー) の書き出し用ローカル実体 (2026-07 追加) ──
+    // 実時間の masterReverbBus は audio thread 専用のため共有しない。パラメータは同一
+    // (makePlateReverbParams) なので鳴りは再生時と一致する。送りは再生と同じ post-fader。
+    // rs > 0 のトラックがある限り毎ブロック処理するので、クリップ終了後のテールも乗る。
+    // Pre-Fader 書き出しでは送り自体を出さない (素のクリップ音のみ・addTrackOut 参照)
+    juce::Reverb offlineReverbBus;
+    offlineReverbBus.setSampleRate(sr);
+    offlineReverbBus.setParameters(makePlateReverbParams());
+    juce::AudioBuffer<float> sendBuf(2, blockSize);
+
+    // ── メトロノーム (CLICK トラック) 合成の書き出し用ローカル状態 (2026-07 追加) ──
+    // 実時間と同じ合成式・同じ INS チェーン経由・同じ「マスターチェーン/ゲインを通さない」
+    // 加算。通常書き出し (明示選択なし) で CLICK トラックが非ミュートのときだけ混ざる
+    // (stems / 明示選択では従来どおり除外)。エンベロープ等は engine メンバでなくローカル
+    // (audio thread の実時間クリック状態と競合しないように)
+    juce::AudioBuffer<float> clickBlock(2, blockSize);
+    juce::Random clickRng;
+    double clkEnv = 0.0, clkPhase = 0.0, clkFreq = 1000.0;
+    bool   clkDown = false;
+    int    clkLastBeat = 0;
+    bool   clkInit = false;
+
     int written = 0;
     while (written < totalSamp)
     {
@@ -1336,6 +1412,10 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                                     /*playing*/ true, /*recording*/ false,
                                     /*looping*/ false, 0.0, 0.0);
 
+        // メトロノームの合成結果 (スコープ内で生成し、マスター処理後に加算する)
+        bool  clickActive = false, clickChainStereo = false;
+        float clickGL = 0.0f, clickGR = 0.0f;
+
         {
             // 再生スナップショットを per-block で取得する (旧 playbackLock 相当)。per-block にする
             // ことで clearPlayback() の drain がこのレンダリングを 1 ブロック分だけ待てば解放される。
@@ -1346,7 +1426,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             const bool explicitFilter = !includeTracks.empty();
 
             // Solo 判定（明示フィルタ無しのときのみ、MIDI トラックも含める）。
-            // clipTracks は dedup 済みトラック一覧 (Click 除外)
+            // clipTracks は dedup 済みトラック一覧 (Click 除外) のため、CLICK トラックの
+            // ソロは明示チェックで含める (実時間の再生ブランチと同じ規則)
             bool anySolo = false;
             if (!explicitFilter)
             {
@@ -1355,6 +1436,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 if (!anySolo)
                     for (auto& mp : snap->midi)
                         if (mp.track && mp.track->isSoloed()) { anySolo = true; break; }
+                if (!anySolo && snap->clickTrack != nullptr && snap->clickTrack->isSoloed())
+                    anySolo = true;
             }
 
             // アクティブトラック収集 (clipTracks ベースで O(トラック数)。全 clips 走査しない)
@@ -1379,6 +1462,46 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 
             juce::AudioBuffer<float> trackBuf(2, n);
             juce::AudioBuffer<float> offlineScratch(2, n);   // 書き出しは単一スレッド = ローカル 1 本で十分
+            bool sendActive = false;                          // このブロックにリバーブ送りがあるか
+
+            // トラックのドライを blockBuf へ、リバーブ送り (Rev スライダー) を sendBuf へ加算。
+            // Post-Fader: gL/gR = vol/pan、送りは gL*rs (再生と同じ post-fader 送り)。
+            // Pre-Fader: クリップの素の音のみ (Vol/Pan/Rev/master を一切通さない)。
+            //   リバーブ送りは再生では post-fader なので、Pre では送り自体を出さない
+            //   (Pre を選ぶ = 加工前の素材が欲しい、なので Rev も混ぜない・要望 2026-07)
+            auto addTrackOut = [&](Track* track, const juce::AudioBuffer<float>& buf)
+            {
+                if (preFader)
+                {
+                    // 素のクリップ音のみ (Vol/Pan/Rev なし)
+                    blockBuf.addFrom(0, 0, buf, 0, 0, n, 1.0f);
+                    blockBuf.addFrom(1, 0, buf, 1, 0, n, 1.0f);
+                    return;
+                }
+
+                const float vol  = track ? juce::Decibels::decibelsToGain(track->getVolume()) : 1.0f;
+                const float pan  = track ? track->getPan() : 0.0f;
+                const float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
+                const float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
+                const float gL = vol * panL;
+                const float gR = vol * panR;
+                blockBuf.addFrom(0, 0, buf, 0, 0, n, gL);
+                blockBuf.addFrom(1, 0, buf, 1, 0, n, gR);
+
+                const float rs = track ? Track::reverbSendGain(track->getReverbSend()) : 0.0f;
+                if (rs > 0.0001f)
+                {
+                    if (!sendActive)
+                    {
+                        sendBuf.setSize(2, n, false, false, true);
+                        sendBuf.clear();
+                        sendActive = true;
+                    }
+                    sendBuf.addFrom(0, 0, buf, 0, 0, n, gL * rs);
+                    sendBuf.addFrom(1, 0, buf, 1, 0, n, gR * rs);
+                }
+            };
+
             for (size_t ai = 0; ai < activeIdx.size(); ++ai)
             {
                 trackBuf.clear();
@@ -1395,21 +1518,195 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                     track->getPluginChain().processBlock(trackBuf, midi, &exportHead);
                 }
 
-                if (preFader)
+                addTrackOut(track, trackBuf);
+            }
+
+            // ── MIDI トラック (内蔵シンセ / INS 音源) のレンダリング ──
+            // 従来はここが無く、MIDI トラックの書き出しが常に無音になっていた (2026-07 修正)。
+            // イベント収集・移調・シンセ/チェーンの流れはリアルタイム再生ブランチと同じ。
+            // 遅延補正 (PDC) やメータ等の実時間専用処理は書き出しでは不要なので行わない
+            const double posEndMidi = posStart + (double)n / sr;
+            for (auto& mp : snap->midi)
+            {
+                if (mp.track == nullptr) continue;
+                if (explicitFilter)
                 {
-                    // Pre-Fader: トラック Vol/Pan/マスター無視
-                    blockBuf.addFrom(0, 0, trackBuf, 0, 0, n, 1.0f);
-                    blockBuf.addFrom(1, 0, trackBuf, 1, 0, n, 1.0f);
+                    if (includeSet.find(mp.trackIdx) == includeSet.end()) continue;
                 }
                 else
                 {
-                    const float vol  = track ? juce::Decibels::decibelsToGain(track->getVolume()) : 1.0f;
-                    const float pan  = track ? track->getPan() : 0.0f;
-                    const float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
-                    const float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
-                    blockBuf.addFrom(0, 0, trackBuf, 0, 0, n, vol * panL);
-                    blockBuf.addFrom(1, 0, trackBuf, 1, 0, n, vol * panR);
+                    if (mp.track->isMuted()) continue;
+                    if (anySolo && !mp.track->isSoloed()) continue;
                 }
+
+                auto& syn = offlineSynths[mp.trackIdx];
+                if (!syn)
+                {
+                    syn = std::make_unique<InternalSynth>();
+                    syn->prepareToPlay(sr, blockSize);
+                }
+                syn->setWaveform(mp.track->getSynthWaveform());
+                const int transpose = mp.track->getTotalTransposeSemitones();
+
+                offlineMidi.clear();
+                // 途中からの書き出しでも音色/ベンドが合うよう、開始ブロックで
+                // startSec より前の PC/CC/PB/CP の最終値を再送する (再生のシーク時と同じ)
+                if (written == 0)
+                    appendMidiStateResend(offlineMidi, mp.events, posStart);
+
+                auto evIt = std::lower_bound(mp.events.begin(), mp.events.end(), posStart,
+                    [](const juce::MidiMessage& m, double v) { return m.getTimeStamp() < v; });
+                for (; evIt != mp.events.end(); ++evIt)
+                {
+                    const double t = evIt->getTimeStamp();
+                    if (t >= posEndMidi) break;
+                    juce::MidiMessage out = *evIt;
+                    if (transpose != 0 && out.isNoteOnOrOff())
+                        out.setNoteNumber(juce::jlimit(0, 127, out.getNoteNumber() + transpose));
+                    offlineMidi.addEvent(out, juce::jlimit(0, n - 1,
+                                                           (int)((t - posStart) * sr)));
+                }
+
+                trackBuf.clear();
+                // 内蔵シンセ ON なら音を書き、OFF なら MIDI を INS チェーン (VST 音源等) だけに渡す
+                if (mp.track->isSynthEnabled())
+                    syn->processBlock(trackBuf, offlineMidi);
+                if (mp.track->getPluginChain().getNumPlugins() > 0)
+                    mp.track->getPluginChain().processBlock(trackBuf, offlineMidi, &exportHead);
+
+                addTrackOut(mp.track, trackBuf);
+            }
+
+            // ── リバーブ送りバス: ウェットを生成してドライへ加算 (2026-07 追加) ──
+            // 実時間と同じくマスターチェーンの前段。rs > 0 のトラックがある限り毎ブロック
+            // 処理されるので、クリップ終了後のテールも書き出しに乗る。
+            // 旧実装はここが無く、Rev スライダーを上げても書き出しには乗らなかった
+            if (sendActive)
+            {
+                offlineReverbBus.processStereo(sendBuf.getWritePointer(0),
+                                               sendBuf.getWritePointer(1), n);
+                blockBuf.addFrom(0, 0, sendBuf, 0, 0, n, 1.0f);
+                blockBuf.addFrom(1, 0, sendBuf, 1, 0, n, 1.0f);
+            }
+
+            // ── メトロノーム (CLICK トラック) の合成 (2026-07 追加) ──
+            // 混ぜる条件は 2 系統:
+            //  - includeClick=true (2 ミックス書き出し。ダイアログ経路は常に明示トラック
+            //    リストを渡すため、呼び出し側が「鳴っている状態か」を判定してこのフラグで指示)
+            //  - 明示選択なしの通常ミックスダウンでは非ミュート + Solo 規則で自動判定
+            // stems (明示選択・フラグ無し) では従来どおり除外。
+            // 合成式・INS チェーン経由・vol/pan 後段は実時間 (audioDeviceIOCallback) と同一
+            Track* clickTr = snap->clickTrack;
+            const bool clickAuto = !explicitFilter && clickTr != nullptr
+                                   && !clickTr->isMuted()
+                                   && !(anySolo && !clickTr->isSoloed());
+            if ((includeClick && clickTr != nullptr) || clickAuto)
+            {
+                const double bpmHere = (exportCfg && !exportCfg->bpmChanges.empty())
+                                       ? exportCfg->bpmAtTime(posStart)
+                                       : metronomeBpm.load();
+                const double bps2 = bpmHere / 60.0;
+                const int    beatsPerBar = juce::jmax(1, metronomeBeatsPerBar.load());
+                const int    sound   = metronomeSound.load();
+                const bool   accent  = metronomeAccent.load();
+                const double rateMul = juce::jmax(0.01f, metronomeRateMul.load());
+                const double beatsAtBlockStart = (exportCfg && !exportCfg->bpmChanges.empty())
+                                                 ? exportCfg->beatsAtTime(posStart)
+                                                 : posStart * bps2;
+                if (!clkInit)
+                {
+                    // 開始位置ちょうどが拍境界なら、その拍から鳴らす (floor だけだと最初の
+                    // 拍が「越えた」判定にならず 1 拍目が欠ける)
+                    const double b0 = beatsAtBlockStart * rateMul;
+                    clkLastBeat = (int)std::floor(b0);
+                    if (std::abs(b0 - std::round(b0)) < 1e-9) clkLastBeat -= 1;
+                    clkInit = true;
+                }
+
+                clickBlock.setSize(2, n, false, false, true);
+                clickBlock.clear();
+                float* cs = clickBlock.getWritePointer(0);
+                for (int i = 0; i < n; ++i)
+                {
+                    const double localBeats = beatsAtBlockStart + bps2 * (double)i / sr;
+                    const int beatInt = (int)std::floor(localBeats * rateMul);
+                    if (beatInt > clkLastBeat)
+                    {
+                        clkEnv   = 1.0;
+                        clkPhase = 0.0;
+                        const double realBeatF = (double)beatInt / rateMul;
+                        const int    realBeatI = (int)std::round(realBeatF);
+                        const bool   onRealBeat = std::abs(realBeatF - (double)realBeatI) < 0.01;
+                        clkDown = onRealBeat &&
+                                  (!exportCfg || exportCfg->meterChanges.empty()
+                                   ? (realBeatI % beatsPerBar == 0)
+                                   : exportCfg->isDownbeatAtBeat(realBeatI));
+                        const bool downHi = accent && clkDown;
+                        switch (sound)
+                        {
+                            case 0: clkFreq = downHi ? 1500.0 : 1000.0; break;  // Beep
+                            case 1: clkFreq = downHi ? 2000.0 : 1500.0; break;  // Stick
+                            case 2: clkFreq = downHi ? 800.0  : 600.0;  break;  // Cowbell
+                            case 3: clkFreq = downHi ? 600.0  : 400.0;  break;  // Wood
+                            case 4: clkFreq = downHi ? 2200.0 : 1700.0; break;  // Tick
+                            case 5: clkFreq = downHi ? 1200.0 : 900.0;  break;  // Bell
+                            default: clkFreq = 1000.0;
+                        }
+                        clkLastBeat = beatInt;
+                    }
+                    if (clkEnv > 0.001)
+                    {
+                        float s = 0.0f;
+                        clkPhase += 2.0 * juce::MathConstants<double>::pi * clkFreq / sr;
+                        switch (sound)
+                        {
+                            case 0: s = (float)(std::sin(clkPhase) * clkEnv); break;
+                            case 1: s = (clickRng.nextFloat() * 2.0f - 1.0f) * (float)clkEnv * 0.7f; break;
+                            case 2: s = (std::sin(clkPhase) > 0 ? 1.0f : -1.0f) * (float)clkEnv * 0.5f; break;
+                            case 3: s = (float)((std::asin(std::sin(clkPhase))
+                                                 / juce::MathConstants<double>::halfPi) * clkEnv) * 0.5f
+                                        + (clickRng.nextFloat() * 2.0f - 1.0f) * (float)clkEnv * 0.2f; break;
+                            case 4: s = (float)(std::sin(clkPhase) * clkEnv * clkEnv); break;
+                            case 5:
+                            {
+                                const double s1 = std::sin(clkPhase);
+                                const double s2 = std::sin(clkPhase * 2.756);
+                                s = (float)((s1 + s2 * 0.5) * clkEnv * 0.6);
+                                break;
+                            }
+                            default: s = (float)(std::sin(clkPhase) * clkEnv);
+                        }
+                        s *= accent ? (clkDown ? 1.3f : 0.85f) : 1.0f;
+                        cs[i] = s;
+                        const double decay = (sound == 1 || sound == 4) ? 0.997 : 0.9985;
+                        clkEnv *= decay;
+                        if (clkEnv < 0.001) clkEnv = 0.0;
+                    }
+                }
+
+                // CLICK トラックの INS チェーン (EQ 等) を通す
+                if (clickTr->getPluginChain().getNumPlugins() > 0)
+                {
+                    clickBlock.copyFrom(1, 0, clickBlock, 0, 0, n);   // dual-mono 化
+                    juce::MidiBuffer midi;
+                    clickTr->getPluginChain().processBlock(clickBlock, midi, &exportHead);
+                    clickChainStereo = true;
+                }
+
+                // vol/pan はチェーン後段 (実時間と同じ)。クリック基本音量 = トラックゲイン × 0.5。
+                // Pre-Fader ではフェーダー/パンを掛けない (他トラックと同じ扱い)
+                if (preFader)
+                {
+                    clickGL = clickGR = 0.5f;
+                }
+                else
+                {
+                    const float vol  = juce::Decibels::decibelsToGain(clickTr->getVolume()) * 0.5f;
+                    const float pan  = clickTr->getPan();
+                    clickGL = vol * ((pan <= 0.0f) ? 1.0f : (1.0f - pan));
+                    clickGR = vol * ((pan >= 0.0f) ? 1.0f : (1.0f + pan));
+                }
+                clickActive = true;
             }
         }
 
@@ -1422,6 +1719,13 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 masterChain->processBlock(blockBuf, midi, &exportHead);
             }
             blockBuf.applyGain(masterGain.load());
+        }
+
+        // メトロノームは実時間と同じくマスターチェーン/ゲインを通さずここで加算する
+        if (clickActive)
+        {
+            blockBuf.addFrom(0, 0, clickBlock, 0, 0, n, clickGL);
+            blockBuf.addFrom(1, 0, clickBlock, clickChainStereo ? 1 : 0, 0, n, clickGR);
         }
 
         for (int ch = 0; ch < 2; ++ch)
@@ -1847,6 +2151,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
 
     // 簡易リバーブ送りバスのフラグ
     bool anyReverbSend = false;
+    // ソロ中は CLICK (メトロノーム) も他トラック同様に黙らせる (クリック自身のソロは除く)。
+    // 判定は下の anySolo のスコープで行い、後段のメトロノーム合成ブロックが参照する
+    bool clickSoloBlocked = false;
 
     {
         // ライブ Solo 判定（オーディオクリップだけでなく MIDI トラックも対象に含める）。
@@ -1857,6 +2164,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         if (!anySolo)
             for (auto& mp : snap->midi)
                 if (mp.track && mp.track->isSoloed()) { anySolo = true; break; }
+        // CLICK トラックのソロも anySolo に含める (clipTracks は Click 除外のため明示チェック。
+        // これが無いと CLICK をソロにしても他トラックが鳴り続け「クリックだけ」にならない)
+        if (!anySolo && snap->clickTrack != nullptr && snap->clickTrack->isSoloed())
+            anySolo = true;
+
+        clickSoloBlocked = anySolo
+                           && (snap->clickTrack == nullptr
+                               || !snap->clickTrack->isSoloed());
 
         // 各トラックの「有効性」を判定し、使うトラックのリストを作る。
         // スクラッチを再利用 (clear で長さ 0 に戻すと容量は保たれヒープ確保が起きない)。
@@ -2006,51 +2321,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             }
 
             // 状態再送: posStart より前にあった Program Change / Control Change /
-            // Pitch Bend / Channel Pressure をブロック先頭 (sample 0) で再送する。
-            // 同種類イベントが複数あれば「最後の値」だけを採用するため、いったん集めて重複排除する。
+            // Pitch Bend / Channel Pressure をブロック先頭 (sample 0) で再送する
+            // (実体は appendMidiStateResend・書き出しの開始ブロックと共用)
             if (needsStateRefresh)
-            {
-                // channel ごとに: 最後の PC、各 CC の最終値、最後の Pitch Bend、最後の Channel Pressure
-                std::array<int, 16> lastPC;            lastPC.fill(-1);
-                std::array<int, 16> lastPitchBend;    lastPitchBend.fill(-1);
-                std::array<int, 16> lastChanPressure; lastChanPressure.fill(-1);
-                // CC は (channel * 128 + ccNum) でキー化
-                std::array<int, 16 * 128> lastCC;     lastCC.fill(-1);
-
-                for (const auto& m : mp.events)
-                {
-                    if (m.getTimeStamp() >= posStart) break;
-                    const int ch = m.getChannel() - 1;
-                    if (ch < 0 || ch >= 16) continue;
-                    if (m.isProgramChange())
-                        lastPC[(size_t)ch] = m.getProgramChangeNumber();
-                    else if (m.isController())
-                        lastCC[(size_t)(ch * 128 + m.getControllerNumber())] = m.getControllerValue();
-                    else if (m.isPitchWheel())
-                        lastPitchBend[(size_t)ch] = m.getPitchWheelValue();
-                    else if (m.isChannelPressure())
-                        lastChanPressure[(size_t)ch] = m.getChannelPressureValue();
-                }
-
-                // sample 0 に注入: CC → PC の順だと PC で音色が変わってから CC が効く
-                // 通常順: Bank Select (CC0/32) → PC → 他の CC → PB
-                // ここでは安全のため CC 全部 → PC → PB の順に送る
-                for (int ch = 0; ch < 16; ++ch)
-                    for (int cc = 0; cc < 128; ++cc)
-                        if (lastCC[(size_t)(ch * 128 + cc)] >= 0)
-                            mb.addEvent(juce::MidiMessage::controllerEvent(ch + 1, cc,
-                                            lastCC[(size_t)(ch * 128 + cc)]), 0);
-                for (int ch = 0; ch < 16; ++ch)
-                    if (lastPC[(size_t)ch] >= 0)
-                        mb.addEvent(juce::MidiMessage::programChange(ch + 1, lastPC[(size_t)ch]), 0);
-                for (int ch = 0; ch < 16; ++ch)
-                    if (lastPitchBend[(size_t)ch] >= 0)
-                        mb.addEvent(juce::MidiMessage::pitchWheel(ch + 1, lastPitchBend[(size_t)ch]), 0);
-                for (int ch = 0; ch < 16; ++ch)
-                    if (lastChanPressure[(size_t)ch] >= 0)
-                        mb.addEvent(juce::MidiMessage::channelPressureChange(ch + 1,
-                                        lastChanPressure[(size_t)ch]), 0);
-            }
+                appendMidiStateResend(mb, mp.events, posStart);
 
             // 移調量が変わった場合は、posStart 時点で保持中のノート (note-on 済み・未 note-off) を
             // 新シフトで sample 0 に鳴らし直す ("再度鳴らす")。これで Octave/Semitone をリアルタイムに
@@ -2265,7 +2539,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             double localBeats = beatsAtBlockStart + bps * (double)i / currentSampleRate;
             int beatInt = (int)std::floor(localBeats * rateMul);
 
-            if (metronomeEnabled.load() && beatInt > clickLastBeatInt && pos >= 0.0)
+            if (metronomeEnabled.load() && !clickSoloBlocked
+                && beatInt > clickLastBeatInt && pos >= 0.0)
             {
                 clickEnvelope    = 1.0;
                 clickPhase       = 0.0;
