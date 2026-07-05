@@ -29,6 +29,10 @@ public:
         bool       autoRename     { true };   // 同名ファイル存在時に連番を付与
         bool       revealAfter    { true };   // 完了後にフォルダを Finder で開く（呼び出し側で処理）
         bool       realtime       { false };  // 実時間レンダリング（VST 等の互換用）
+        // CLICK トラック (メトロノーム合成) をミックスに混ぜる (2 ミックス用)。
+        // 呼び出し側が「鳴っている状態か (存在・非ミュート・ソロ規則)」を判定して立てる。
+        // 2 ミックスは selectedTrackIndices を常に明示指定するため、このフラグが唯一の経路
+        bool       includeClick   { false };
         juce::String           baseName;                 // mix-down 時のファイル名（拡張子なし）
         // 書き出し対象のトラック index 一覧
         // ・mix-down: ここに含まれるトラックのみをミックスして単一ファイルに書き出し

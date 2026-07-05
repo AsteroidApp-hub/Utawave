@@ -24,6 +24,7 @@
 #include "../Source/Tracks/TrackManager.h"
 #include "../Source/Tracks/Track.h"
 #include "../Source/Tracks/AudioClip.h"
+#include "../Source/Tracks/MidiClip.h"
 #include "../Source/Export/ExportEngine.h"
 
 namespace
@@ -187,6 +188,8 @@ public:
         testSelectedTrackIndicesIgnoreMuteSolo();
         testEmptySelectionHonorsSoloMute();
         testClickTrackExcluded();
+        testMidiTrackRendersInExport();
+        testReverbSendInExport();
         testDither16PerturbsSteadyLevel();
         testDitherSilenceBounded();
         testOverwritesExistingFile();
@@ -831,10 +834,11 @@ public:
     }
 
     //==========================================================================
-    // 20. クリックトラックは常に書き出しから除外される
+    // 20. クリックトラック: 通常ミックスには鳴っていれば混ざる (要望 2026-07)。
+    //     クリップは再生されず (合成メトロノームのみ)、ミュートで除外、明示選択 (stems) は従来どおり除外
     void testClickTrackExcluded()
     {
-        beginTest("click track is always excluded from export");
+        beginTest("click track: mixed into 2-mix when audible, excluded from stems");
 
         juce::AudioFormatManager fmt; fmt.registerBasicFormats();
         TrackManager tm(fmt);
@@ -846,6 +850,7 @@ public:
         tn->setVolume(0.0f); tn->setPan(0.0f);
 
         auto* click = tm.addClickTrack();
+        click->setVolume(-20.0f);   // クリック振幅を抑えて閾値検証を安定させる
         auto sClk = outDir.getChildFile("clk_click.wav");
         writeMonoConst(sClk, (int)(0.1 * kSR), 0.50f);
         auto* cc = click->addClip(sClk, 0.0, 0.1);
@@ -859,16 +864,49 @@ public:
 
         AudioEngine engine; engine.preparePlayback(tm);
 
-        // (A) 空選択: 通常ミックス → クリックは出ず 0.30 のみ
+        // (A1) クリックをミュート: 通常ミックスに混ざらず 0.30 のみ
+        {
+            click->setMuted(true);
+            auto out = outDir.getChildFile("clk_mix_muted.wav");
+            auto o = baseOpts(out, 32, 0.1); o.peakGuard = false;
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "render: " + err);
+            auto d = readAudio(out);
+            expectAllClose(d.samples, 0, 0.30f, 1.0e-5f, "muted click absent from mix");
+            click->setMuted(false);
+        }
+        // (A2) クリック非ミュート: 合成メトロノームが混ざる。ただしクリップ (0.5) は再生されない
         {
             auto out = outDir.getChildFile("clk_mix.wav");
             auto o = baseOpts(out, 32, 0.1); o.peakGuard = false;
             juce::String err;
             expect(ExportEngine::render(engine, o, {}, {}, &err), "render: " + err);
             auto d = readAudio(out);
-            expectAllClose(d.samples, 0, 0.30f, 1.0e-5f, "click absent from normal mix");
+            float maxDev = 0.0f;
+            const float* p = d.samples.getReadPointer(0);
+            for (int i = 0; i < d.samples.getNumSamples(); ++i)
+                maxDev = juce::jmax(maxDev, std::abs(p[i] - 0.30f));
+            expect(maxDev > 0.005f, "synthesized click mixed into 2-mix");
+            expect(d.maxAbs() < 0.45f, "click track clip (0.5) is NOT played");
         }
-        // (B) クリックを明示選択 → それでも除外され無音
+        // (A3) 実アプリの 2 ミックス経路: 明示トラックリスト + includeClick=true → 混ざる
+        //      (2 ミックスは常に selectedTrackIndices を渡すため、このフラグが唯一の経路。
+        //       フラグ無しで明示リストだけだと混ざらなかった実機バグの回帰テスト)
+        {
+            auto out = outDir.getChildFile("clk_mix_explicit.wav");
+            auto o = baseOpts(out, 32, 0.1); o.peakGuard = false;
+            o.selectedTrackIndices = { 0 };   // normal トラックのみ明示 (実アプリと同じ形)
+            o.includeClick = true;
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "render: " + err);
+            auto d = readAudio(out);
+            float maxDev = 0.0f;
+            const float* p = d.samples.getReadPointer(0);
+            for (int i = 0; i < d.samples.getNumSamples(); ++i)
+                maxDev = juce::jmax(maxDev, std::abs(p[i] - 0.30f));
+            expect(maxDev > 0.005f, "includeClick mixes click with explicit track list");
+        }
+        // (B) クリックを明示選択 (stems・includeClick 無し) → 従来どおり除外され無音
         {
             auto out = outDir.getChildFile("clk_only.wav");
             auto o = baseOpts(out, 32, 0.1); o.peakGuard = false;
@@ -878,6 +916,122 @@ public:
             auto d = readAudio(out);
             expectWithinAbsoluteError(d.maxAbs(), 0.0f, 1.0e-4f);
         }
+    }
+
+    //==========================================================================
+    // 20.5. MIDI トラック (内蔵シンセ) が書き出しに乗る
+    //       (旧実装は renderOfflineRange が MIDI を描画せず常に無音だった・2026-07 修正の回帰テスト)
+    void testMidiTrackRendersInExport()
+    {
+        beginTest("MIDI track (internal synth) renders in offline export");
+
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        auto* t = tm.addTrack("midi", false);
+        t->setMidiTrack(true);
+        t->setVolume(0.0f); t->setPan(0.0f);
+        auto* mc = t->addMidiClip(0.0, 1.0);
+        expect(mc != nullptr, "midi clip created");
+        // A4 (69) を 0.1s on / 0.8s off (クリップ相対秒 = クリップが 0 開始なので絶対秒と同じ)
+        auto& seq = mc->getSequence();
+        seq.addEvent(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 100), 0.1);
+        seq.addEvent(juce::MidiMessage::noteOff(1, 69), 0.8);
+        seq.updateMatchedPairs();
+
+        AudioEngine engine;
+        engine.preparePlayback(tm);
+
+        auto out = outDir.getChildFile("midi.wav");
+        auto o = baseOpts(out, 32, 1.0);
+        o.dither = false; o.peakGuard = false;
+        juce::String err;
+        expect(ExportEngine::render(engine, o, {}, {}, &err), "render: " + err);
+
+        auto d = readAudio(out);
+        expect(d.ok && d.len == (juce::int64) kSR, "readable, 1s output");
+        // ノート区間は鳴っている (フル振幅 = velocity(100/127) * 0.25 ~= 0.197)
+        const int sOn = (int)(0.3 * kSR), nOn = (int)(0.3 * kSR);
+        expect(d.samples.getMagnitude(0, sOn, nOn) > 0.10f, "note region is audible");
+        expect(d.samples.getMagnitude(1, sOn, nOn) > 0.10f, "note audible on both channels");
+        // ノート前は無音 / ノートオフ + リリース (50ms) 後も無音
+        expect(d.samples.getMagnitude(0, 0, (int)(0.08 * kSR)) < 1.0e-4f, "silence before note");
+        expect(d.samples.getMagnitude(0, (int)(0.95 * kSR), (int)(0.05 * kSR)) < 1.0e-3f,
+               "silence after release");
+
+        // ミュートは通常書き出しから除外 / 明示選択 (stems) はミュートを無視して鳴る
+        t->setMuted(true);
+        expect(ExportEngine::render(engine, o, {}, {}, &err), "render muted: " + err);
+        d = readAudio(out);
+        expect(d.maxAbs() < 1.0e-6f, "muted MIDI track exports silence");
+
+        auto o2 = o; o2.selectedTrackIndices = { 0 };
+        expect(ExportEngine::render(engine, o2, {}, {}, &err), "render selected: " + err);
+        d = readAudio(out);
+        expect(d.samples.getMagnitude(0, sOn, nOn) > 0.10f,
+               "explicit selection ignores mute for MIDI track");
+        t->setMuted(false);
+    }
+
+    //==========================================================================
+    // 20.6. リバーブ送り (Rev スライダー) が書き出しに乗る
+    //       (旧実装は送りバスが無くドライのみだった・2026-07 修正の回帰テスト)
+    void testReverbSendInExport()
+    {
+        beginTest("reverb send (Rev slider) renders in offline export");
+
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        auto src = outDir.getChildFile("rev_src.wav");
+        writeMonoConst(src, (int)(0.2 * kSR), 0.4f);
+        auto* t = tm.addTrack("vo", false);
+        auto* c = t->addClip(src, 0.0, 0.2);
+        c->setFadeInSecs(0.0); c->setFadeOutSecs(0.0);
+        t->setVolume(0.0f); t->setPan(0.0f);
+
+        AudioEngine engine; engine.preparePlayback(tm);
+        const int tailFrom = (int)(0.3 * kSR);
+        const int tailLen  = (int)(0.5 * kSR);
+
+        // (A) Rev = 0: クリップ終了後は完全無音 (テール無し)
+        {
+            t->setReverbSend(0.0f);
+            auto out = outDir.getChildFile("rev_dry.wav");
+            auto o = baseOpts(out, 32, 1.0); o.peakGuard = false; o.dither = false;
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "render dry: " + err);
+            auto d = readAudio(out);
+            expect(d.samples.getMagnitude(0, tailFrom, tailLen) < 1.0e-5f,
+                   "no tail when send is 0");
+        }
+        // (B) Rev = 1: クリップ終了後にリバーブテールが残る + ドライは維持
+        {
+            t->setReverbSend(1.0f);
+            auto out = outDir.getChildFile("rev_wet.wav");
+            auto o = baseOpts(out, 32, 1.0); o.peakGuard = false; o.dither = false;
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "render wet: " + err);
+            auto d = readAudio(out);
+            expect(d.samples.getMagnitude(0, tailFrom, tailLen) > 1.0e-3f,
+                   "reverb tail present after clip end");
+            expect(d.samples.getMagnitude(0, 0, (int)(0.1 * kSR)) > 0.3f,
+                   "dry signal still present during clip");
+        }
+        // (C) Pre-Fader は素のクリップ音のみ: Rev=1 でもテール無し + ドライは素 (0.4)
+        //     (Pre = Vol/Pan/Rev/master を通さない。要望 2026-07 の回帰テスト)
+        {
+            t->setReverbSend(1.0f);
+            auto out = outDir.getChildFile("rev_pre.wav");
+            auto o = baseOpts(out, 32, 1.0); o.peakGuard = false; o.dither = false;
+            o.preFader = true;
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "render pre: " + err);
+            auto d = readAudio(out);
+            expect(d.samples.getMagnitude(0, tailFrom, tailLen) < 1.0e-5f,
+                   "no reverb tail in pre-fader export");
+            expectAllClose(d.samples, 0, 0.4f, 1.0e-5f,
+                           "pre-fader is raw clip (0.4), no reverb summed", 0, (int)(0.15 * kSR));
+        }
+        t->setReverbSend(0.0f);
     }
 
     //==========================================================================

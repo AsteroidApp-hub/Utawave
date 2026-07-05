@@ -655,6 +655,18 @@ void MainComponent::showExportDialog()
                     .withButton("OK"), nullptr);
                 return;
             }
+            // CLICK トラックが再生で鳴っている状態 (存在・非ミュート・ソロ規則通過) なら
+            // 2 ミックスへ混ぜる (要望 2026-07)。ダイアログのトラック一覧は CLICK を出さない
+            // ため index では渡せず、専用フラグで指示する (stems は従来どおり混ぜない)
+            {
+                bool anySoloForClick = false;
+                for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+                    if (auto* t = trackManager.getTrack(ti); t != nullptr && t->isSoloed())
+                    { anySoloForClick = true; break; }
+                auto* clickT = trackManager.getClickTrack();
+                job.opts.includeClick = clickT != nullptr && !clickT->isMuted()
+                                        && !(anySoloForClick && !clickT->isSoloed());
+            }
             auto base = options.baseName.isEmpty() ? projectStem : options.baseName;
             auto outF = folder.getChildFile(base + extStr);
             if (options.autoRename && outF.existsAsFile())

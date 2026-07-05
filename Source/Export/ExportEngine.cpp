@@ -196,7 +196,8 @@ bool ExportEngine::render(AudioEngine& engine, const Options& opts,
                 if (progress) progress(p * 0.85);
             },
             opts.selectedTrackIndices,
-            opts.preFader);
+            opts.preFader,
+            opts.includeClick);
     }
 
     if (shouldCancel && shouldCancel()) return false;
