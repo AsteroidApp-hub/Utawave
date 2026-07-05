@@ -1,7 +1,7 @@
 name: Release Build (macOS + Windows)
 
 # 手動発火のみ (push では走らない)。Actions タブ → このワークフロー → "Run workflow" から実行する。
-# version を入力すると zip 名 (Utawave-<version>-macOS-arm64.zip / -Windows-x64.zip) に使われる。
+# version を入力すると zip 名 (Utawave-<version>-macOS-universal.zip / -Windows-x64.zip) に使われる。
 on:
   workflow_dispatch:
     inputs:
@@ -28,11 +28,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.12-${{ runner.os }}
+          key: juce-8.0.12-${{ runner.os }}-universal
 
       - name: Build (Release)
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUTAWAVE_CRASH_REPORT_URL="${{ vars.UTAWAVE_CRASH_REPORT_URL }}" -DUTAWAVE_ADS_ENABLED=ON -DUTAWAVE_AD_FEED_URL="https://utawave.com/ads/feed.json"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUTAWAVE_MAC_UNIVERSAL=ON -DUTAWAVE_CRASH_REPORT_URL="${{ vars.UTAWAVE_CRASH_REPORT_URL }}" -DUTAWAVE_ADS_ENABLED=ON -DUTAWAVE_AD_FEED_URL="https://utawave.com/ads/feed.json"
           cmake --build build --config Release --target Utawave
 
       - name: Locate .app
@@ -87,13 +87,13 @@ jobs:
           # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
           cp THIRD_PARTY_LICENSES.txt Docs/MANUAL.html Docs/README.txt Utawave-macOS/
           cp LICENSE Utawave-macOS/LICENSE.txt
-          ditto -c -k --sequesterRsrc --keepParent Utawave-macOS "Utawave-${{ inputs.version }}-macOS-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent Utawave-macOS "Utawave-${{ inputs.version }}-macOS-universal.zip"
 
       - name: Upload macOS zip
         uses: actions/upload-artifact@v4
         with:
-          name: Utawave-${{ inputs.version }}-macOS-arm64
-          path: Utawave-${{ inputs.version }}-macOS-arm64.zip
+          name: Utawave-${{ inputs.version }}-macOS-universal
+          path: Utawave-${{ inputs.version }}-macOS-universal.zip
 
   # ──────────────────────────────────────────────────────────────
   # Windows: ビルド → 未署名 exe + PDB を artifact 化 → zip

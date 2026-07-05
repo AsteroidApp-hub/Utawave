@@ -25,8 +25,10 @@ repo `AsteroidApp-hub/Utawave`）へ
 > `ASIOSDK_DEPLOY_KEY`) で取得してビルドします。deploy key 未登録の環境 (fork 等) では取得を skip し、
 > WASAPI/DirectSound のみでビルドします (= fork 安全)。ローカル手動ビルドの手順は末尾「補足」にも残します。
 
-zip のファイル名にはバージョン + アーキテクチャを含めます（例: `Utawave-0.1.0-macOS-arm64.zip` /
-`Utawave-0.1.0-Windows-x64.zip`）。
+zip のファイル名にはバージョン + アーキテクチャを含めます（例: `Utawave-0.1.0-macOS-universal.zip` /
+`Utawave-0.1.0-Windows-x64.zip`）。macOS 版は **Universal 2 バイナリ** (Intel x86_64 + Apple Silicon
+arm64 の 1 つの `.app`) で、CI が arm64 ランナー上から `-DUTAWAVE_MAC_UNIVERSAL=ON` で両アーキを
+クロスコンパイルします。ローカル手動ビルドは既定でビルドマシンのアーキのみ（速度優先）。
 
 ## 0. リリースビルドに焼き込むフラグ（重要）
 
@@ -75,7 +77,7 @@ zip のファイル名にはバージョン + アーキテクチャを含めま�
 3. macOS は自動で署名 + 公証 + ステープルされる（追加操作なし）。
    **Windows は CI では未署名のまま完了する**（Certum はローカル署名運用のため。下記 2.5 で署名する）。
 4. 完了後、ワークフローの成果物 (Artifacts) から以下をダウンロード:
-   - `Utawave-<version>-macOS-arm64`（**署名 + 公証済み** / Secrets 未登録の fork 等では ad-hoc）
+   - `Utawave-<version>-macOS-universal`（Intel + Apple Silicon の Universal 2 / **署名 + 公証済み** / Secrets 未登録の fork 等では ad-hoc）
    - `Utawave-<version>-Windows-x64`（**未署名** exe を zip 化。ASIO 対応・上級者/ポータブル用途）
    - `Utawave-<version>-Windows-Setup`（**未署名インストーラ** `Utawave-<version>-Setup.exe`。デスクトップ/スタートの
      ショートカット + `.uta` 関連付け + アンインストーラ。**配布の主役はこちら**）
@@ -123,7 +125,7 @@ GitHub Releases が**配布物の実体の置き場**で、公式サイトの `d
 タグを打つことで AGPL の「対応ソースコード」も同じタグに紐づく。
 
 ```sh
-gh release create v0.1.0 Utawave-0.1.0-macOS-arm64.zip Utawave-0.1.0-Windows-x64.zip \
+gh release create v0.1.0 Utawave-0.1.0-macOS-universal.zip Utawave-0.1.0-Windows-x64.zip \
   --title "Utawave v0.1.0" --notes "更新内容の要約"
 ```
 
@@ -141,7 +143,7 @@ CI やトークンは不要で、push すると Cloudflare Pages が自動デプ
    URL の形式（タグ `v<version>` とファイル名は手順 2/4 のもの）:
 
    ```
-   https://github.com/AsteroidApp-hub/Utawave/releases/download/v0.1.0/Utawave-0.1.0-macOS-arm64.zip
+   https://github.com/AsteroidApp-hub/Utawave/releases/download/v0.1.0/Utawave-0.1.0-macOS-universal.zip
    https://github.com/AsteroidApp-hub/Utawave/releases/download/v0.1.0/Utawave-0.1.0-Windows-x64.zip
    ```
 
@@ -163,7 +165,7 @@ CI やトークンは不要で、push すると Cloudflare Pages が自動デプ
    旧バージョンのアプリの起動画面に「アップデートがあります」が表示されること
 
 > **毎回 download.html を編集したくない場合**: CI のアセット名から**バージョンを外し**（例
-> `Utawave-macOS-arm64.zip`）、`https://github.com/AsteroidApp-hub/Utawave/releases/latest/download/Utawave-macOS-arm64.zip`
+> `Utawave-macOS-universal.zip`）、`https://github.com/AsteroidApp-hub/Utawave/releases/latest/download/Utawave-macOS-universal.zip`
 > を使うと**常に最新 Release へリダイレクト**されるので、`download.html` のリンクは固定にできる
 > （リリース時に触るのは `version.json` / `changelog.html` だけになる。要 workflow のアセット名変更）。
 

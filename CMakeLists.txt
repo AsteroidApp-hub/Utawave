@@ -2,7 +2,22 @@ cmake_minimum_required(VERSION 3.22)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
 
+# ── macOS: Universal (Intel + Apple Silicon) バイナリ ──
+# 既定はビルドマシンのアーキのみ (ローカル開発を速く保つ)。配布ビルド (CI) は
+# -DUTAWAVE_MAC_UNIVERSAL=ON を渡して arm64 + x86_64 の Universal 2 バイナリを生成する。
+# アーキ固有コードは無く依存 (JUCE / LAME / r8brain / PitchCore) も両対応なので、
+# arm64 ランナー上から x86_64 をクロスコンパイルできる。CMAKE_OSX_ARCHITECTURES は
+# Apple 以外のジェネレータでは無視されるため素の set で安全。project() より前に確定させる。
+option(UTAWAVE_MAC_UNIVERSAL "Build a Universal (arm64 + x86_64) macOS binary" OFF)
+if(UTAWAVE_MAC_UNIVERSAL)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS build architectures" FORCE)
+endif()
+
 project(Utawave VERSION 1.0.0)
+
+if(UTAWAVE_MAC_UNIVERSAL)
+    message(STATUS "Utawave: macOS Universal binary (arm64 + x86_64)")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
