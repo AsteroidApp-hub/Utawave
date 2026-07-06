@@ -249,7 +249,7 @@
       <li><b>Check your voice</b>: Turn on <kbd>I</kbd> (input monitor) to hear yourself back and watch the meter move. Sing and confirm the meter responds.</li>
     </ol>
     <div class="note"><b>Recording multiple tracks at once:</b> Light up <kbd>R</kbd> on several tracks and assign each a different input, and you can record to multiple tracks simultaneously.</div>
-    <div class="warn"><b>If you get no sound or no input:</b> Open "File" → "Preferences" and, in the audio settings, make sure your audio device (audio interface) is selected.</div>
+    <div class="warn"><b>If you get no sound or no input:</b> Click the <kbd>AUDIO</kbd> button at the top right of the toolbar and, in the audio settings, make sure your audio device (audio interface) is selected.</div>
   </section>
 
   <section id="tempo">
@@ -259,7 +259,7 @@
       <li><b>Set it by tapping</b>: Tap the <kbd>TAP</kbd> button along with the song to estimate the tempo.</li>
       <li><b>Detect it automatically</b>: Right-click an imported track and choose "Detect Tempo" to automatically estimate the BPM from the accompaniment.</li>
       <li><b>Metronome</b>: Use the <kbd>CLICK</kbd> button to turn the click sound on / off. You can also adjust its volume and more on the dedicated click track.</li>
-      <li><b>Count-in</b>: You can set how many bars of count-in play before recording starts (in Preferences).</li>
+      <li><b>Count-in</b>: You can set how many bars of count-in play before recording starts (the <kbd>C-IN</kbd> button in the toolbar).</li>
     </ul>
   </section>
 
@@ -442,13 +442,13 @@
     <h3>My mic isn't recording</h3>
     <ul>
       <li>Check that Utawave is allowed to use the mic in your OS's microphone permissions.</li>
-      <li>In the audio settings under Preferences, check that the correct input device and channel are selected.</li>
+      <li>Click the <kbd>AUDIO</kbd> button at the top right of the toolbar and, in the audio settings, check that the correct input device and channel are selected.</li>
       <li>Check that the track's <kbd>R</kbd> (record arm) is lit.</li>
     </ul>
     <h3>I hear my voice with a delay (monitoring latency)</h3>
-    <p>On Windows with an audio interface, selecting <b>ASIO</b> (the driver bundled with your interface) as the driver type in the audio settings improves this dramatically. Lowering the buffer size also reduces the delay (if you go too small and the sound drops out, step it back up one notch).</p>
+    <p>On Windows with an audio interface, click the <kbd>AUDIO</kbd> button at the top right of the toolbar and select <b>ASIO</b> (the driver bundled with your interface) as the driver type in the audio settings — this improves things dramatically. Lowering the buffer size also reduces the delay (if you go too small and the sound drops out, step it back up one notch).</p>
     <h3>My recorded vocal sounds behind the backing track</h3>
-    <p>Utawave automatically compensates for your device's latency when recording. If it still drifts, gradually increase the <b>Additional Recording Offset (ms)</b> under "Recording Flow" in Preferences (a positive value moves it earlier).</p>
+    <p>Utawave automatically compensates for your device's latency when recording. If it still drifts, click the <kbd>SETTING</kbd> button at the top right of the toolbar (Preferences) and gradually increase the <b>Additional Recording Offset (ms)</b> under "Recording Flow" (a positive value moves it earlier).</p>
     <h3>A plugin isn't in the list</h3>
     <p>Open "File" → "Manage Plugins..." and run "Rescan All." Plugins installed just now will be recognized too. Plugins that misbehave are automatically excluded during the scan (the app won't crash).</p>
   </section>
