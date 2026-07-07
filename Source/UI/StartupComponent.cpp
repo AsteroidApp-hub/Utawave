@@ -94,7 +94,15 @@ StartupComponent::StartupComponent(bool showAds)
     bitDepthBox.addItem(tr(u8"16 bit"),       16);
     bitDepthBox.addItem(tr(u8"24 bit"),       24);
     bitDepthBox.addItem(tr(u8"32 bit float"), 32);
-    bitDepthBox.setSelectedId(32, juce::dontSendNotification);
+    // 前回作成したプロジェクトのビット深度を既定に引き継ぐ (AppPreferences)。SR は下の
+    // syncSampleRateBoxToDevice で「前回 SR → 無ければデバイス SR」の順に決める。
+    {
+        const auto prefs = AppPreferences::load();
+        lastProjectSrPref = prefs.lastProjectSampleRate;
+        const int lastBd = prefs.lastProjectBitDepth;
+        bitDepthBox.setSelectedId((lastBd == 16 || lastBd == 24 || lastBd == 32) ? lastBd : 32,
+                                  juce::dontSendNotification);
+    }
     addAndMakeVisible(bitDepthBox);
 
     deviceSummaryLabel.setFont(juce::FontOptions(12.0f));
@@ -496,10 +504,15 @@ void StartupComponent::showDeviceDialog()
 void StartupComponent::syncSampleRateBoxToDevice()
 {
     if (srUserPicked) return;   // 手動選択を尊重
-    double devSr = startupDeviceManager.getAudioDeviceSetup().sampleRate;
-    if (auto* dev = startupDeviceManager.getCurrentAudioDevice())
-        if (dev->getCurrentSampleRate() > 0.0) devSr = dev->getCurrentSampleRate();
-    const int sr = (int) devSr;
+    // 優先: 前回作成したプロジェクトの SR (引き継ぎ) → 無ければデバイスの現在 SR。
+    int sr = (int) lastProjectSrPref;
+    if (sr <= 0)
+    {
+        double devSr = startupDeviceManager.getAudioDeviceSetup().sampleRate;
+        if (auto* dev = startupDeviceManager.getCurrentAudioDevice())
+            if (dev->getCurrentSampleRate() > 0.0) devSr = dev->getCurrentSampleRate();
+        sr = (int) devSr;
+    }
     if (sr <= 0) return;
     // コンボに該当 SR がある時だけ既定として選ぶ (無ければ現状維持)。onChange が
     // srUserPicked を立てないよう dontSendNotification で設定する。

@@ -43,6 +43,12 @@ public:
     // 環境設定でここを OFF にできる。OFF でも書き出し自体・出力フォルダを開く動作は変わらない。
     bool showExportCompleteDialog { true };
 
+    // 前回作成したプロジェクトのサンプルレート / ビット深度 (新規作成ダイアログの既定に引き継ぐ)。
+    // lastProjectSampleRate は 0 = 未設定 (初回はデバイスの現在 SR にフォールバック)。
+    // 作成後は実際に確定した projectSampleRate / projectBitDepth を保存する。
+    double lastProjectSampleRate { 0.0 };
+    int    lastProjectBitDepth   { 32 };
+
     // ディスクストリーミング (再生時の音声読み込みを先読みスレッドへ分離) を使うか (既定: ON)。
     // ON で audio スレッドのディスク I/O が先読みヒット時ゼロになり、多トラック/低速ディスクでの
     // 取りこぼしを減らす。ミス時は従来の同期読みへフォールバックするので出力は常に正確。

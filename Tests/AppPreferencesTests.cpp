@@ -115,6 +115,20 @@ public:
             expect(AppPreferences::load().showExportCompleteDialog == false,
                    "showExportCompleteDialog round trips false");
         }
+
+        beginTest("save/load round trip for last-used project SR / bit depth");
+        {
+            // 既定: SR 未設定 (0) / ビット深度 32。作成後の値を保存 → load で引き継がれる
+            expect(approxEq(AppPreferences{}.lastProjectSampleRate, 0.0), "default SR unset (0)");
+            expect(AppPreferences{}.lastProjectBitDepth == 32, "default bit depth 32");
+            AppPreferences p;
+            p.lastProjectSampleRate = 48000.0;
+            p.lastProjectBitDepth   = 24;
+            expect(p.save(), "save succeeds");
+            const auto q = AppPreferences::load();
+            expect(approxEq(q.lastProjectSampleRate, 48000.0), "last SR round trips (48000)");
+            expect(q.lastProjectBitDepth == 24, "last bit depth round trips (24)");
+        }
     }
 };
 

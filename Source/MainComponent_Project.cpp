@@ -421,7 +421,14 @@ bool MainComponent::createNewProject(const juce::File& projectFile,
     audioEngine.setAppSettings(appSettings);
     recordingMgr.setBitDepth(bitDepth);
     // オーディオデバイスをプロジェクトのサンプリングレートに追従させる
+    // (デバイスが要求 SR を出せない場合は appSettings.projectSampleRate が実デバイス SR に確定する)
     applyProjectSampleRateToDevice();
+
+    // 次回の新規作成ダイアログへ引き継ぐため、確定した SR / ビット深度を記憶する (アプリ全体設定)。
+    // SR は applyProjectSampleRateToDevice で実際に確定した値 (要求値とは限らない) を保存する。
+    appPrefs.lastProjectSampleRate = appSettings.projectSampleRate;
+    appPrefs.lastProjectBitDepth   = appSettings.projectBitDepth;
+    appPrefs.save();
 
     currentProjectFile = projectFile;
 
@@ -430,7 +437,7 @@ bool MainComponent::createNewProject(const juce::File& projectFile,
     if (!saveProjectTo(projectFile, /*announce=*/false)) return false;
 
     statusBar.setTrackCount(trackManager.getTrackCount());
-    statusBar.setSampleRate((int) sampleRate);
+    statusBar.setSampleRate((int) appSettings.projectSampleRate);   // 実際に確定した SR を表示
     statusBar.setBitDepth(bitDepth);
     restartAutoSaveTimer();
     return true;
