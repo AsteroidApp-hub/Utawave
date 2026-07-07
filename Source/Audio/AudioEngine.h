@@ -474,6 +474,10 @@ private:
     bool   clickIsDownbeat  { false };
 
     std::atomic<bool>  playing         { false };
+    // オフライン書き出し (renderOfflineRange) の実行中フラグ。書き出しは別スレッドで同じ
+    // PluginChain の processBlock を叩くため、停止時ブランチのプラグインプレビューが同じ
+    // チェーンを並行処理して書き出し音声を壊さないよう、書き出し中はプレビューをスキップする。
+    std::atomic<bool>  offlineRenderActive { false };
     std::atomic<double> currentPosition { 0.0 };
     std::atomic<float> masterGain      { 1.0f };
 

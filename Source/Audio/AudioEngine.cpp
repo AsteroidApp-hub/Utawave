@@ -1375,6 +1375,12 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     const double sr        = currentSampleRate;
     const int    totalSamp = (int)std::round((endSec - startSec) * sr);
     if (totalSamp <= 0) return;   // 半サンプル未満の範囲 (round で 0) を弾く (progress の 0 除算防止)
+
+    // 書き出し中は、audio thread の停止時ブランチが同じ PluginChain を並行 processBlock して
+    // 書き出し音声を壊さないよう、プレビュー処理をスキップさせる (RAII で確実に戻す)。
+    offlineRenderActive.store(true);
+    struct RenderFlagReset { std::atomic<bool>& f; ~RenderFlagReset() { f.store(false); } }
+        renderFlagReset { offlineRenderActive };
     // 書き出しのブロックサイズはデバイス (再生時) と同じ currentBufferSize に「厳密に」合わせる。
     // プラグインは prepareToPlay 時に宣言した最大ブロック (setPlayConfigDetails) と異なるブロックで
     // 叩かれると内部で再バッファして「報告外の遅延」が乗ることがある (Ozone 等のルックアヘッド系で
@@ -2225,6 +2231,49 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 const float chGain = vol * (ch == 0 ? panL : panR);
                 const float* src = previewBuf.getReadPointer(juce::jmin(ch, previewBuf.getNumChannels() - 1));
                 juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
+            }
+        }
+
+        // ── 停止中もトラックのプラグインチェーンを処理する (Melodyne 等の編集プレビュー音を鳴らす) ──
+        // 停止中はクリップを読まないので入力は無音。プラグインが自前で生成する音 (Melodyne の
+        // ノート編集/スクラブのプレビュー等) だけがチェーンから出てくるので、それを拾って出力へ混ぜる。
+        // プラグインの無いトラックは getActivePluginCountAtomic で早期スキップ = 無負荷。入力モニタ
+        // 対象トラックは mixInputMonitoring が別途チェーンを叩くので、二重処理を避けてスキップする。
+        // オフライン書き出し中は、書き出しスレッドが同じチェーンを processBlock しているため、
+        // ここでプレビュー処理すると processBlock が交互に呼ばれてプラグイン状態が壊れ書き出しが
+        // 破損する。書き出し中はプレビューを丸ごとスキップする (offlineRenderActive)。
+        if (!offlineRenderActive.load())
+        {
+            // Melodyne 等が「停止中プレビュー」モードで動くよう、停止状態の playhead を供給する。
+            fillPlayHead(playHead, currentPosition.load(), currentSampleRate, *appCfg,
+                         /*playing*/ false, /*recording*/ false,
+                         /*looping*/ false, 0.0, 0.0);
+            for (auto& [tidx, trk] : snap->clipTracks)
+            {
+                if (trk == nullptr || trk->isMuted()) continue;
+                if (tidx < 0 || tidx >= (int) snap->trackBuffers.size()) continue;
+                auto& chain = trk->getPluginChain();
+                if (chain.getActivePluginCountAtomic() == 0) continue;   // プラグイン無し = 触らない
+                if (monActive && &chain == monChain) continue;           // モニタ経路で処理済み (二重処理回避)
+                if (!chain.isPreparedFor(currentSampleRate, currentBufferSize)) continue;  // 未 prepare は安全にスキップ
+
+                auto& buf = snap->trackBuffers[(size_t) tidx];   // 停止中は未使用のスクラッチを流用
+                buf.setSize(2, numSamples, false, false, true);
+                buf.clear();                                     // 無音入力 (プラグインの自前生成音のみ拾う)
+                emptyMidi.clear();
+                chain.processBlock(buf, emptyMidi, &playHead);
+
+                // トラックの Vol/Pan を反映して出力へ (synth プレビューと同じ扱い・マスターは通さない)
+                const float vol  = juce::Decibels::decibelsToGain(trk->getVolume(), -60.0f);
+                const float pan  = juce::jlimit(-1.0f, 1.0f, trk->getPan());
+                const float panL = std::cos((pan * 0.5f + 0.5f) * juce::MathConstants<float>::halfPi);
+                const float panR = std::sin((pan * 0.5f + 0.5f) * juce::MathConstants<float>::halfPi);
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                {
+                    const float chGain = vol * (ch == 0 ? panL : panR);
+                    const float* src = buf.getReadPointer(juce::jmin(ch, buf.getNumChannels() - 1));
+                    juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
+                }
             }
         }
 
