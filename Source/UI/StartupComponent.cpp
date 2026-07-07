@@ -88,6 +88,7 @@ StartupComponent::StartupComponent(bool showAds)
     sampleRateBox.addItem("96000 Hz", 96000);
     sampleRateBox.addItem("192000 Hz", 192000);
     sampleRateBox.setSelectedId(48000, juce::dontSendNotification);
+    sampleRateBox.onChange = [this] { srUserPicked = true; };  // 手動選択を記録 (以後デバイスに追従しない)
     addAndMakeVisible(sampleRateBox);
 
     bitDepthBox.addItem(tr(u8"16 bit"),       16);
@@ -109,6 +110,7 @@ StartupComponent::StartupComponent(bool showAds)
     AudioDeviceSettings::initialise(startupDeviceManager, 2, 2);
     startupDeviceManager.addChangeListener(this);
     refreshDeviceLabel();
+    syncSampleRateBoxToDevice();   // 既定 SR = デバイスの現在 SR
 
     createBtn.onClick = [this] { createNewProject(); };
     createBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a78ff));
@@ -491,8 +493,27 @@ void StartupComponent::showDeviceDialog()
     opts.launchAsync();
 }
 
+void StartupComponent::syncSampleRateBoxToDevice()
+{
+    if (srUserPicked) return;   // 手動選択を尊重
+    double devSr = startupDeviceManager.getAudioDeviceSetup().sampleRate;
+    if (auto* dev = startupDeviceManager.getCurrentAudioDevice())
+        if (dev->getCurrentSampleRate() > 0.0) devSr = dev->getCurrentSampleRate();
+    const int sr = (int) devSr;
+    if (sr <= 0) return;
+    // コンボに該当 SR がある時だけ既定として選ぶ (無ければ現状維持)。onChange が
+    // srUserPicked を立てないよう dontSendNotification で設定する。
+    for (int i = 0; i < sampleRateBox.getNumItems(); ++i)
+        if (sampleRateBox.getItemId(i) == sr)
+        {
+            sampleRateBox.setSelectedId(sr, juce::dontSendNotification);
+            return;
+        }
+}
+
 void StartupComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     AudioDeviceSettings::saveState(startupDeviceManager);
     refreshDeviceLabel();
+    syncSampleRateBoxToDevice();   // デバイス変更時も既定 SR を追従 (手動選択済みなら尊重)
 }

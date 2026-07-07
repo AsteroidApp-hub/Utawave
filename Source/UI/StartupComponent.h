@@ -42,6 +42,10 @@ private:
     void refreshRecents();
     void showDeviceDialog();
     void refreshDeviceLabel();
+    // 新規プロジェクトの既定サンプルレートを、現在のオーディオデバイスの SR に合わせる
+    // (Windows 等でデバイス既定と食い違って音切れするのを防ぐ)。ユーザーが手動で選んだら尊重する。
+    void syncSampleRateBoxToDevice();
+    bool srUserPicked { false };   // サンプルレートをユーザーが手動選択したか
 
     // アップデート通知 (右上のリンク)。GitHub の最新リリース / タグを非同期取得し、現在版より
     // 新しければリンクを表示する。クリックでリリースページを既定ブラウザで開く。

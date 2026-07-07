@@ -2138,26 +2138,33 @@ bool MainComponent::computeLoudnessTargetVol(const juce::File& file, double file
 
 void MainComponent::applyProjectSampleRateToDevice()
 {
-    const double targetSr = appSettings.projectSampleRate;
-    if (targetSr <= 0.0) return;
-
     auto& dm = audioEngine.getDeviceManager();
     auto setup = dm.getAudioDeviceSetup();
-    if (std::abs(setup.sampleRate - targetSr) < 0.5) return;  // 既に一致
+    const double targetSr = appSettings.projectSampleRate;
 
-    setup.sampleRate = targetSr;
-    const juce::String err = dm.setAudioDeviceSetup(setup, true);
-    if (err.isNotEmpty())
+    // プロジェクト SR をデバイスへ要求する (既に一致していれば触らない)。デバイスを再設定すると
+    // 一瞬途切れるため、不要な設定変更は避ける。失敗しても続行 — 下でデバイスが実際に動いている
+    // SR を projectSampleRate に採用する。
+    if (targetSr > 0.0 && std::abs(setup.sampleRate - targetSr) >= 0.5)
     {
-        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::WarningIcon)
-            .withTitle(tr(u8"サンプリングレート"))
-            .withMessage(tr(u8"プロジェクトのサンプリングレート ")
-                          + juce::String((int) targetSr) + " Hz"
-                          + tr(u8" にオーディオデバイスを設定できませんでした。\n\n")
-                          + err)
-            .withButton("OK"), nullptr);
+        setup.sampleRate = targetSr;
+        dm.setAudioDeviceSetup(setup, true);
     }
+
+    // 【肝】プロジェクト SR を「デバイスが実際に動いている SR」に確定する。Windows (WASAPI 共有
+    // モード等) では要求 SR を出せず別 SR のままになることがあるが、その場合でも
+    // projectSampleRate == 実デバイス SR に揃えることで、録音 (デバイス SR) とインポート
+    // (projectSampleRate へリサンプル) の不一致 = 音切れ/再生速度ずれを構造的に防ぐ。
+    double actualSr = dm.getAudioDeviceSetup().sampleRate;
+    if (auto* dev = dm.getCurrentAudioDevice())
+        if (dev->getCurrentSampleRate() > 0.0) actualSr = dev->getCurrentSampleRate();
+
+    if (actualSr > 0.0 && std::abs(actualSr - appSettings.projectSampleRate) >= 0.5)
+    {
+        appSettings.projectSampleRate = actualSr;
+        audioEngine.setAppSettings(appSettings);
+    }
+    statusBar.setSampleRate((int) appSettings.projectSampleRate);
 }
 
 void MainComponent::mouseDown(const juce::MouseEvent&)

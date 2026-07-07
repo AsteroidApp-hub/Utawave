@@ -420,7 +420,7 @@ void MainComponent::showShortcutsDialog()
 
 void MainComponent::showAudioSettings()
 {
-    auto* sel = new juce::AudioDeviceSelectorComponent(
+    auto sel = std::make_unique<juce::AudioDeviceSelectorComponent>(
         audioEngine.getDeviceManager(), 0, 2, 2, 2, false, false, false, false);
     sel->setSize(480, 380);
 
@@ -458,12 +458,38 @@ void MainComponent::showAudioSettings()
         walk(root);
     };
 
+    // セレクタをホルダで包み、ダイアログを閉じた時にプロジェクト SR をデバイスへ再適用する。
+    // デバイスを切り替えられても projectSampleRate == 実デバイス SR に揃え直す安全網
+    // (SR コンボはロック済みだが、デバイス切替で SR が変わる経路を塞ぐ)。
+    class Holder : public juce::Component
+    {
+    public:
+        std::unique_ptr<juce::AudioDeviceSelectorComponent> sel;
+        std::function<void()> onDestroy;
+        explicit Holder(std::unique_ptr<juce::AudioDeviceSelectorComponent> s) : sel(std::move(s))
+        {
+            addAndMakeVisible(sel.get());
+            setSize(sel->getWidth(), sel->getHeight());
+        }
+        ~Holder() override
+        {
+            sel.reset();               // 先にセレクタを破棄 (デバイスリスナーを外す)
+            if (onDestroy) onDestroy(); // その後で SR を再適用
+        }
+        void resized() override { if (sel) sel->setBounds(getLocalBounds()); }
+    };
+    auto* holder = new Holder(std::move(sel));
+    holder->onDestroy = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (auto* self = safe.getComponent()) self->applyProjectSampleRateToDevice();
+    };
+
     if (appSettings.projectSampleRate > 0.0)
     {
         // ComboBox は構築直後に項目が populated されないことがあるため、
         // 同期で 1 回試した後、非同期でも 1 回試す
-        lockSampleRateUi(sel);
-        juce::Component::SafePointer<juce::Component> safe(sel);
+        lockSampleRateUi(holder);
+        juce::Component::SafePointer<juce::Component> safe(holder);
         juce::MessageManager::callAsync([safe, lockSampleRateUi]
         {
             if (auto* c = safe.getComponent()) lockSampleRateUi(c);
@@ -471,7 +497,7 @@ void MainComponent::showAudioSettings()
     }
 
     juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned(sel);
+    opts.content.setOwned(holder);
     opts.dialogTitle                  = "Audio Settings";
     opts.dialogBackgroundColour       = AppColours::panelBg;
     opts.escapeKeyTriggersCloseButton = true;
