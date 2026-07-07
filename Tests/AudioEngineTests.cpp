@@ -274,6 +274,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testDeferredDestructionRebuild();
         testRecordingLatencyComp();
         testRecordingWriteGate();
+        testStereoWriterMonoInput();
         testLoopWrapFromOutside();
         testMonitorThroughInserts();
         testStoppedPluginPreview();
@@ -718,6 +719,55 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         tw.reset();
         bg.stopThread(2000);
         expect(wav.existsAsFile() && wav.getSize() > 0, "recorded file has data");
+    }
+
+    void testStereoWriterMonoInput()
+    {
+        // 回帰テスト: ステレオ arm したトラック (2ch writer / tgt.stereo=true) を
+        // モノ入力デバイス (numInputChannels==1) で録音すると、旧コードは
+        // 「tgt.stereo && numInputChannels>=2」が false になり else 分岐で 1 要素配列を
+        // 2ch ThreadedWriter に渡していた → Buffer::write が data[1] を境界外参照して
+        // クラッシュ (Mac SIGSEGV / Win AV・v0.5.6 から継続していた録音データ損失バグ)。
+        // 修正で stereo 分岐は入力が 1ch でも常に 2 要素配列 (L を複製) を渡す。
+        beginTest("recording: stereo writer with mono input does not crash (OOB write)");
+
+        Scene s;
+        s.start();
+
+        juce::TimeSliceThread bg("StereoMonoTestThread");
+        bg.startThread();
+        auto wav = tempDir.getChildFile("stereo_mono.wav");
+        std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> tw;
+        {
+            juce::WavAudioFormat waf;
+            using SF = juce::AudioFormatWriterOptions::SampleFormat;
+            auto wopts = juce::AudioFormatWriterOptions{}
+                             .withSampleRate(kSR).withNumChannels(2)   // ステレオ writer
+                             .withBitsPerSample(32).withSampleFormat(SF::floatingPoint);
+            wav.deleteFile();
+            auto fos = std::make_unique<juce::FileOutputStream>(wav);
+            expect(fos->openedOk(), "writer stream open");
+            std::unique_ptr<juce::OutputStream> os = std::move(fos);
+            std::unique_ptr<juce::AudioFormatWriter> w(waf.createWriterFor(os, wopts));
+            expect(w != nullptr, "writer create");
+            tw = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(w.release(), bg, 65536);
+        }
+        // stereo=true で登録するが、駆動は 1 入力チャンネルのみ (runBlocksWithInput)
+        s.engine.setRecordingTarget(tw.get(), nullptr, 0, /*stereo=*/true);
+
+        s.engine.setRecordingActive(true, 0.0, 0.0);
+        s.engine.setPosition(0.0);
+        s.engine.play();
+        runBlocksWithInput(s.engine, 40, 0.25f);   // ここで旧コードは境界外参照でクラッシュ
+        s.engine.stop();
+        s.engine.setRecordingActive(false);
+
+        expect(s.engine.getRecordedSampleCount() > 0, "stereo writer received samples from mono input");
+
+        s.engine.setRecordingTarget(nullptr, nullptr);
+        tw.reset();
+        bg.stopThread(2000);
+        expect(wav.existsAsFile() && wav.getSize() > 0, "stereo/mono recorded file has data");
     }
 
     void testLoopWrapFromOutside()

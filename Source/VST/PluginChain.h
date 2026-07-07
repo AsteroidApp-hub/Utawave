@@ -36,6 +36,17 @@ public:
     // ─── オーディオ処理 ───
     void prepareToPlay(double sampleRate, int blockSize);
     void releaseResources();
+
+    // オフライン書き出し (バウンス) 用にプラグインの nonRealtime フラグを切り替えて再 prepare する。
+    // JUCE のオフラインレンダー契約は「setNonRealtime → prepareToPlay」の順。オーバーサンプリング /
+    // ルックアヘッド / レンダリング品質モードを持つプラグインは、realtime 前提で確保したバッファのまま
+    // 書き出しで叩かれると過走して null/低位アドレス書き込みでクラッシュすることがある。書き出し前に
+    // offline=true で呼んで再構成し、書き出し後に offline=false で realtime へ復帰させる。
+    // setNonRealtime を効かせるには prepareToPlay の前に設定する必要があるため必ず再 prepare する
+    // (isPreparedFor ガードは通さない)。**入力モニター中のチェーンには使わないこと** — releaseResources +
+    // 再確保が chainLock 保持下で audio thread をブロックし (優先度逆転)、プラグイン状態もリセットされて
+    // モニターがグリッチする。呼び出し側 (renderOfflineRange) がモニターチェーンを除外する。
+    void setOfflineRenderMode(bool offline, double sampleRate, int blockSize);
     /** buffer をプラグインチェーン全体に通す（in-place）。
         @param playHead 各プラグインへ供給する再生位置情報 (Melodyne 等の transport 同期用)。
                         nullptr なら設定しない（書き出し以外の経路や transport 不要なテスト用）。 */
@@ -68,6 +79,12 @@ private:
         std::unique_ptr<juce::AudioPluginInstance> plugin;
         bool bypassed { false };
     };
+
+    // 1 プラグインをチェーンの I/O 規約で prepare し直す共通シーケンス。**chainLock 保持下で呼ぶこと**。
+    // releaseResources → disableNonMainBuses → setPlayConfigDetails(2,2) → prepareToPlay の順序には
+    // 微妙な制約がある (一部プラグインは prepare 前の releaseResources が必須)。prepareToPlay と
+    // setOfflineRenderMode の両方がこれを使い、順序がドリフトしないようにする。
+    static void prepareSlot(Slot* s, double sampleRate, int blockSize);
 
     juce::OwnedArray<Slot>      slots;
     // processBlock() (audio thread) でも取得するブロッキングロック。プラグインの

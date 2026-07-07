@@ -1453,6 +1453,33 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     std::shared_ptr<PlaybackSnapshot> snap0;
     { const juce::SpinLock::ScopedLockType l(snapshotLock); snap0 = activeSnapshot; }
 
+    // ── オフライン書き出し (バウンス) のためのプラグイン再構成 ──
+    // 書き出しは JUCE のオフラインレンダーなので、各プラグインを setNonRealtime(true) にして
+    // 再 prepare する (オーバーサンプリング/ルックアヘッド系が realtime 前提の確保のまま叩かれて
+    // クラッシュするのを防ぐ)。書き出し後は setNonRealtime(false) で realtime へ復帰させる。
+    // **入力モニター中のチェーンは除外**する — 書き出し中も audio thread がそのチェーンを
+    // processBlock し続けるため、releaseResources+再確保が優先度逆転/グリッチを起こす。
+    // 書き出し中は再生停止 (offlineRenderActive でプレビューもスキップ) なので、モニター以外の
+    // チェーンは書き出しスレッドが唯一の使用者 = 安全に再 prepare できる。
+    PluginChain* monChainNow = nullptr;
+    { const juce::SpinLock::ScopedLockType l(monConfigLock);
+      if (activeMonConfig) monChainNow = activeMonConfig->chain; }
+    std::vector<PluginChain*> bouncedChains;   // setNonRealtime(true) にしたチェーン (復帰用)
+    const int restoreBlock = (currentBufferSize > 0) ? currentBufferSize : blockSize;
+    auto bouncePrepareChain = [&](PluginChain& chain)
+    {
+        if (chain.getNumPlugins() == 0) return;
+        if (&chain == monChainNow)
+        {
+            // モニタ中: realtime のまま。二重 prepare (状態リセット) を避けるため isPreparedFor ガード
+            if (sr > 0.0 && blockSize > 0 && !chain.isPreparedFor(sr, blockSize))
+                chain.prepareToPlay(sr, blockSize);
+            return;
+        }
+        chain.setOfflineRenderMode(true, sr, blockSize);
+        bouncedChains.push_back(&chain);
+    };
+
     // チェーンを書き出し blockSize で prepare し「直す」のは、まだそのサイズで prepare されて
     // いないときだけにする (isPreparedFor ガード)。通常は blockSize == currentBufferSize なので
     // preparePlayback 済み = 素通りし、latency だけ読む。無条件に prepareToPlay すると、
@@ -1463,8 +1490,7 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     {
         auto& chain = trk->getPluginChain();
         if (chain.getNumPlugins() == 0) return 0;
-        if (sr > 0.0 && blockSize > 0 && !chain.isPreparedFor(sr, blockSize))
-            chain.prepareToPlay(sr, blockSize);
+        bouncePrepareChain(chain);   // setNonRealtime(true) + 再 prepare (モニタ中は除外)
         return chain.getTotalLatencySamples();
     };
     {
@@ -1511,11 +1537,18 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     int masterLat = 0;
     if (!preFader && masterChain && masterChain->getNumPlugins() > 0)
     {
-        if (sr > 0.0 && blockSize > 0 && !masterChain->isPreparedFor(sr, blockSize))
-            masterChain->prepareToPlay(sr, blockSize);   // isPreparedFor ガードは prepareAndLat と同じ理由
+        bouncePrepareChain(*masterChain);   // オフライン再構成 (マスターはモニタ対象外)
         masterLat = masterChain->getTotalLatencySamples();
     }
     const int totalSkip = pdcMaxLat + masterLat;
+
+    // 書き出し完了 (早期 return / 例外含む) で必ず realtime へ復帰させる。
+    // setNonRealtime(false) + 再 prepare を realtime のブロックサイズ (currentBufferSize) で。
+    struct BounceRestore
+    {
+        std::vector<PluginChain*>& chains; double sr; int bs;
+        ~BounceRestore() { for (auto* c : chains) if (c) c->setOfflineRenderMode(false, sr, bs); }
+    } bounceRestore { bouncedChains, sr, restoreBlock };
 
     // 各トラックの遅延ライン (index = 絶対トラック index)。delaySamples = pdcMaxLat - 自身の遅延。
     std::vector<TrackDelay> trackDelays;
@@ -2863,10 +2896,18 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 int chL = juce::jlimit(0, numInputChannels - 1, tgt.inputCh);
                 if (inputChannelData[chL] == nullptr) chL = 0;
 
-                if (tgt.stereo && numInputChannels >= 2)
+                // writer のチャンネル数 (= tgt.stereo ? 2 : 1) と同じ数の配列を必ず渡す。
+                // stereo writer にモノ (1 要素) 配列を渡すと ThreadedWriter が data[1] を
+                // 境界外参照してクラッシュする (ステレオトラックをモノ入力デバイス=
+                // numInputChannels<2 で録るケース)。入力が 1ch しか無い時は L を R に複製する。
+                if (tgt.stereo)
                 {
-                    int chR = juce::jlimit(0, numInputChannels - 1, tgt.inputCh + 1);
-                    if (inputChannelData[chR] == nullptr) chR = chL;
+                    int chR = chL;
+                    if (numInputChannels >= 2)
+                    {
+                        chR = juce::jlimit(0, numInputChannels - 1, tgt.inputCh + 1);
+                        if (inputChannelData[chR] == nullptr) chR = chL;
+                    }
                     const float* stereoData[2] = { inputChannelData[chL], inputChannelData[chR] };
                     tgt.writer->write(stereoData, numSamples);
                 }
@@ -2890,10 +2931,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             int chL = juce::jlimit(0, numInputChannels - 1, recCfg->retroInputCh);
             if (inputChannelData[chL] == nullptr) chL = 0;
 
-            if (recCfg->retroStereo && numInputChannels >= 2)
+            // stereo writer には常に 2ch 配列を渡す (targets と同じ理由・モノ入力は L を複製)
+            if (recCfg->retroStereo)
             {
-                int chR = juce::jlimit(0, numInputChannels - 1, recCfg->retroInputCh + 1);
-                if (inputChannelData[chR] == nullptr) chR = chL;
+                int chR = chL;
+                if (numInputChannels >= 2)
+                {
+                    chR = juce::jlimit(0, numInputChannels - 1, recCfg->retroInputCh + 1);
+                    if (inputChannelData[chR] == nullptr) chR = chL;
+                }
                 const float* sd[2] = { inputChannelData[chL], inputChannelData[chR] };
                 recCfg->retro->write(sd, numSamples);
             }

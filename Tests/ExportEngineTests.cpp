@@ -171,6 +171,55 @@ public:
     void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
 };
 
+// オフライン書き出し (バウンス) の nonRealtime 契約を検証するプローブ。
+// realtime 前提でバッファを確保し、processBlock で「非 realtime なのに realtime サイズで叩かれたら」
+// (= setNonRealtime + 再 prepare されていなければ) 検出する。実際のプラグイン (Sonible 等) が
+// realtime 確保のまま書き出しで過走してクラッシュする状況を模す。
+class NonRealtimeProbePlugin : public juce::AudioPluginInstance
+{
+public:
+    NonRealtimeProbePlugin()
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())) {}
+
+    // 観測フラグ (テストから読む)
+    bool sawNonRealtimePrepare { false };  // 非 realtime で prepareToPlay された事があるか (立てたら消えない)
+    bool nonRealtimeAtProcess { false };   // 最後の processBlock 時の isNonRealtime()
+    bool processedWhilePrepared { true };  // processBlock 時に prepare 済みだったか
+    int  preparedBlock { 0 };
+    bool prepared { false };
+
+    const juce::String getName() const override { return "NRProbe"; }
+    void prepareToPlay(double, int bs) override
+    {
+        if (isNonRealtime()) sawNonRealtimePrepare = true;   // 復帰 prepare (realtime) では消さない
+        preparedBlock = bs;
+        prepared = true;
+    }
+    void releaseResources() override { prepared = false; }
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override
+    {
+        nonRealtimeAtProcess = isNonRealtime();
+        if (!prepared) processedWhilePrepared = false;
+        b.applyGain(1.0f);   // パススルー (出力は変えない)
+    }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi() const override            { return false; }
+    bool producesMidi() const override           { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override              { return false; }
+    int getNumPrograms() override                { return 1; }
+    int getCurrentProgram() override             { return 0; }
+    void setCurrentProgram(int) override         {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override {}
+    void setStateInformation(const void*, int) override {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
+
 // 読み出した WAV/AIFF の情報
 struct AudioFileData
 {
@@ -289,6 +338,7 @@ public:
         testMidiTrackRendersInExport();
         testReverbSendInExport();
         testPluginLatencyCompensation();
+        testOfflineRenderNonRealtimeContract();
         testPreFaderSkipsPlugins();
         testDither16PerturbsSteadyLevel();
         testDitherSilenceBounded();
@@ -1260,6 +1310,48 @@ public:
                 matchesRef(d.samples, "stem track " + juce::String(ti));
             }
         }
+    }
+
+    //==========================================================================
+    // 20b2. オフライン書き出し (バウンス) の nonRealtime 契約。
+    //   書き出し (Post-Fader) は各プラグインを setNonRealtime(true) にして再 prepare してから
+    //   processBlock する (JUCE のオフラインレンダー契約)。これをしないとオーバーサンプリング/
+    //   ルックアヘッド系が realtime 前提の確保のまま叩かれてクラッシュする (書き出し中のみ落ちる
+    //   サードパーティプラグインの回帰)。書き出し後は realtime (nonRealtime=false) へ復帰させる。
+    void testOfflineRenderNonRealtimeContract()
+    {
+        beginTest("offline export sets plugins to non-realtime, prepares, then restores realtime");
+
+        const float V = 0.3f;
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        auto src = outDir.getChildFile("nrt_src.wav");
+        expect(writeMonoConst(src, (int)(0.1 * kSR), V), "source write");
+
+        TrackManager tm(fmt);
+        auto* t = tm.addTrack("nrt", false);
+        auto* c = t->addClip(src, 0.0, 0.1);
+        c->setFadeInSecs(0.0); c->setFadeOutSecs(0.0);
+        t->setVolume(0.0f); t->setPan(0.0f);
+        auto probeOwned = std::make_unique<NonRealtimeProbePlugin>();
+        auto* probe = probeOwned.get();
+        t->getPluginChain().addPlugin(std::move(probeOwned));
+
+        AudioEngine engine; engine.preparePlayback(tm);   // 一度 realtime で prepare される
+
+        // Post-Fader で書き出す (Pre はプラグインを通さないので nonRealtime 契約の対象外)
+        auto out = outDir.getChildFile("nrt.wav");
+        auto o = baseOpts(out, 32, 0.1);
+        o.preFader = false;
+        juce::String err;
+        expect(ExportEngine::render(engine, o, {}, {}, &err), "nrt render: " + err);
+
+        // 書き出し中は非 realtime で、かつ prepare 済みで叩かれた
+        expect(probe->nonRealtimeAtProcess, "plugin was in non-realtime mode during export processBlock");
+        expect(probe->sawNonRealtimePrepare, "setNonRealtime(true) preceded prepareToPlay (contract order)");
+        expect(probe->processedWhilePrepared, "plugin was prepared (not released) when processed");
+        // 書き出し後は realtime へ復帰している (次の再生/入力モニターのため)
+        expect(!probe->isNonRealtime(), "plugin restored to realtime after export");
+        expect(probe->prepared, "plugin re-prepared for realtime after export");
     }
 
     //==========================================================================

@@ -159,19 +159,23 @@ juce::AudioPluginInstance* PluginChain::getPlugin(int index) const
     return slots[index]->plugin.get();
 }
 
+// chainLock 保持下で呼ぶ 1 プラグインの prepare シーケンス (prepareToPlay / setOfflineRenderMode 共用)。
+void PluginChain::prepareSlot(Slot* s, double sampleRate, int blockSize)
+{
+    if (s == nullptr || s->plugin == nullptr) return;
+    s->plugin->releaseResources();      // 既存リソース解放
+    s->plugin->disableNonMainBuses();   // サイドチェイン等を切る
+    s->plugin->setPlayConfigDetails(2, 2, sampleRate, blockSize);
+    s->plugin->prepareToPlay(sampleRate, blockSize);
+}
+
 void PluginChain::prepareToPlay(double sampleRate, int blockSize)
 {
     preparedSampleRate.store(sampleRate);
     preparedBlockSize.store(blockSize);
     const juce::ScopedLock sl(chainLock);
     for (auto* s : slots)
-    {
-        if (s == nullptr || s->plugin == nullptr) continue;
-        s->plugin->releaseResources();      // 既存リソース解放
-        s->plugin->disableNonMainBuses();   // サイドチェイン等を切る
-        s->plugin->setPlayConfigDetails(2, 2, sampleRate, blockSize);
-        s->plugin->prepareToPlay(sampleRate, blockSize);
-    }
+        prepareSlot(s, sampleRate, blockSize);
 }
 
 void PluginChain::releaseResources()
@@ -180,6 +184,25 @@ void PluginChain::releaseResources()
     for (auto* s : slots)
         if (s && s->plugin)
             s->plugin->releaseResources();
+    // prepared 済みフラグを落とす。これをしないと releaseResources 後も isPreparedFor が
+    // stale な true を返し、次の processBlock が未 prepare のプラグインを叩いてクラッシュしうる。
+    preparedSampleRate.store(0.0);
+    preparedBlockSize.store(0);
+}
+
+void PluginChain::setOfflineRenderMode(bool offline, double sampleRate, int blockSize)
+{
+    if (sampleRate <= 0.0 || blockSize <= 0) return;
+    const juce::ScopedLock sl(chainLock);
+    if (slots.isEmpty()) return;
+    preparedSampleRate.store(sampleRate);
+    preparedBlockSize.store(blockSize);
+    for (auto* s : slots)
+    {
+        if (s == nullptr || s->plugin == nullptr) continue;
+        s->plugin->setNonRealtime(offline);   // prepareToPlay より前に設定する (契約)
+        prepareSlot(s, sampleRate, blockSize);
+    }
 }
 
 void PluginChain::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi,
