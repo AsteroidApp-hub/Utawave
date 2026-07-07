@@ -44,6 +44,9 @@ private:
     void refreshDeviceLabel();
     // 新規プロジェクトの既定サンプルレートを、現在のオーディオデバイスの SR に合わせる
     // (Windows 等でデバイス既定と食い違って音切れするのを防ぐ)。ユーザーが手動で選んだら尊重する。
+    // 現在のデバイスが対応する SR だけをコンボに列挙する (getAvailableSampleRates)。
+    // 非対応 SR を選べなくして「選んだ SR をデバイスが出せず自動追従」する事故を防ぐ。
+    void populateSampleRateBox();
     void syncSampleRateBoxToDevice();
     bool srUserPicked { false };   // サンプルレートをユーザーが手動選択したか
     double lastProjectSrPref { 0.0 };   // 前回作成した SR (AppPreferences 由来、0=未設定)。既定に引き継ぐ

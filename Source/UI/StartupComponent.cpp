@@ -82,12 +82,9 @@ StartupComponent::StartupComponent(bool showAds)
     addAndMakeVisible(browseLocBtn);
     browseLocBtn.onClick = [this] { chooseLocation(); };
 
-    sampleRateBox.addItem("44100 Hz", 44100);
-    sampleRateBox.addItem("48000 Hz", 48000);
-    sampleRateBox.addItem("88200 Hz", 88200);
-    sampleRateBox.addItem("96000 Hz", 96000);
-    sampleRateBox.addItem("192000 Hz", 192000);
-    sampleRateBox.setSelectedId(48000, juce::dontSendNotification);
+    // SR コンボの項目は、デバイス初期化後に populateSampleRateBox() で「そのデバイスが実際に
+    // 対応する SR」だけを列挙する (getAvailableSampleRates)。非対応 SR を選べないようにして
+    // 「選んだ SR をデバイスが出せず自動追従」という事故を未然に防ぐ。ここでは onChange のみ設定。
     sampleRateBox.onChange = [this] { srUserPicked = true; };  // 手動選択を記録 (以後デバイスに追従しない)
     addAndMakeVisible(sampleRateBox);
 
@@ -118,7 +115,7 @@ StartupComponent::StartupComponent(bool showAds)
     AudioDeviceSettings::initialise(startupDeviceManager, 2, 2);
     startupDeviceManager.addChangeListener(this);
     refreshDeviceLabel();
-    syncSampleRateBoxToDevice();   // 既定 SR = デバイスの現在 SR
+    populateSampleRateBox();   // デバイス対応 SR を列挙し、既定を選ぶ
 
     createBtn.onClick = [this] { createNewProject(); };
     createBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a78ff));
@@ -501,6 +498,39 @@ void StartupComponent::showDeviceDialog()
     opts.launchAsync();
 }
 
+void StartupComponent::populateSampleRateBox()
+{
+    // 現在のデバイスが対応する SR のみを列挙する。手動選択が残っていれば控えて復元する。
+    const int keep = srUserPicked ? sampleRateBox.getSelectedId() : 0;
+
+    juce::Array<double> rates;
+    if (auto* dev = startupDeviceManager.getCurrentAudioDevice())
+        rates = dev->getAvailableSampleRates();
+    if (rates.isEmpty())   // デバイス無し/取得不可はフォールバックの標準リスト
+        rates = { 44100.0, 48000.0, 88200.0, 96000.0, 192000.0 };
+
+    sampleRateBox.clear(juce::dontSendNotification);
+    for (auto r : rates)
+    {
+        const int sr = (int) r;
+        if (sr > 0 && sampleRateBox.indexOfItemId(sr) < 0)
+            sampleRateBox.addItem(juce::String(sr) + " Hz", sr);
+    }
+
+    // 手動選択が新しいリストにも在れば維持、無ければ既定を選び直す (前回SR→デバイスSR→先頭)。
+    if (keep > 0 && sampleRateBox.indexOfItemId(keep) >= 0)
+    {
+        sampleRateBox.setSelectedId(keep, juce::dontSendNotification);
+    }
+    else
+    {
+        srUserPicked = false;          // 選べなくなった手動選択は破棄
+        syncSampleRateBoxToDevice();   // 前回SR / デバイスSR を既定に
+        if (sampleRateBox.getSelectedId() <= 0 && sampleRateBox.getNumItems() > 0)
+            sampleRateBox.setSelectedId(sampleRateBox.getItemId(0), juce::dontSendNotification);  // 先頭
+    }
+}
+
 void StartupComponent::syncSampleRateBoxToDevice()
 {
     if (srUserPicked) return;   // 手動選択を尊重
@@ -528,5 +558,5 @@ void StartupComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     AudioDeviceSettings::saveState(startupDeviceManager);
     refreshDeviceLabel();
-    syncSampleRateBoxToDevice();   // デバイス変更時も既定 SR を追従 (手動選択済みなら尊重)
+    populateSampleRateBox();   // デバイス変更で対応 SR リストと既定を更新 (手動選択は可能なら維持)
 }
