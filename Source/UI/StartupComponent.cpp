@@ -85,8 +85,9 @@ StartupComponent::StartupComponent(bool showAds)
     browseLocBtn.setTooltip(tr(u8"参照..."));                    // 機能は tooltip で示す
     browseLocBtn.onClick = [this] { chooseLocation(); };
 
-    // 「デフォルト」: 保存先を既定 (~/Documents/Utawave) に戻し、前回値もクリアする
+    // 「デフォルト」(円形リフレッシュアイコン): 保存先を既定 (~/Documents/Utawave) に戻し、前回値もクリア
     addAndMakeVisible(defaultLocBtn);
+    defaultLocBtn.setTooltip(tr(u8"デフォルト"));   // アイコンだけなので機能を tooltip で示す
     defaultLocBtn.onClick = [this]
     {
         auto def = defaultProjectLocation();
@@ -294,7 +295,7 @@ void StartupComponent::resized()
     {
         locationLabel.setBounds(leftCol.removeFromTop(18));
         auto row = leftCol.removeFromTop(28);
-        defaultLocBtn.setBounds(row.removeFromRight(92));
+        defaultLocBtn.setBounds(row.removeFromRight(30));  // 円形リフレッシュアイコン (正方形)
         row.removeFromRight(6);
         browseLocBtn.setBounds(row.removeFromRight(30));   // 「…」のみなので狭く = 保存先欄が広がる
         row.removeFromRight(6);

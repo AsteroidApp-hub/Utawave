@@ -8,6 +8,53 @@
 #include "../Project/UpdateChecker.h"
 #include "AdPanel.h"
 
+// 円形リフレッシュ (2 本矢印) アイコンボタン。「保存先を既定に戻す」用。TextButton を継承して
+// 背景は LookAndFeel を再利用 (隣の「…」ボタンと統一感)、上に 2 本の弧 + 矢尻を自前描画する。
+class ResetIconButton : public juce::TextButton
+{
+public:
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        getLookAndFeel().drawButtonBackground (g, *this,
+            findColour (juce::TextButton::buttonColourId), over, down);
+
+        auto bnd = getLocalBounds().toFloat();
+        const float cx = bnd.getCentreX(), cy = bnd.getCentreY();
+        const float r  = juce::jmin (bnd.getWidth(), bnd.getHeight()) * 0.28f;
+        const float thick = juce::jmax (1.6f, r * 0.26f);
+        const float hlen  = r * 0.85f;   // 矢尻の長さ (前方)
+        const float hw    = r * 0.62f;   // 矢尻の半幅
+        g.setColour (juce::Colours::white.withAlpha ((over || down) ? 1.0f : 0.9f));
+
+        // 弧 (12 時 = 0°・時計回りに角度が増える)。ギャップを大きめに取り 2 本の矢印に見せる。
+        auto arc = [&] (float fromDeg, float toDeg)
+        {
+            juce::Path p;
+            p.addCentredArc (cx, cy, r, r, 0.0f,
+                             juce::degreesToRadians (fromDeg), juce::degreesToRadians (toDeg), true);
+            g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+        };
+        // 弧の終端に「塗りつぶし三角」の矢尻。進行方向 (時計回りの接線 = (cosθ, sinθ)) に尖らせる。
+        auto arrowHead = [&] (float endDeg)
+        {
+            const float a = juce::degreesToRadians (endDeg);
+            const juce::Point<float> base (cx + r * std::sin (a), cy - r * std::cos (a)); // 弧の端
+            const juce::Point<float> fwd  (std::cos (a),  std::sin (a));   // 進行方向 (単位)
+            const juce::Point<float> perp (-std::sin (a), std::cos (a));   // 直交
+            juce::Path tri;
+            tri.startNewSubPath (base + fwd  * hlen);   // 先端
+            tri.lineTo         (base + perp * hw);
+            tri.lineTo         (base - perp * hw);
+            tri.closeSubPath();
+            g.fillPath (tri);
+        };
+
+        arc (35.0f, 165.0f);   arrowHead (165.0f);   // 上の弧 → 右下で矢尻
+        arc (215.0f, 345.0f);  arrowHead (345.0f);   // 下の弧 → 左上で矢尻
+    }
+};
+
 class StartupComponent : public juce::Component,
                          public juce::ListBoxModel,
                          private juce::ChangeListener
@@ -77,7 +124,7 @@ private:
     juce::TextEditor nameEditor;
     juce::TextEditor locationEditor;
     juce::TextButton browseLocBtn  { tr(u8"参照...") };
-    juce::TextButton defaultLocBtn { tr(u8"デフォルト") };   // 保存先を既定に戻す
+    ResetIconButton  defaultLocBtn;   // 保存先を既定に戻す (円形リフレッシュアイコン)
     juce::ComboBox   sampleRateBox;
     juce::ComboBox   bitDepthBox;
     juce::Label      deviceSummaryLabel;
