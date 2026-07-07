@@ -81,6 +81,8 @@ StartupComponent::StartupComponent(bool showAds)
     addAndMakeVisible(locationEditor);
 
     addAndMakeVisible(browseLocBtn);
+    browseLocBtn.setButtonText(juce::String::fromUTF8(u8"…"));  // 3 点リーダのみでコンパクトに (保存先欄を広く)
+    browseLocBtn.setTooltip(tr(u8"参照..."));                    // 機能は tooltip で示す
     browseLocBtn.onClick = [this] { chooseLocation(); };
 
     // 「デフォルト」: 保存先を既定 (~/Documents/Utawave) に戻し、前回値もクリアする
@@ -294,7 +296,7 @@ void StartupComponent::resized()
         auto row = leftCol.removeFromTop(28);
         defaultLocBtn.setBounds(row.removeFromRight(92));
         row.removeFromRight(6);
-        browseLocBtn.setBounds(row.removeFromRight(72));
+        browseLocBtn.setBounds(row.removeFromRight(40));   // 「…」のみなので狭く = 保存先欄が広がる
         row.removeFromRight(6);
         locationEditor.setBounds(row);
         leftCol.removeFromTop(12);
