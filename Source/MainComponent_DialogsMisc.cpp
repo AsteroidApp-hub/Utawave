@@ -885,10 +885,13 @@ void MainComponent::showExportDialog()
                 };
 
                 auto* content = new ExportDoneContent(msg);
-                content->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
-                                   (bool dontShow)
+                // SafePointer はラムダ外のローカルに取ってから捕捉する。onExport ラムダ ([this,w]) の
+                // 中で init-capture に this を書くと MSVC が this を外側クロージャと解釈して落ちるため
+                // (Clang は通るが移植性のため)。
+                juce::Component::SafePointer<MainComponent> safeThis(this);
+                content->onClose = [safeThis](bool dontShow)
                 {
-                    if (auto* self = safe.getComponent())
+                    if (auto* self = safeThis.getComponent())
                         if (dontShow) { self->appPrefs.showExportCompleteDialog = false; self->appPrefs.save(); }
                 };
 
