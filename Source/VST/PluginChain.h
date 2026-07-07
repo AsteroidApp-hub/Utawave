@@ -49,12 +49,14 @@ public:
     // 合計遅延サンプル（PDC 用）。現状は呼び出し側で参照のみ
     int getTotalLatencySamples() const;
 
-    // 指定 SR / blockSize で既に prepareToPlay 済みか。モニター経路 (setMonitorChain) が
-    // 同設定での二重 prepare (プラグイン状態リセット = グリッチ) を避けるための軽量判定。
-    // prepared* は message thread でのみ書かれる (prepareToPlay) ので同スレッド read は安全。
+    // 指定 SR / blockSize で既に prepareToPlay 済みか。モニター経路 (setMonitorChain) と
+    // 書き出し経路 (renderOfflineRange・別スレッド) が、同設定での二重 prepare
+    // (プラグイン状態リセット = グリッチ) を避けるための軽量判定。prepared* は書き出しの
+    // バックグラウンドスレッドからも読まれる (prepareToPlay の message thread 書き込みと競合し
+    // うる) ため atomic 化してある (torn read = UB を回避)。
     bool isPreparedFor(double sr, int bs) const noexcept
     {
-        return preparedSampleRate == sr && preparedBlockSize == bs;
+        return preparedSampleRate.load() == sr && preparedBlockSize.load() == bs;
     }
 
     // 変更通知
@@ -75,8 +77,9 @@ private:
     // chainLock 下でスロット構成を変えるたびに slots.size() を release-store する。
     // audio thread はこれを acquire-load してロック無しで「処理対象あり」を判定する。
     std::atomic<int> activePluginCount { 0 };
-    double      preparedSampleRate { 0.0 };
-    int         preparedBlockSize  { 0 };
+    // 書き出しの別スレッドからも isPreparedFor 経由で読まれるため atomic (torn read 回避)。
+    std::atomic<double> preparedSampleRate { 0.0 };
+    std::atomic<int>    preparedBlockSize  { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginChain)
 };

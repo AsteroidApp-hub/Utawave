@@ -17,11 +17,13 @@ void PluginChain::addPlugin(std::unique_ptr<juce::AudioPluginInstance> plugin)
     // 再 prepareToPlay する際は releaseResources してから行う（Nectar 4 等で必須）。
     plugin->releaseResources();
     plugin->disableNonMainBuses();
-    const double sr = preparedSampleRate > 0.0 ? preparedSampleRate : 48000.0;
-    const int    bs = preparedBlockSize  > 0   ? preparedBlockSize  : 512;
+    const double psr = preparedSampleRate.load();
+    const int    pbs = preparedBlockSize.load();
+    const double sr = psr > 0.0 ? psr : 48000.0;
+    const int    bs = pbs > 0   ? pbs : 512;
     plugin->setPlayConfigDetails(2, 2, sr, bs);
-    if (preparedSampleRate > 0.0 && preparedBlockSize > 0)
-        plugin->prepareToPlay(preparedSampleRate, preparedBlockSize);
+    if (psr > 0.0 && pbs > 0)
+        plugin->prepareToPlay(psr, pbs);
 
     auto* slot = new Slot();
     slot->plugin = std::move(plugin);
@@ -39,11 +41,13 @@ void PluginChain::insertPluginAt(int slotIdx, std::unique_ptr<juce::AudioPluginI
 
     plugin->releaseResources();
     plugin->disableNonMainBuses();
-    const double sr = preparedSampleRate > 0.0 ? preparedSampleRate : 48000.0;
-    const int    bs = preparedBlockSize  > 0   ? preparedBlockSize  : 512;
+    const double psr = preparedSampleRate.load();
+    const int    pbs = preparedBlockSize.load();
+    const double sr = psr > 0.0 ? psr : 48000.0;
+    const int    bs = pbs > 0   ? pbs : 512;
     plugin->setPlayConfigDetails(2, 2, sr, bs);
-    if (preparedSampleRate > 0.0 && preparedBlockSize > 0)
-        plugin->prepareToPlay(preparedSampleRate, preparedBlockSize);
+    if (psr > 0.0 && pbs > 0)
+        plugin->prepareToPlay(psr, pbs);
 
     {
         const juce::ScopedLock sl(chainLock);
@@ -157,8 +161,8 @@ juce::AudioPluginInstance* PluginChain::getPlugin(int index) const
 
 void PluginChain::prepareToPlay(double sampleRate, int blockSize)
 {
-    preparedSampleRate = sampleRate;
-    preparedBlockSize  = blockSize;
+    preparedSampleRate.store(sampleRate);
+    preparedBlockSize.store(blockSize);
     const juce::ScopedLock sl(chainLock);
     for (auto* s : slots)
     {

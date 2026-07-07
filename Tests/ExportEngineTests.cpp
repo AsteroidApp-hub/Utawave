@@ -26,6 +26,7 @@
 #include "../Source/Tracks/AudioClip.h"
 #include "../Source/Tracks/MidiClip.h"
 #include "../Source/Export/ExportEngine.h"
+#include "../Source/VST/PluginChain.h"
 
 namespace
 {
@@ -72,6 +73,72 @@ bool writeStereoConst(const juce::File& f, int numSamples, float l, float r)
     juce::FloatVectorOperations::fill(b.getWritePointer(1), r, numSamples);
     return writeFloatWav(f, kSR, b);
 }
+
+// 定数値の「ステップ」モノ WAV: [0,edge) を 0、[edge,N) を value に (PDC のずれ検出用)
+bool writeMonoStep(const juce::File& f, int numSamples, int edge, float value)
+{
+    juce::AudioBuffer<float> b(1, numSamples);
+    b.clear();
+    if (edge < numSamples)
+        juce::FloatVectorOperations::fill(b.getWritePointer(0) + edge, value, numSamples - edge);
+    return writeFloatWav(f, kSR, b);
+}
+
+// L サンプルの純遅延を行い getLatencySamples()==L を報告するスタブ (PDC 検証用)。
+// 実プラグイン (リニアフェーズ EQ / ルックアヘッド系) の「遅延して出力する」挙動を模す。
+// パススルー + L 遅延なので、PDC が完全補正すれば遅延無しの書き出しと一致する。
+class FakeLatencyPlugin : public juce::AudioPluginInstance
+{
+public:
+    explicit FakeLatencyPlugin(int latencyIn)
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())),
+          latency(latencyIn) {}
+
+    int latency { 0 };
+    std::vector<std::vector<float>> ring;   // ch 毎の L サンプル遅延ライン
+    int wp { 0 };
+
+    const juce::String getName() const override { return "Latency" + juce::String(latency); }
+    void prepareToPlay(double, int) override
+    {
+        ring.assign(2, std::vector<float>((size_t) juce::jmax(1, latency), 0.0f));
+        wp = 0;
+        setLatencySamples(latency);
+    }
+    void releaseResources() override {}
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override
+    {
+        if (latency <= 0) return;
+        const int nch = juce::jmin(2, b.getNumChannels());
+        const int n   = b.getNumSamples();
+        for (int i = 0; i < n; ++i)
+        {
+            for (int ch = 0; ch < nch; ++ch)
+            {
+                const float in  = b.getSample(ch, i);
+                b.setSample(ch, i, ring[(size_t) ch][(size_t) wp]);
+                ring[(size_t) ch][(size_t) wp] = in;
+            }
+            wp = (wp + 1) % latency;
+        }
+    }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi() const override            { return false; }
+    bool producesMidi() const override           { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override              { return false; }
+    int getNumPrograms() override                { return 1; }
+    int getCurrentProgram() override             { return 0; }
+    void setCurrentProgram(int) override         {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override {}
+    void setStateInformation(const void*, int) override {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
 
 // 読み出した WAV/AIFF の情報
 struct AudioFileData
@@ -190,6 +257,7 @@ public:
         testClickTrackExcluded();
         testMidiTrackRendersInExport();
         testReverbSendInExport();
+        testPluginLatencyCompensation();
         testDither16PerturbsSteadyLevel();
         testDitherSilenceBounded();
         testOverwritesExistingFile();
@@ -1032,6 +1100,134 @@ public:
                            "pre-fader is raw clip (0.4), no reverb summed", 0, (int)(0.15 * kSR));
         }
         t->setReverbSend(0.0f);
+    }
+
+    //==========================================================================
+    // 20b. プラグイン遅延補正 (PDC): 遅延プラグインを挿しても書き出しがタイムラインに揃う。
+    //      遅延プラグインはパススルー + L 遅延なので、PDC が完全補正すれば「遅延無しの書き出し」
+    //      とサンプル単位で一致する (ずれも末尾切れも無い)。トラック挿入とマスター挿入の両方を検証。
+    void testPluginLatencyCompensation()
+    {
+        beginTest("plugin delay compensation aligns export to timeline (track + master)");
+
+        const int   N    = (int)(0.25 * kSR);   // 12000 サンプル
+        const int   edge = 5000;                 // ステップ位置 (ここでずれが見える)
+        const float V    = 0.3f;
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        auto src = outDir.getChildFile("pdc_src.wav");
+        expect(writeMonoStep(src, N, edge, V), "source write");
+        const double dur = (double) N / kSR;
+
+        // 参照: プラグイン無しの書き出し
+        juce::AudioBuffer<float> ref;
+        {
+            TrackManager tm(fmt);
+            auto* t = tm.addTrack("ref", false);
+            auto* c = t->addClip(src, 0.0, dur);
+            c->setFadeInSecs(0.0); c->setFadeOutSecs(0.0);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            AudioEngine engine; engine.preparePlayback(tm);
+            auto out = outDir.getChildFile("pdc_ref.wav");
+            auto o = baseOpts(out, 32, dur);
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "ref render: " + err);
+            auto d = readAudio(out);
+            expect(d.ok, "ref readable");
+            ref = d.samples;
+            expectEquals(ref.getNumSamples(), N, "ref length");
+        }
+
+        auto matchesRef = [&](const juce::AudioBuffer<float>& s, const juce::String& tag)
+        {
+            expectEquals(s.getNumSamples(), ref.getNumSamples(), tag + ": length unchanged by PDC");
+            float maxErr = 0.0f; int badIdx = -1;
+            const int nn = juce::jmin(s.getNumSamples(), ref.getNumSamples());
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < nn; ++i)
+                {
+                    float e = std::abs(s.getSample(ch, i) - ref.getSample(ch, i));
+                    if (e > maxErr) { maxErr = e; badIdx = i; }
+                }
+            expect(maxErr <= 1.0e-5f, tag + ": matches no-plugin reference (PDC) maxErr="
+                   + juce::String(maxErr, 8) + " at " + juce::String(badIdx));
+        };
+
+        // トラックに遅延プラグインを挿す (非ブロック整列の奇数 777 と、ブロック整列 2048)
+        for (int L : { 777, 2048 })
+        {
+            TrackManager tm(fmt);
+            auto* t = tm.addTrack("p", false);
+            auto* c = t->addClip(src, 0.0, dur);
+            c->setFadeInSecs(0.0); c->setFadeOutSecs(0.0);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            t->getPluginChain().addPlugin(std::make_unique<FakeLatencyPlugin>(L));
+
+            AudioEngine engine; engine.preparePlayback(tm);
+            auto out = outDir.getChildFile("pdc_L" + juce::String(L) + ".wav");
+            auto o = baseOpts(out, 32, dur);
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "plugin render: " + err);
+            auto d = readAudio(out);
+            expect(d.ok, "plugin readable");
+            matchesRef(d.samples, "track L=" + juce::String(L));
+
+            // 明示スポットチェック: ステップが L だけ遅れず edge に居る (補正の可読な担保)
+            expectAllClose(d.samples, 0, 0.0f, 1.0e-4f, "silent before step", 0, edge - 8);
+            expectAllClose(d.samples, 0, V,    1.0e-4f, "value after step",  edge + 8, N);
+        }
+
+        // マスターチェーンの遅延も補正される
+        {
+            const int L = 1024;
+            TrackManager tm(fmt);
+            auto* t = tm.addTrack("m", false);
+            auto* c = t->addClip(src, 0.0, dur);
+            c->setFadeInSecs(0.0); c->setFadeOutSecs(0.0);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            AudioEngine engine;
+            engine.getMasterChain().addPlugin(std::make_unique<FakeLatencyPlugin>(L));
+            engine.preparePlayback(tm);
+            auto out = outDir.getChildFile("pdc_master.wav");
+            auto o = baseOpts(out, 32, dur);
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "master render: " + err);
+            auto d = readAudio(out);
+            expect(d.ok, "master readable");
+            matchesRef(d.samples, "master L=" + juce::String(L));
+        }
+
+        // パラ書き出し (stems) 相当: 明示選択 (selectedTrackIndices={ti}) の単一トラック書き出しも
+        // 各 stem が個別にタイムライン基準へ補正され、互いにずれないことを検証。プラグイン有トラック
+        // (L=1200) とプラグイン無トラックを別々に書き出し、両方とも参照 (遅延無し) と一致させる。
+        {
+            const int L = 1200;
+            TrackManager tm(fmt);
+            auto* tp = tm.addTrack("stemP", false);   // index 0: プラグイン有
+            auto* cp = tp->addClip(src, 0.0, dur);
+            cp->setFadeInSecs(0.0); cp->setFadeOutSecs(0.0);
+            tp->setVolume(0.0f); tp->setPan(0.0f);
+            tp->getPluginChain().addPlugin(std::make_unique<FakeLatencyPlugin>(L));
+
+            auto* tn = tm.addTrack("stemN", false);   // index 1: プラグイン無
+            auto* cn = tn->addClip(src, 0.0, dur);
+            cn->setFadeInSecs(0.0); cn->setFadeOutSecs(0.0);
+            tn->setVolume(0.0f); tn->setPan(0.0f);
+
+            AudioEngine engine; engine.preparePlayback(tm);
+
+            for (int ti : { 0, 1 })
+            {
+                auto out = outDir.getChildFile("pdc_stem" + juce::String(ti) + ".wav");
+                auto o = baseOpts(out, 32, dur);
+                o.selectedTrackIndices = { ti };   // stems = 1 トラックずつ明示選択
+                juce::String err;
+                expect(ExportEngine::render(engine, o, {}, {}, &err), "stem render: " + err);
+                auto d = readAudio(out);
+                expect(d.ok, "stem readable");
+                // どちらの stem も遅延無しの参照と一致 = タイムライン基準に揃っている (互いにずれない)
+                matchesRef(d.samples, "stem track " + juce::String(ti));
+            }
+        }
     }
 
     //==========================================================================

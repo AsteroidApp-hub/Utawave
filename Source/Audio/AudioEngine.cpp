@@ -925,31 +925,35 @@ void AudioEngine::applyTrackDelay(std::vector<TrackDelay>& delays, int trackIdx,
                                   juce::AudioBuffer<float>& trackBuf, int numSamples)
 {
     if (trackIdx < 0 || trackIdx >= (int)delays.size()) return;
-    auto& d = delays[(size_t)trackIdx];
+    applyDelayLine(delays[(size_t)trackIdx], trackBuf, numSamples);
+}
+
+void AudioEngine::applyDelayLine(TrackDelay& d, juce::AudioBuffer<float>& buf, int numSamples)
+{
     if (d.delaySamples == 0) return;            // 遅延不要 = 最遅トラック自身
     const int bufLen = d.buf.getNumSamples();
     if (bufLen <= 0) return;
 
-    // Step 1: trackBuf → 循環バッファへ書き込み（ラップ分割）
+    // Step 1: buf → 循環バッファへ書き込み（ラップ分割）
     int wp = d.writePos;
     int firstChunk  = juce::jmin(numSamples, bufLen - wp);
     int secondChunk = numSamples - firstChunk;
-    for (int ch = 0; ch < juce::jmin(2, trackBuf.getNumChannels()); ++ch)
+    for (int ch = 0; ch < juce::jmin(2, buf.getNumChannels()); ++ch)
     {
-        d.buf.copyFrom(ch, wp, trackBuf, ch, 0, firstChunk);
+        d.buf.copyFrom(ch, wp, buf, ch, 0, firstChunk);
         if (secondChunk > 0)
-            d.buf.copyFrom(ch, 0,  trackBuf, ch, firstChunk, secondChunk);
+            d.buf.copyFrom(ch, 0,  buf, ch, firstChunk, secondChunk);
     }
 
-    // Step 2: 循環バッファから delaySamples 遅れた位置を読み出して trackBuf 上書き
+    // Step 2: 循環バッファから delaySamples 遅れた位置を読み出して buf 上書き
     int rp = (wp - d.delaySamples + bufLen) % bufLen;
     firstChunk  = juce::jmin(numSamples, bufLen - rp);
     secondChunk = numSamples - firstChunk;
-    for (int ch = 0; ch < juce::jmin(2, trackBuf.getNumChannels()); ++ch)
+    for (int ch = 0; ch < juce::jmin(2, buf.getNumChannels()); ++ch)
     {
-        trackBuf.copyFrom(ch, 0,          d.buf, ch, rp, firstChunk);
+        buf.copyFrom(ch, 0,          d.buf, ch, rp, firstChunk);
         if (secondChunk > 0)
-            trackBuf.copyFrom(ch, firstChunk, d.buf, ch, 0, secondChunk);
+            buf.copyFrom(ch, firstChunk, d.buf, ch, 0, secondChunk);
     }
 
     d.writePos = (wp + numSamples) % bufLen;
@@ -1348,6 +1352,18 @@ static void appendMidiStateResend(juce::MidiBuffer& mb,
                             lastChanPressure[(size_t)ch]), 0);
 }
 
+// 書き出しで「このトラックをミックスに含めるか」の共通規則 (明示選択なら選択集合、無ければ
+// Mute/Solo)。PDC セットアップと per-block 収集の両方から呼び、規則の二重定義 (ドリフト) を防ぐ。
+static bool exportTrackActive(int ti, const Track* trk, bool explicitFilter,
+                              const std::unordered_set<int>& includeSet, bool anySolo)
+{
+    if (trk == nullptr) return false;
+    if (explicitFilter) return includeSet.find(ti) != includeSet.end();
+    if (trk->isMuted()) return false;
+    if (anySolo && !trk->isSoloed()) return false;
+    return true;
+}
+
 void AudioEngine::renderOfflineRange(double startSec, double endSec,
                                       juce::AudioBuffer<float>& outBuffer,
                                       std::function<void(double)> progress,
@@ -1358,7 +1374,16 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 
     const double sr        = currentSampleRate;
     const int    totalSamp = (int)std::round((endSec - startSec) * sr);
-    const int    blockSize = 1024;
+    if (totalSamp <= 0) return;   // 半サンプル未満の範囲 (round で 0) を弾く (progress の 0 除算防止)
+    // 書き出しのブロックサイズはデバイス (再生時) と同じ currentBufferSize に「厳密に」合わせる。
+    // プラグインは prepareToPlay 時に宣言した最大ブロック (setPlayConfigDetails) と異なるブロックで
+    // 叩かれると内部で再バッファして「報告外の遅延」が乗ることがある (Ozone 等のルックアヘッド系で
+    // 顕著)。旧実装は 1024 固定で、512 で prepare されたプラグインが僅かに遅れる原因になっていた。
+    // isPreparedFor ガードが機能する (= 再 prepare を避ける) のは blockSize==currentBufferSize の
+    // ときだけなので、実在するバッファサイズ (16〜) はそのまま使い、下限クランプで丸めない
+    // (下限で丸めると小バッファ機で blockSize がずれ、モニター中でも再 prepare が走ってしまう)。
+    // 上限だけ非現実的な巨大値へのガードとして残す。
+    const int    blockSize = (currentBufferSize > 0) ? juce::jmin(currentBufferSize, 8192) : 1024;
 
     // 書き出し中もプラグインへ再生位置を供給する (テンポ同期プラグイン等が正しく動くように)。
     // audio thread と競合しないよう、メンバ playHead ではなくローカルインスタンスを使う。
@@ -1400,14 +1425,126 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     int    clkLastBeat = 0;
     bool   clkInit = false;
 
-    int written = 0;
-    while (written < totalSamp)
+    // ── プラグイン遅延補正 (PDC) のセットアップ ──
+    // 重いプラグイン (リニアフェーズ EQ / ルックアヘッド系リミッター等) を挿したトラックは、
+    // プラグインの遅延サンプル分だけ遅れて出力される。再生時は applyTrackDelay で全トラックを
+    // 最遅トラックに揃えているが、書き出しは従来これを一切行わず、重いトラックだけが 2 ミックス
+    // 上で遅れてずれていた。ここで再生と同じ相対補正 (各トラックを pdcMaxLat - 自身の遅延 分
+    // 遅らせる) を行い、さらに全体の絶対遅延 (最大遅延 + マスターチェーン遅延 = totalSkip) を
+    // 先頭に余分にレンダリングして読み飛ばすことで、タイムラインに正確に揃える (先頭の空白や
+    // 末尾のテール切れも解消)。プラグイン遅延が全く無ければ totalSkip=0 で従来と完全に同一。
+    //
+    // 【精度の肝】各チェーンが書き出し blockSize (= currentBufferSize) で prepare 済みであること。
+    // プラグインは宣言した最大ブロックと異なるブロックで叩かれると内部で再バッファして報告外の遅延が
+    // 乗るため、処理と同じブロックサイズで prepare されていれば報告値と実挙動が一致する。通常は
+    // preparePlayback / audioDeviceAboutToStart が currentBufferSize で prepare 済みなので下の
+    // prepareAndLat は素通りする。**書き出しは再生は止めるが入力モニターは止めない** ので、
+    // 万一 prepare が必要なときのために isPreparedFor ガードを噛ませて再 prepare を避ける
+    // (下の prepareAndLat のコメント参照)。
+    std::unordered_map<int,int> pdcTrackLatById;   // 絶対トラック index → プラグイン遅延サンプル
+    int  pdcMaxLat = 0, pdcMaxTrackIdx = -1, clickChainLat = 0;
+    bool clickWillPlay = false;
+    std::shared_ptr<PlaybackSnapshot> snap0;
+    { const juce::SpinLock::ScopedLockType l(snapshotLock); snap0 = activeSnapshot; }
+
+    // チェーンを書き出し blockSize で prepare し「直す」のは、まだそのサイズで prepare されて
+    // いないときだけにする (isPreparedFor ガード)。通常は blockSize == currentBufferSize なので
+    // preparePlayback 済み = 素通りし、latency だけ読む。無条件に prepareToPlay すると、
+    // 入力モニター中 (audio thread が同じチェーンを processBlock 中) の書き出しで chainLock 保持
+    // 下の releaseResources + 再確保がオーディオスレッドをブロックし、プラグイン状態もリセット
+    // されてグリッチになる (setMonitorChain と同じ作法・CLAUDE.md「停止中 prepare (肝)」)。
+    auto prepareAndLat = [&](Track* trk) -> int
     {
-        const int n = juce::jmin(blockSize, totalSamp - written);
+        auto& chain = trk->getPluginChain();
+        if (chain.getNumPlugins() == 0) return 0;
+        if (sr > 0.0 && blockSize > 0 && !chain.isPreparedFor(sr, blockSize))
+            chain.prepareToPlay(sr, blockSize);
+        return chain.getTotalLatencySamples();
+    };
+    {
+        const bool explicitFilter0 = !includeTracks.empty();
+        const std::unordered_set<int> includeSet0(includeTracks.begin(), includeTracks.end());
+        bool anySolo0 = false;
+        if (!explicitFilter0)
+        {
+            for (auto& [ti, trk] : snap0->clipTracks)
+                if (trk && trk->isSoloed()) { anySolo0 = true; break; }
+            if (!anySolo0)
+                for (auto& mp : snap0->midi)
+                    if (mp.track && mp.track->isSoloed()) { anySolo0 = true; break; }
+            if (!anySolo0 && snap0->clickTrack != nullptr && snap0->clickTrack->isSoloed())
+                anySolo0 = true;
+        }
+        auto noteLat = [&](int ti, Track* trk)
+        {
+            if (!exportTrackActive(ti, trk, explicitFilter0, includeSet0, anySolo0)) return;
+            const int lat = prepareAndLat(trk);
+            pdcTrackLatById[ti] = lat;
+            pdcMaxLat      = juce::jmax(pdcMaxLat, lat);
+            pdcMaxTrackIdx = juce::jmax(pdcMaxTrackIdx, ti);
+        };
+        for (auto& [ti, trk] : snap0->clipTracks) noteLat(ti, trk);
+        for (auto& mp : snap0->midi)              noteLat(mp.trackIdx, mp.track);
+
+        // クリック (メトロノーム) トラックのチェーン遅延も最大遅延に含める。クリックはトラックと
+        // 同じ INS チェーンを通ってからマスター後に加算されるため、これを入れないとクリックに
+        // 重いプラグインを挿したときクリックだけがずれる。
+        Track* clickTr0 = snap0->clickTrack;
+        const bool clickAuto0 = !explicitFilter0 && clickTr0 != nullptr && !clickTr0->isMuted()
+                                && !(anySolo0 && !clickTr0->isSoloed());
+        clickWillPlay = (includeClick && clickTr0 != nullptr) || clickAuto0;
+        if (clickWillPlay && clickTr0 != nullptr)
+        {
+            clickChainLat = prepareAndLat(clickTr0);
+            pdcMaxLat = juce::jmax(pdcMaxLat, clickChainLat);
+        }
+    }
+
+    // マスターチェーン遅延 (Pre-Fader はマスターを通さないので 0)。全体の絶対遅延に含める。
+    int masterLat = 0;
+    if (!preFader && masterChain && masterChain->getNumPlugins() > 0)
+    {
+        if (sr > 0.0 && blockSize > 0 && !masterChain->isPreparedFor(sr, blockSize))
+            masterChain->prepareToPlay(sr, blockSize);   // isPreparedFor ガードは prepareAndLat と同じ理由
+        masterLat = masterChain->getTotalLatencySamples();
+    }
+    const int totalSkip = pdcMaxLat + masterLat;
+
+    // 各トラックの遅延ライン (index = 絶対トラック index)。delaySamples = pdcMaxLat - 自身の遅延。
+    std::vector<TrackDelay> trackDelays;
+    if (pdcMaxLat > 0 && pdcMaxTrackIdx >= 0)
+    {
+        trackDelays.resize((size_t)(pdcMaxTrackIdx + 1));
+        const int dlen = juce::jmax(1, pdcMaxLat + blockSize);
+        for (auto& [ti, lat] : pdcTrackLatById)
+        {
+            auto& d = trackDelays[(size_t)ti];
+            d.delaySamples = pdcMaxLat - lat;
+            if (d.delaySamples > 0) { d.buf.setSize(2, dlen, false, true, true); d.writePos = 0; }
+        }
+    }
+    // クリックの遅延ライン: クリックは自身の INS チェーンで clickChainLat 遅れて出るため、
+    // マスター後のトラック (totalSkip) と揃えるには残り (totalSkip - clickChainLat) だけ足す。
+    // pdcMaxLat >= clickChainLat なので cd >= masterLat >= 0。
+    TrackDelay clickDelay;
+    {
+        const int cd = totalSkip - clickChainLat;
+        if (cd > 0)
+        {
+            clickDelay.delaySamples = cd;
+            clickDelay.buf.setSize(2, cd + blockSize, false, true, true);
+        }
+    }
+    const int renderSamp = totalSamp + totalSkip;   // 絶対遅延分を余分にレンダリングして前詰めで読み飛ばす
+
+    int feedPos = 0;
+    while (feedPos < renderSamp)
+    {
+        const int n = juce::jmin(blockSize, renderSamp - feedPos);
         blockBuf.setSize(2, n, false, false, true);
         blockBuf.clear();
 
-        const double posStart = startSec + (double)written / sr;
+        const double posStart = startSec + (double)feedPos / sr;
         if (exportCfg) fillPlayHead(exportHead, posStart, sr, *exportCfg,
                                     /*playing*/ true, /*recording*/ false,
                                     /*looping*/ false, 0.0, 0.0);
@@ -1446,16 +1583,7 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             std::vector<Track*> activeTracks;
             for (auto& [ti, trk] : snap->clipTracks)
             {
-                if (trk == nullptr) continue;
-                if (explicitFilter)
-                {
-                    if (includeSet.find(ti) == includeSet.end()) continue;
-                }
-                else
-                {
-                    if (trk->isMuted()) continue;
-                    if (anySolo && !trk->isSoloed()) continue;
-                }
+                if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo)) continue;
                 activeIdx.push_back(ti);
                 activeTracks.push_back(trk);
             }
@@ -1518,26 +1646,21 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                     track->getPluginChain().processBlock(trackBuf, midi, &exportHead);
                 }
 
+                // PDC: 自分より遅いトラックに合わせて遅延させミックスに揃える (再生時と同じ)。
+                applyTrackDelay(trackDelays, tidx, trackBuf, n);
+
                 addTrackOut(track, trackBuf);
             }
 
             // ── MIDI トラック (内蔵シンセ / INS 音源) のレンダリング ──
             // 従来はここが無く、MIDI トラックの書き出しが常に無音になっていた (2026-07 修正)。
             // イベント収集・移調・シンセ/チェーンの流れはリアルタイム再生ブランチと同じ。
-            // 遅延補正 (PDC) やメータ等の実時間専用処理は書き出しでは不要なので行わない
+            // MIDI トラックにも PDC (applyTrackDelay) をかける (下記)。
             const double posEndMidi = posStart + (double)n / sr;
             for (auto& mp : snap->midi)
             {
-                if (mp.track == nullptr) continue;
-                if (explicitFilter)
-                {
-                    if (includeSet.find(mp.trackIdx) == includeSet.end()) continue;
-                }
-                else
-                {
-                    if (mp.track->isMuted()) continue;
-                    if (anySolo && !mp.track->isSoloed()) continue;
-                }
+                if (!exportTrackActive(mp.trackIdx, mp.track, explicitFilter, includeSet, anySolo))
+                    continue;
 
                 auto& syn = offlineSynths[mp.trackIdx];
                 if (!syn)
@@ -1551,7 +1674,7 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 offlineMidi.clear();
                 // 途中からの書き出しでも音色/ベンドが合うよう、開始ブロックで
                 // startSec より前の PC/CC/PB/CP の最終値を再送する (再生のシーク時と同じ)
-                if (written == 0)
+                if (feedPos == 0)
                     appendMidiStateResend(offlineMidi, mp.events, posStart);
 
                 auto evIt = std::lower_bound(mp.events.begin(), mp.events.end(), posStart,
@@ -1573,6 +1696,9 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                     syn->processBlock(trackBuf, offlineMidi);
                 if (mp.track->getPluginChain().getNumPlugins() > 0)
                     mp.track->getPluginChain().processBlock(trackBuf, offlineMidi, &exportHead);
+
+                // PDC: 遅延の無い (または少ない) MIDI トラックも最遅トラックに合わせて遅延させる。
+                applyTrackDelay(trackDelays, mp.trackIdx, trackBuf, n);
 
                 addTrackOut(mp.track, trackBuf);
             }
@@ -1693,6 +1819,10 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                     clickChainStereo = true;
                 }
 
+                // PDC: クリックはマスター通過後に加算されるため、全体の絶対遅延 totalSkip 分
+                // 遅延させてトラック (マスター後) と時間を揃える。
+                applyDelayLine(clickDelay, clickBlock, n);
+
                 // vol/pan はチェーン後段 (実時間と同じ)。クリック基本音量 = トラックゲイン × 0.5。
                 // Pre-Fader ではフェーダー/パンを掛けない (他トラックと同じ扱い)
                 if (preFader)
@@ -1728,11 +1858,22 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             blockBuf.addFrom(1, 0, clickBlock, clickChainStereo ? 1 : 0, 0, n, clickGR);
         }
 
-        for (int ch = 0; ch < 2; ++ch)
-            outBuffer.copyFrom(ch, written, blockBuf, ch, 0, n);
+        // ── 出力へコピー (PDC の絶対遅延 totalSkip 分を先頭で読み飛ばす) ──
+        // このブロックの feed サンプル [feedPos, feedPos+n) は export サンプル
+        // [feedPos-totalSkip, ...) に対応する。負域 (先頭のプラグイン鳴り込み) は捨てる。
+        int srcOff = 0, dst = feedPos - totalSkip, cnt = n;
+        if (dst < 0) { srcOff = -dst; dst = 0; cnt = n - srcOff; }
+        if (cnt > 0 && dst < totalSamp)
+        {
+            cnt = juce::jmin(cnt, totalSamp - dst);
+            for (int ch = 0; ch < 2; ++ch)
+                outBuffer.copyFrom(ch, dst, blockBuf, ch, srcOff, cnt);
+        }
 
-        written += n;
-        if (progress) progress((double)written / (double)totalSamp);
+        feedPos += n;
+        // 進捗は feed 位置 / 全レンダリング長 (= totalSamp + totalSkip) で報告する。前詰めの
+        // プリロール中も滑らかに進む (旧: exportWritten/totalSamp は先頭 totalSkip 分 0 に張り付いた)。
+        if (progress) progress((double)feedPos / (double)renderSamp);
     }
 }
 

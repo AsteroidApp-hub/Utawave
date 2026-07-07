@@ -421,6 +421,9 @@ private:
     // PDC: スナップショットの trackDelays を渡して trackBuf を遅延させる。
     void applyTrackDelay(std::vector<TrackDelay>& delays, int trackIdx,
                          juce::AudioBuffer<float>& trackBuf, int numSamples);
+    // 単一の遅延ライン (循環バッファ) を buf に適用する。applyTrackDelay と書き出しの
+    // クリック遅延で共用 (delaySamples==0 は no-op)。
+    static void applyDelayLine(TrackDelay& d, juce::AudioBuffer<float>& buf, int numSamples);
     // 入力モニターの返しを出力へミックス (ドライ + モニターリバーブ)。録音には焼かない。
     // monChain が非 null かつ非空なら、返し音をそのチェーンに通す (INS をライブに掛ける)。
     void mixInputMonitoring(const float* const* inputChannelData, int numInputChannels,
