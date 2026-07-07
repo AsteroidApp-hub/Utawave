@@ -93,6 +93,41 @@ public:
     void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
 };
 
+// 入力に関係なく buffer を定数で埋める最小スタブ (Melodyne が「停止中に自前でプレビュー音を
+// 生成する」挙動を模す)。停止中プラグインプレビューの検証用。
+class GeneratorFakePlugin : public juce::AudioPluginInstance
+{
+public:
+    explicit GeneratorFakePlugin(float v)
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())),
+          value(v) {}
+    float value { 0.0f };
+    const juce::String getName() const override            { return "Gen"; }
+    void prepareToPlay(double, int) override               {}
+    void releaseResources() override                       {}
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override
+    {
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+            juce::FloatVectorOperations::fill(b.getWritePointer(ch), value, b.getNumSamples());
+    }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override           { return 0.0; }
+    bool acceptsMidi() const override                      { return false; }
+    bool producesMidi() const override                     { return false; }
+    juce::AudioProcessorEditor* createEditor() override    { return nullptr; }
+    bool hasEditor() const override                        { return false; }
+    int getNumPrograms() override                          { return 1; }
+    int getCurrentProgram() override                       { return 0; }
+    void setCurrentProgram(int) override                   {}
+    const juce::String getProgramName(int) override        { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override  {}
+    void setStateInformation(const void*, int) override    {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
+
 // audioDeviceAboutToStart に渡す最小スタブ。SR / buffer size / チャンネル構成だけを返す。
 struct FakeAudioIODevice : public juce::AudioIODevice
 {
@@ -241,6 +276,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testRecordingWriteGate();
         testLoopWrapFromOutside();
         testMonitorThroughInserts();
+        testStoppedPluginPreview();
         testDiskStreamingDeterminism();
         testMulticoreDeterminism();
 
@@ -981,6 +1017,63 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             const float peak = runWithInput(s.engine, 4, 0.25f);
             expect(std::abs(peak - 0.5f) < 0.01f,
                    "setMonitorChain prepares an unprepared chain so the plugin works (~0.5)");
+        }
+    }
+
+    // 停止中もトラックのプラグインチェーンを処理し、プラグインが自前生成する音 (Melodyne の編集
+    // プレビュー等) が出力へ乗ることを検証する。GeneratorFakePlugin は入力に関係なく定数を出す。
+    void testStoppedPluginPreview()
+    {
+        beginTest("stopped: track plugin chain is processed so it can output preview audio (Melodyne-style)");
+
+        auto wav = tempDir.getChildFile("stopprev_clip.wav");
+        expect(writeMonoConstWav(wav, (int) kSR, 0.0f), "silent clip source");  // クリップ自体は無音でよい
+
+        // 停止中 (play しない) に n ブロック駆動し L ピークを返す。入力 nullptr = モニタ非干渉。
+        auto stoppedPeak = [](AudioEngine& eng, int n) -> float
+        {
+            juce::AudioBuffer<float> out(2, kBlock);
+            float peak = 0.0f;
+            for (int i = 0; i < n; ++i)
+            {
+                out.clear();
+                float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+                eng.audioDeviceIOCallbackWithContext(nullptr, 0, chans, 2, kBlock, {});
+                peak = juce::jmax(peak, out.getMagnitude(0, 0, kBlock));
+            }
+            return peak;
+        };
+        // 停止時プレビューのパンは synth プレビューと同じ sin/cos 則 (センター = -3dB ≒ 0.707)
+        const float kCenterPan = std::cos(0.5f * juce::MathConstants<float>::halfPi);
+
+        // (1) プラグイン付きトラック: 停止中でもチェーンが処理され、生成音 (0.5) が出力に乗る
+        {
+            Scene s;
+            auto* t = s.addConstTrack(wav, 1.0);     // クリップ有 = clipTracks に載る
+            t->getPluginChain().addPlugin(std::make_unique<GeneratorFakePlugin>(0.5f));
+            s.start();                               // 停止中
+            const float peak = stoppedPeak(s.engine, 4);
+            expect(std::abs(peak - 0.5f * kCenterPan) < 0.02f,
+                   "stopped: plugin-generated preview reaches output (~0.5 * centerPan)");
+        }
+
+        // (2) プラグイン無しトラック: 停止中はチェーンを処理しない → 無音 (クリップも鳴らさない)
+        {
+            Scene s;
+            s.addConstTrack(wav, 1.0);               // プラグイン無し
+            s.start();
+            expect(stoppedPeak(s.engine, 4) < 1.0e-4f,
+                   "stopped: no plugin => silent (clips are not played when stopped)");
+        }
+
+        // (3) ミュートしたプラグイン付きトラック: 停止中もプレビューしない → 無音
+        {
+            Scene s;
+            auto* t = s.addConstTrack(wav, 1.0);
+            t->getPluginChain().addPlugin(std::make_unique<GeneratorFakePlugin>(0.5f));
+            t->setMuted(true);
+            s.start();
+            expect(stoppedPeak(s.engine, 4) < 1.0e-4f, "stopped: muted track => no preview");
         }
     }
 };
