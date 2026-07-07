@@ -164,8 +164,32 @@ private:
         void closeButtonPressed() override;
         juce::AudioPluginInstance* getPlugin() const { return &plugin; }
     private:
+        // ウィンドウのリサイズ制約をプラグインエディタ側の constrainer へ委譲し、タイトルバー等の
+        // 枠分を加味する (JUCE 公式 AudioPluginHost と同じ作法・Melodyne 等の可変エディタ用)。
+        class DecoratorConstrainer : public juce::BorderedComponentBoundsConstrainer
+        {
+        public:
+            explicit DecoratorConstrainer(juce::DocumentWindow& w) : window(w) {}
+            juce::ComponentBoundsConstrainer* getWrappedConstrainer() const override
+            {
+                auto* ed = dynamic_cast<juce::AudioProcessorEditor*>(window.getContentComponent());
+                return ed != nullptr ? ed->getConstrainer() : nullptr;
+            }
+            juce::BorderSize<int> getAdditionalBorder() const override
+            {
+                juce::BorderSize<int> frame;
+                if (auto* peer = window.getPeer())
+                    if (const auto f = peer->getFrameSizeIfPresent())
+                        frame = *f;
+                return frame.addedTo(window.getContentComponentBorder());
+            }
+        private:
+            juce::DocumentWindow& window;
+        };
+
         juce::AudioPluginInstance& plugin;
         juce::AudioProcessorEditor* editor { nullptr };
+        DecoratorConstrainer constrainer { *this };
         std::function<void(PluginEditorWindow*)> onClose;
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginEditorWindow)
     };

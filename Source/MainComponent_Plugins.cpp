@@ -48,16 +48,21 @@ MainComponent::PluginEditorWindow::PluginEditorWindow(
       onClose(std::move(onCloseCb))
 {
     setUsingNativeTitleBar(true);
-    setResizable(false, false);
     setAlwaysOnTop(true);   // 閉じるまで常に最前面
 
     if (auto* ed = plugin.createEditorIfNeeded())
     {
         editor = ed;
         setContentNonOwned(editor, true);
+        // プラグイン側がリサイズ対応 (Melodyne 等) ならウィンドウも可変にする。制約は
+        // エディタの constrainer へ委譲する (下限より小さくできない)。固定サイズのエディタは
+        // 崩れるので従来どおり固定。(JUCE 公式 AudioPluginHost と同じ作法)
+        setConstrainer(&constrainer);
+        setResizable(editor->isResizable(), false);
     }
     else
     {
+        setResizable(false, false);
         auto* lbl = new juce::Label({}, tr(u8"このプラグインは独自エディタを持っていません"));
         lbl->setSize(360, 80);
         lbl->setJustificationType(juce::Justification::centred);
