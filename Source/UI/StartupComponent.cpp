@@ -124,6 +124,9 @@ StartupComponent::StartupComponent(bool showAds)
     addAndMakeVisible(deviceChangeBtn);
     deviceChangeBtn.onClick = [this] { showDeviceDialog(); };
 
+    addAndMakeVisible(settingsBtn);
+    settingsBtn.onClick = [this] { showStartupPreferences(); };
+
     // 共有 XML から起動用 deviceManager を初期化（MainComponent と状態を共有）
     AudioDeviceSettings::initialise(startupDeviceManager, 2, 2);
     startupDeviceManager.addChangeListener(this);
@@ -296,7 +299,7 @@ void StartupComponent::resized()
         auto row = leftCol.removeFromTop(28);
         defaultLocBtn.setBounds(row.removeFromRight(92));
         row.removeFromRight(6);
-        browseLocBtn.setBounds(row.removeFromRight(40));   // 「…」のみなので狭く = 保存先欄が広がる
+        browseLocBtn.setBounds(row.removeFromRight(30));   // 「…」のみなので狭く = 保存先欄が広がる
         row.removeFromRight(6);
         locationEditor.setBounds(row);
         leftCol.removeFromTop(12);
@@ -325,6 +328,10 @@ void StartupComponent::resized()
         row.removeFromRight(6);
         deviceSummaryLabel.setBounds(row);
     }
+
+    // 環境設定ボタン (作成前にアプリ全体設定を開ける)。オーディオI/F 行と作成ボタンの間の空きへ。
+    leftCol.removeFromTop(16);
+    settingsBtn.setBounds(leftCol.removeFromTop(30).removeFromLeft(200));
 
     createBtn.setBounds(leftCol.removeFromBottom(40));
 
@@ -532,6 +539,148 @@ void StartupComponent::showDeviceDialog()
     opts.escapeKeyTriggersCloseButton = true;
     opts.useNativeTitleBar            = true;
     opts.resizable                    = true;
+    opts.launchAsync();
+}
+
+void StartupComponent::showStartupPreferences()
+{
+    // 起動画面用の簡易環境設定: アプリ全体設定 (AppPreferences) + 言語 + 表示倍率のみ。
+    // 各コントロールは即 save し、次に作成/読み込むプロジェクトの MainComponent が
+    // AppPreferences::load() で読み込んで適用する (録音補正/ディスクストリーミング/マルチコア等)。
+    // プロジェクト固有設定 (ビット深度以外の AppSettings) はプロジェクトが無いと意味が無いため出さない。
+    class StartupPrefs : public juce::Component
+    {
+    public:
+        juce::Label    langLabel, scaleLabel, noteLabel;
+        juce::ComboBox langCombo, scaleCombo;
+        juce::ToggleButton tooltipsBtn, recCompBtn, monInsBtn, diskStreamBtn, multicoreBtn, exportDlgBtn;
+        juce::TextButton closeBtn;
+
+        StartupPrefs()
+        {
+            auto setupLabel = [this](juce::Label& l, const juce::String& t) {
+                l.setText(t, juce::dontSendNotification);
+                l.setColour(juce::Label::textColourId, juce::Colours::white);
+                addAndMakeVisible(l);
+            };
+            // トグル: 初期状態を設定し、onClick で load→変更→save (他項目を壊さない)
+            auto setupToggle = [this](juce::ToggleButton& b, const juce::String& t, bool state,
+                                      std::function<void(AppPreferences&, bool)> apply) {
+                b.setButtonText(t);
+                b.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+                b.setToggleState(state, juce::dontSendNotification);
+                b.onClick = [&b, apply] { auto p = AppPreferences::load(); apply(p, b.getToggleState()); p.save(); };
+                addAndMakeVisible(b);
+            };
+
+            const auto prefs = AppPreferences::load();
+
+            // 言語
+            setupLabel(langLabel, tr(u8"言語"));
+            langCombo.addItem(juce::String::fromUTF8(u8"日本語"),   1);
+            langCombo.addItem("English",                          2);
+            langCombo.addItem(juce::String::fromUTF8(u8"简体中文"), 3);
+            langCombo.addItem(juce::String::fromUTF8(u8"繁體中文"), 4);
+            langCombo.addItem(juce::String::fromUTF8(u8"한국어"),   5);
+            int langId = 1;
+            switch (Localisation::getSavedLanguage())
+            {
+                case Localisation::Language::English:            langId = 2; break;
+                case Localisation::Language::SimplifiedChinese:  langId = 3; break;
+                case Localisation::Language::TraditionalChinese: langId = 4; break;
+                case Localisation::Language::Korean:             langId = 5; break;
+                default:                                         langId = 1; break;
+            }
+            langCombo.setSelectedId(langId, juce::dontSendNotification);
+            langCombo.onChange = [this] {
+                auto lang = Localisation::Language::Japanese;
+                switch (langCombo.getSelectedId())
+                {
+                    case 2: lang = Localisation::Language::English;            break;
+                    case 3: lang = Localisation::Language::SimplifiedChinese;  break;
+                    case 4: lang = Localisation::Language::TraditionalChinese; break;
+                    case 5: lang = Localisation::Language::Korean;             break;
+                    default: lang = Localisation::Language::Japanese;          break;
+                }
+                Localisation::saveLanguage(lang);
+                Localisation::install(lang);        // 次に作成/読み込むプロジェクトの画面に反映
+                noteLabel.setVisible(true);
+            };
+            addAndMakeVisible(langCombo);
+
+            // 画面の表示倍率
+            setupLabel(scaleLabel, tr(u8"画面の表示倍率"));
+            static const int kScales[] = { 80, 90, 100, 110, 125, 150, 175, 200 };
+            for (int pct : kScales) scaleCombo.addItem(juce::String(pct) + "%", pct);
+            const int curPct = (int) std::round(prefs.resolvedUiScale() * 100.0);
+            int best = 100, bestDiff = 1 << 30;
+            for (int o : kScales) { int d = std::abs(o - curPct); if (d < bestDiff) { bestDiff = d; best = o; } }
+            scaleCombo.setSelectedId(best, juce::dontSendNotification);
+            scaleCombo.onChange = [this] {
+                auto p = AppPreferences::load();
+                p.uiScale = juce::jlimit(AppPreferences::minUiScale, AppPreferences::maxUiScale,
+                                         scaleCombo.getSelectedId() / 100.0);
+                p.uiScaleUserSet = true;
+                p.save();
+                juce::Desktop::getInstance().setGlobalScaleFactor((float) p.uiScale);   // 即時反映
+            };
+            addAndMakeVisible(scaleCombo);
+
+            // トグル群 (本体環境設定と同じ文言キー = 翻訳を再利用)
+            setupToggle(tooltipsBtn, tr(u8"ボタンの上にマウスを乗せたとき説明 (ツールチップ) を表示する"),
+                        prefs.showTooltips,        [](AppPreferences& p, bool v){ p.showTooltips = v; });
+            setupToggle(recCompBtn,  tr(u8"録音をデバイスのレイテンシ分だけ自動で手前にずらす"),
+                        prefs.recLatencyAutoComp,  [](AppPreferences& p, bool v){ p.recLatencyAutoComp = v; });
+            setupToggle(monInsBtn,   tr(u8"入力モニター中、トラックの INS (インサート FX) を返し音にも通す"),
+                        prefs.monitorThroughInserts,[](AppPreferences& p, bool v){ p.monitorThroughInserts = v; });
+            setupToggle(diskStreamBtn, tr(u8"ディスクストリーミングを使う (再生の読み込みを先読みして音切れを防ぐ)"),
+                        prefs.diskStreaming,       [](AppPreferences& p, bool v){ p.diskStreaming = v; });
+            setupToggle(multicoreBtn, tr(u8"オーディオをマルチコアで処理する (多トラック/重いプラグインで軽くなる)"),
+                        prefs.multicoreAudio,      [](AppPreferences& p, bool v){ p.multicoreAudio = v; });
+            setupToggle(exportDlgBtn, tr(u8"書き出し完了後にダイアログを表示する"),
+                        prefs.showExportCompleteDialog, [](AppPreferences& p, bool v){ p.showExportCompleteDialog = v; });
+
+            noteLabel.setText(tr(u8"※ 言語は次に開く画面から反映されます"), juce::dontSendNotification);
+            noteLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
+            noteLabel.setVisible(false);
+            addAndMakeVisible(noteLabel);
+
+            closeBtn.setButtonText(tr(u8"閉じる"));
+            closeBtn.onClick = [this] {
+                if (auto* dw = findParentComponentOfClass<juce::DialogWindow>()) dw->exitModalState(0);
+            };
+            addAndMakeVisible(closeBtn);
+
+            setSize(520, 360);
+        }
+
+        void paint(juce::Graphics& g) override { g.fillAll(juce::Colour(0xff1a1a1a)); }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(16);
+            auto rowCombo = [&](juce::Label& l, juce::ComboBox& c) {
+                l.setBounds(r.removeFromTop(18));
+                c.setBounds(r.removeFromTop(26).removeFromLeft(220));
+                r.removeFromTop(8);
+            };
+            rowCombo(langLabel,  langCombo);
+            noteLabel.setBounds(langCombo.getBounds().withX(langCombo.getRight() + 8).withWidth(240));
+            rowCombo(scaleLabel, scaleCombo);
+            for (auto* b : { &tooltipsBtn, &recCompBtn, &monInsBtn, &diskStreamBtn, &multicoreBtn, &exportDlgBtn })
+            { b->setBounds(r.removeFromTop(24)); r.removeFromTop(4); }
+            closeBtn.setBounds(r.removeFromBottom(30).removeFromRight(100));
+        }
+    };
+
+    auto* content = new StartupPrefs();
+    juce::DialogWindow::LaunchOptions opts;
+    opts.content.setOwned(content);
+    opts.dialogTitle                  = tr(u8"環境設定");
+    opts.dialogBackgroundColour       = juce::Colour(0xff1a1a1a);
+    opts.escapeKeyTriggersCloseButton = true;
+    opts.useNativeTitleBar            = true;
+    opts.resizable                    = false;
     opts.launchAsync();
 }
 

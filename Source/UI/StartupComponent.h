@@ -44,6 +44,9 @@ private:
     void createNewProject();
     void refreshRecents();
     void showDeviceDialog();
+    // プロジェクト作成前に、アプリ全体設定 (AppPreferences) + 言語 + 表示倍率だけを設定できる
+    // 独立ダイアログ (本体の環境設定はプロジェクト/エンジンに依存するため起動画面では開けない)。
+    void showStartupPreferences();
     void refreshDeviceLabel();
     // 新規プロジェクトの既定サンプルレートを、現在のオーディオデバイスの SR に合わせる
     // (Windows 等でデバイス既定と食い違って音切れするのを防ぐ)。ユーザーが手動で選んだら尊重する。
@@ -82,6 +85,7 @@ private:
     juce::ComboBox   bitDepthBox;
     juce::Label      deviceSummaryLabel;
     juce::TextButton deviceChangeBtn { tr(u8"変更...") };
+    juce::TextButton settingsBtn     { tr(u8"環境設定...") };   // 作成前にアプリ全体設定を開く
     juce::TextButton createBtn       { tr(u8"作成") };
 
     // 起動画面用の AudioDeviceManager（保存済み状態を共有）
