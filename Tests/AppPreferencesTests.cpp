@@ -124,10 +124,19 @@ public:
             AppPreferences p;
             p.lastProjectSampleRate = 48000.0;
             p.lastProjectBitDepth   = 24;
+            p.lastProjectLocation   = "/tmp/UtawaveProjects";
             expect(p.save(), "save succeeds");
             const auto q = AppPreferences::load();
             expect(approxEq(q.lastProjectSampleRate, 48000.0), "last SR round trips (48000)");
             expect(q.lastProjectBitDepth == 24, "last bit depth round trips (24)");
+            expect(q.lastProjectLocation == juce::String("/tmp/UtawaveProjects"),
+                   "last project location round trips");
+            // 空 (デフォルトへリセット) も往復する
+            AppPreferences r;
+            r.lastProjectLocation = {};
+            expect(r.save(), "save empty succeeds");
+            expect(AppPreferences::load().lastProjectLocation.isEmpty(),
+                   "empty location round trips (reset to default)");
         }
     }
 };

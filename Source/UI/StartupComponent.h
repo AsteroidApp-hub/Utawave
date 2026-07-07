@@ -37,6 +37,9 @@ public:
 
 private:
     void chooseLocation();
+    // 新規プロジェクト保存先の既定 (~/Documents/Utawave) と、前回値の永続化。
+    static juce::File defaultProjectLocation();
+    void persistProjectLocation(const juce::String& path);   // 空 = 既定へリセット
     void browseExisting();
     void createNewProject();
     void refreshRecents();
@@ -74,6 +77,7 @@ private:
     juce::TextEditor nameEditor;
     juce::TextEditor locationEditor;
     juce::TextButton browseLocBtn  { tr(u8"参照...") };
+    juce::TextButton defaultLocBtn { tr(u8"デフォルト") };   // 保存先を既定に戻す
     juce::ComboBox   sampleRateBox;
     juce::ComboBox   bitDepthBox;
     juce::Label      deviceSummaryLabel;

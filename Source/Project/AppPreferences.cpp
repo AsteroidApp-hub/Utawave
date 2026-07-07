@@ -65,6 +65,7 @@ AppPreferences AppPreferences::load()
         p.showExportCompleteDialog = xml->getBoolAttribute("showExportCompleteDialog", p.showExportCompleteDialog);
         p.lastProjectSampleRate = xml->getDoubleAttribute("lastProjectSampleRate", p.lastProjectSampleRate);
         p.lastProjectBitDepth   = xml->getIntAttribute("lastProjectBitDepth", p.lastProjectBitDepth);
+        p.lastProjectLocation   = xml->getStringAttribute("lastProjectLocation", p.lastProjectLocation);
         p.diskStreaming      = xml->getBoolAttribute("diskStreaming", p.diskStreaming);
         p.multicoreAudio     = xml->getBoolAttribute("multicoreAudio", p.multicoreAudio);
         // 範囲は LyricsView::kMinFont/kMaxFont と一致させる (UI へ依存させないため数値で持つ)
@@ -90,6 +91,7 @@ bool AppPreferences::save() const
     xml.setAttribute("showExportCompleteDialog", showExportCompleteDialog);
     xml.setAttribute("lastProjectSampleRate", lastProjectSampleRate);
     xml.setAttribute("lastProjectBitDepth", lastProjectBitDepth);
+    xml.setAttribute("lastProjectLocation", lastProjectLocation);
     xml.setAttribute("diskStreaming", diskStreaming);
     xml.setAttribute("multicoreAudio", multicoreAudio);
     xml.setAttribute("lyricsFontSize", lyricsFontSize);

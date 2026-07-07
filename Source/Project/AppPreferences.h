@@ -49,6 +49,10 @@ public:
     double lastProjectSampleRate { 0.0 };
     int    lastProjectBitDepth   { 32 };
 
+    // 前回使った新規プロジェクトの保存先フォルダ (新規作成ダイアログの既定に引き継ぐ)。
+    // 空 = 未設定 (既定の ~/Documents/Utawave を使う。「デフォルト」ボタンで空へ戻す)。
+    juce::String lastProjectLocation;
+
     // ディスクストリーミング (再生時の音声読み込みを先読みスレッドへ分離) を使うか (既定: ON)。
     // ON で audio スレッドのディスク I/O が先読みヒット時ゼロになり、多トラック/低速ディスクでの
     // 取りこぼしを減らす。ミス時は従来の同期読みへフォールバックするので出力は常に正確。

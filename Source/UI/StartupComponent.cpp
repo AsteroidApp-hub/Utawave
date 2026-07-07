@@ -73,14 +73,25 @@ StartupComponent::StartupComponent(bool showAds)
     nameEditor.setSelectAllWhenFocused(true);
     addAndMakeVisible(nameEditor);
 
-    auto defaultLoc = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-                          .getChildFile("Utawave");
-    defaultLoc.createDirectory();
-    locationEditor.setText(defaultLoc.getFullPathName(), juce::dontSendNotification);
+    // 保存先は前回値 (AppPreferences::lastProjectLocation) を引き継ぐ。空なら既定へ。
+    const auto savedLoc = AppPreferences::load().lastProjectLocation;
+    juce::File initLoc = savedLoc.isNotEmpty() ? juce::File(savedLoc) : defaultProjectLocation();
+    initLoc.createDirectory();
+    locationEditor.setText(initLoc.getFullPathName(), juce::dontSendNotification);
     addAndMakeVisible(locationEditor);
 
     addAndMakeVisible(browseLocBtn);
     browseLocBtn.onClick = [this] { chooseLocation(); };
+
+    // 「デフォルト」: 保存先を既定 (~/Documents/Utawave) に戻し、前回値もクリアする
+    addAndMakeVisible(defaultLocBtn);
+    defaultLocBtn.onClick = [this]
+    {
+        auto def = defaultProjectLocation();
+        def.createDirectory();
+        locationEditor.setText(def.getFullPathName(), juce::dontSendNotification);
+        persistProjectLocation({});   // 空 = 既定へリセット (次回起動も既定)
+    };
 
     // SR コンボの項目は、デバイス初期化後に populateSampleRateBox() で「そのデバイスが実際に
     // 対応する SR」だけを列挙する (getAvailableSampleRates)。非対応 SR を選べないようにして
@@ -281,7 +292,9 @@ void StartupComponent::resized()
     {
         locationLabel.setBounds(leftCol.removeFromTop(18));
         auto row = leftCol.removeFromTop(28);
-        browseLocBtn.setBounds(row.removeFromRight(80));
+        defaultLocBtn.setBounds(row.removeFromRight(92));
+        row.removeFromRight(6);
+        browseLocBtn.setBounds(row.removeFromRight(72));
         row.removeFromRight(6);
         locationEditor.setBounds(row);
         leftCol.removeFromTop(12);
@@ -330,6 +343,19 @@ void StartupComponent::resized()
     }
 }
 
+juce::File StartupComponent::defaultProjectLocation()
+{
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("Utawave");
+}
+
+void StartupComponent::persistProjectLocation(const juce::String& path)
+{
+    // 保存先を AppPreferences に記憶する (空 = 既定へリセット)。他項目を壊さないよう load→変更→save。
+    auto p = AppPreferences::load();
+    p.lastProjectLocation = path;
+    p.save();
+}
+
 void StartupComponent::chooseLocation()
 {
     juce::File current(locationEditor.getText());
@@ -345,7 +371,10 @@ void StartupComponent::chooseLocation()
         {
             auto f = fc.getResult();
             if (f.isDirectory())
+            {
                 locationEditor.setText(f.getFullPathName(), juce::dontSendNotification);
+                persistProjectLocation(f.getFullPathName());   // 選んだ保存先を記憶 (次回起動も維持)
+            }
         });
 }
 
@@ -421,6 +450,12 @@ void StartupComponent::createNewProject()
 
     double sr = (double)juce::jmax(1, sampleRateBox.getSelectedId());
     int    bd = juce::jmax(16, bitDepthBox.getSelectedId());
+
+    // 手入力の保存先も次回へ引き継ぐ (既定と同じなら記憶せず既定扱いのまま)。
+    if (loc == defaultProjectLocation())
+        persistProjectLocation({});
+    else
+        persistProjectLocation(loc.getFullPathName());
 
     if (onProjectChosen)
     {
