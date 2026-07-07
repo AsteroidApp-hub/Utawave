@@ -266,6 +266,12 @@ public:
     void setSampleRate(double sr) { sampleRate = sr; }
     // 録音中のライブ波形が伸びる領域だけを部分 repaint する (全面 repaint のちらつき防止)
     void repaintRecordingArea();
+    // 録音中、再生バー付近の「新着波形が載る先端の狭い帯」だけを vblank ごとに部分 repaint する。
+    // ライブ波形レーンは 20Hz の repaintRecordingArea でしか描き直されないため、vblank で滑らかに
+    // 進む再生バーに対して波形の先端が 50ms + レイテンシ分カクついて追従する (Windows の大きめ音声
+    // バッファ + Direct2D で顕著)。先端の狭い帯に絞れば全波形を毎フレーム描き直さずコストを抑えつつ
+    // (draw は clip 域だけパス化する)、波形の先端を再生バーに密着させられる。
+    void repaintLiveLeadingEdge();
     // 指定の時間範囲 [startSec, endSec] を覆う縦帯だけを部分 repaint する。
     // サムネイル非同期ロードの進捗通知で、変わったクリップの領域だけを描き直す用途
     // (全面 repaint だと巨大クリップ全体を fillPath で描き直して数百 ms 固まるため)。

@@ -1075,6 +1075,32 @@ void TimelineView::repaintRecordingArea()
     }
 }
 
+void TimelineView::repaintLiveLeadingEdge()
+{
+    // 再生バー付近の先端帯 (marginSecs) だけを repaint する。ここに新着波形が載るので、
+    // vblank ごとに描き直せば波形の先端が滑らかな再生バーに密着して追従する。draw は
+    // clip 域 (この帯) だけをパス化するため、録音が長くなってもコストは帯幅で頭打ち。
+    // marginSecs はレイテンシ補正 (手動 ±300ms + デバイス往復) と 20Hz 量子化を余裕を持って覆う。
+    auto area = getContentArea();
+    const double bps = bpm / 60.0;
+    constexpr double marginSecs = 0.5;
+    for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+    {
+        auto* tr = trackManager.getTrack(ti);
+        if (!tr || !tr->hasLiveRecording()) continue;
+        const int trackTop = area.getY() + trackManager.getTrackY(ti) - scrollY;
+        const int trackH   = tr->getTotalHeight();
+        const double startSecs = tr->getRecordingStartPos();
+        const double endSecs   = juce::jmax(startSecs, playheadSecs);
+        const double leftSecs  = juce::jmax(startSecs, endSecs - marginSecs);
+        int x1 = (int)(leftSecs * bps * pixelsPerBeat - scrollX) - 2;
+        int x2 = (int)(endSecs  * bps * pixelsPerBeat - scrollX) + 6;
+        x1 = juce::jmax(area.getX(), x1);
+        x2 = juce::jmin(area.getRight(), x2);
+        if (x2 > x1) repaint(x1, trackTop, x2 - x1, trackH);
+    }
+}
+
 bool TimelineView::getRangeForRulerFromSelection(double& start, double& end) const
 {
     // 範囲選択を最優先、無ければ選択クリップ群 (primary + 追加選択) の全体スパン

@@ -1209,6 +1209,13 @@ void MainComponent::onVBlank (double timestampSec)
 
     timelineView.setPlayheadPosition(visualPlayhead);
     propagatePlayheadToPianoRolls(visualPlayhead);
+
+    // 録音中はライブ波形の先端 (再生バー付近・新着データ) を vblank ごとに描き直し、20Hz の
+    // repaintRecordingArea だけでは 50ms + レイテンシ分カクついて追従する波形を、滑らかな
+    // 再生バーに密着させる。帯を絞ってあるので毎フレーム描いても軽い (Windows で顕著だった
+    // 「波形の描画が遅れる」対策)。
+    if (isRecording)
+        timelineView.repaintLiveLeadingEdge();
 }
 
 // ; (JIS の「+」キー位置) で進む / − で戻る。停止中に押している間、ディスプレイ垂直同期ごとに
