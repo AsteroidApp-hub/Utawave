@@ -390,6 +390,10 @@ void MainComponent::openPianoRollFor(MidiClip* clip, Track* track)
         ed->setUndoManager(&undoManager);
         // 自動ページング (再生バーがビュー外へ出たら次ページへ) をアプリ設定から反映
         ed->setPagingEnabled(appPrefs.midiPagingEnabled);
+        // Space = 再生/停止。ピアノロール (独立ウィンドウ) にフォーカスがある間も再生できるよう、
+        // メイン側のトランスポートへ委譲する (Windows で再生できない問題の対策・macOS は
+        // GlobalKeyMonitor 経由なのでこの経路は実質未使用だが害はない)。
+        ed->onTogglePlay = [this] { togglePlay(); };
         // undo/redo で MidiClip が書き換わったときに、現在開いている
         // (作成元と異なる可能性のある) Editor を見つけて再描画させる経路。
         ed->setExternalReloadCallback([this](MidiClip* changedClip)

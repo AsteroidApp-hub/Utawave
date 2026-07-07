@@ -598,6 +598,14 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
         deleteSelected();
         return true;
     }
+    // Space = 再生 / 停止。ピアノロールは独立ウィンドウなので、フォーカス中はここで拾って
+    // メイン側のトランスポートへ委譲しないと Windows で再生できない (macOS は GlobalKeyMonitor が
+    // Space を消費するため keyPressed には届かず、この分岐は Windows/Linux でのみ実質作動する)。
+    if (k == juce::KeyPress::spaceKey)
+    {
+        if (onTogglePlay) onTogglePlay();
+        return true;
+    }
     if (mods.isCommandDown() && k.getKeyCode() == 'A')      { selectAll(); return true; }
     if (mods.isCommandDown() && k.getKeyCode() == 'C')      { copySelected(); return true; }
     if (mods.isCommandDown() && k.getKeyCode() == 'X')      { cutSelected(); return true; }

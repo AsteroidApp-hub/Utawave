@@ -31,6 +31,12 @@ public:
     // 「クリップ start position + 引数」を全体プレイヘッドに反映する。
     std::function<void(double /*secsInClip*/)> onSeek;
 
+    // Space キーで再生 / 停止をトグルする通知。ピアノロールは独立ウィンドウ (always-on-top) の
+    // ため、フォーカスがある間 Space がメイン画面のコマンドへ届かない。macOS は GlobalKeyMonitor が
+    // Space をグローバル捕捉して消費するのでこの経路は使われないが、Windows/Linux にはそれが無く
+    // Space が宙に浮いて「ピアノロールから再生できない」ため、keyPressed からこれを呼ぶ。
+    std::function<void()> onTogglePlay;
+
     // 再生バー位置 (クリップ先頭からの秒数) を更新
     void setPlayheadPosition(double secs);
 
