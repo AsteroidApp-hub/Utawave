@@ -140,6 +140,37 @@ public:
     void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
 };
 
+// 入力を gain 倍する最小スタブ (ゼロレイテンシー)。Pre-Fader がプラグインを通さないことの検証用:
+// Post は gain 倍 / Pre は素の値になるはず。
+class FakeGainPlugin : public juce::AudioPluginInstance
+{
+public:
+    explicit FakeGainPlugin(float g)
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())),
+          gain(g) {}
+    float gain { 1.0f };
+    const juce::String getName() const override { return "Gain"; }
+    void prepareToPlay(double, int) override {}
+    void releaseResources() override {}
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override { b.applyGain(gain); }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi() const override            { return false; }
+    bool producesMidi() const override           { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override              { return false; }
+    int getNumPrograms() override                { return 1; }
+    int getCurrentProgram() override             { return 0; }
+    void setCurrentProgram(int) override         {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override {}
+    void setStateInformation(const void*, int) override {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
+
 // 読み出した WAV/AIFF の情報
 struct AudioFileData
 {
@@ -258,6 +289,7 @@ public:
         testMidiTrackRendersInExport();
         testReverbSendInExport();
         testPluginLatencyCompensation();
+        testPreFaderSkipsPlugins();
         testDither16PerturbsSteadyLevel();
         testDitherSilenceBounded();
         testOverwritesExistingFile();
@@ -1228,6 +1260,48 @@ public:
                 matchesRef(d.samples, "stem track " + juce::String(ti));
             }
         }
+    }
+
+    //==========================================================================
+    // 20c. Pre-Fader は「波形のみ」= プラグイン (Melodyne 等) を通さない (要望)。
+    //      Post-Fader はプラグインを通す。ゲイン×2 プラグインで Pre=素の値 / Post=2倍 を検証。
+    void testPreFaderSkipsPlugins()
+    {
+        beginTest("pre-fader export skips the plugin chain (raw clip only)");
+
+        const float V = 0.3f;
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        auto src = outDir.getChildFile("prefx_src.wav");
+        expect(writeMonoConst(src, (int)(0.1 * kSR), V), "source write");
+
+        auto run = [&](bool preFader) -> AudioFileData
+        {
+            TrackManager tm(fmt);
+            auto* t = tm.addTrack("fx", false);
+            auto* c = t->addClip(src, 0.0, 0.1);
+            c->setFadeInSecs(0.0); c->setFadeOutSecs(0.0);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            t->getPluginChain().addPlugin(std::make_unique<FakeGainPlugin>(2.0f));
+
+            AudioEngine engine; engine.preparePlayback(tm);
+            auto out = outDir.getChildFile(juce::String(preFader ? "prefx_pre" : "prefx_post") + ".wav");
+            auto o = baseOpts(out, 32, 0.1); o.peakGuard = false; o.dither = false;
+            o.preFader = preFader;
+            juce::String err;
+            expect(ExportEngine::render(engine, o, {}, {}, &err), "render: " + err);
+            return readAudio(out);
+        };
+
+        // Post-Fader: プラグイン (×2) が掛かる → 0.6
+        auto post = run(false);
+        expect(post.ok, "post readable");
+        expectAllClose(post.samples, 0, 2.0f * V, 1.0e-5f, "post-fader applies plugin (x2 = 0.6)");
+
+        // Pre-Fader: プラグインを通さない → 素の 0.3 (波形のみ)
+        auto pre = run(true);
+        expect(pre.ok, "pre readable");
+        expectAllClose(pre.samples, 0, V, 1.0e-5f, "pre-fader is raw clip (0.3), plugin NOT applied");
+        expectEquals(pre.len, post.len, "pre/post length identical (no PDC shift in pre)");
     }
 
     //==========================================================================

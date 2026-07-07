@@ -1484,7 +1484,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
         auto noteLat = [&](int ti, Track* trk)
         {
             if (!exportTrackActive(ti, trk, explicitFilter0, includeSet0, anySolo0)) return;
-            const int lat = prepareAndLat(trk);
+            // Pre-Fader は素のクリップ音のみ (プラグインを掛けない) なので遅延補正も不要 = 0。
+            const int lat = preFader ? 0 : prepareAndLat(trk);
             pdcTrackLatById[ti] = lat;
             pdcMaxLat      = juce::jmax(pdcMaxLat, lat);
             pdcMaxTrackIdx = juce::jmax(pdcMaxTrackIdx, ti);
@@ -1645,14 +1646,17 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                         renderClip(snap->clips[(size_t)ci], trackBuf, offlineScratch, posStart, n,
                                    /*preFader*/ true, /*allowStreaming*/ false);
 
+                // Pre-Fader は「波形のみ」= プラグイン (Melodyne 等) を通さない (Vol/Pan/Rev/master も
+                // 通さないのは addTrackOut 側)。Post-Fader のときだけチェーンを通す。
                 auto* track = activeTracks[ai];
-                if (track && track->getPluginChain().getNumPlugins() > 0)
+                if (!preFader && track && track->getPluginChain().getNumPlugins() > 0)
                 {
                     juce::MidiBuffer midi;
                     track->getPluginChain().processBlock(trackBuf, midi, &exportHead);
                 }
 
                 // PDC: 自分より遅いトラックに合わせて遅延させミックスに揃える (再生時と同じ)。
+                // Pre-Fader は上でプラグインを通さない = 遅延補正も無効 (noteLat で lat=0)。
                 applyTrackDelay(trackDelays, tidx, trackBuf, n);
 
                 addTrackOut(track, trackBuf);
