@@ -104,6 +104,17 @@ public:
             expect(q.recLatencyAutoComp == false, "auto comp round trips");
             expect(approxEq(q.recLatencyManualMs, -37.0), "manual offset round trips");
         }
+
+        beginTest("save/load round trip for export-complete dialog toggle");
+        {
+            // 既定 true。false を保存 → load で false が保たれる (書き出し完了ダイアログの表示設定)
+            expect(AppPreferences{}.showExportCompleteDialog, "default is true");
+            AppPreferences p;
+            p.showExportCompleteDialog = false;
+            expect(p.save(), "save succeeds");
+            expect(AppPreferences::load().showExportCompleteDialog == false,
+                   "showExportCompleteDialog round trips false");
+        }
     }
 };
 

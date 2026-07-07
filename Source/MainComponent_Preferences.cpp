@@ -24,6 +24,7 @@ void MainComponent::showPreferences()
         std::function<void(int)>   onLanguageChanged;   // 1=日本語, 2=English
         juce::ToggleButton followSelBtn, rtzBtn, autoNormBtn, zoomMouseBtn, peakGuardBtn, zeroCrossBtn, stripMetaBtn;
         juce::ToggleButton showMidiExportBtn;   // 初期状態 / コールバックは showPreferences 側で設定 (アプリ全体設定)
+        juce::ToggleButton exportDoneDlgBtn;    // 書き出し完了ダイアログ表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton tooltipsBtn;         // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
@@ -58,6 +59,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onZeroCrossChanged;
         std::function<void(bool)>  onStripMetaChanged;
         std::function<void(bool)>  onShowMidiExportChanged;
+        std::function<void(bool)>  onExportDoneDlgChanged;
         std::function<void(bool)>  onMidiPagingChanged;
         std::function<void(bool)>  onTooltipsChanged;
         std::function<void(bool)>  onShowAdsChanged;
@@ -412,6 +414,14 @@ void MainComponent::showPreferences()
             };
             addAndMakeVisible(showMidiExportBtn);
 
+            // 書き出し完了ダイアログの表示切替 (アプリ全体設定・2 ミックス / stems 共用)。初期状態は showPreferences 側
+            exportDoneDlgBtn.setButtonText(tr(u8"書き出し完了後にダイアログを表示する"));
+            exportDoneDlgBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            exportDoneDlgBtn.onClick = [this] {
+                if (onExportDoneDlgChanged) onExportDoneDlgChanged(exportDoneDlgBtn.getToggleState());
+            };
+            addAndMakeVisible(exportDoneDlgBtn);
+
             // 起動画面の広告表示切替 (広告がコンパイル時有効なビルドのみ表示。初期状態は showPreferences 側)
             if (adsUi)
             {
@@ -519,6 +529,7 @@ void MainComponent::showPreferences()
             // ── 書き出し ──
             y += gSec; y = label(exportLabel, y);
             y = check(peakGuardBtn, y);
+            y = check(exportDoneDlgBtn, y);
             y = check(showMidiExportBtn, y);
 
             if (adsUi)
@@ -697,6 +708,13 @@ void MainComponent::showPreferences()
         appPrefs.save();
         menuItemsChanged();   // ファイルメニューを再構築 (項目の表示/非表示を即反映)
     };
+    // 書き出し完了ダイアログの表示 (アプリ全体設定・2 ミックス / stems 共用)。即時保存のみ
+    // (次の書き出しから反映。markProjectDirty は呼ばない)。
+    dlg->exportDoneDlgBtn.setToggleState(appPrefs.showExportCompleteDialog, juce::dontSendNotification);
+    dlg->onExportDoneDlgChanged = [this](bool v) {
+        appPrefs.showExportCompleteDialog = v;
+        appPrefs.save();
+    };
     // MIDI ピアノロールの自動ページング (アプリ全体設定)。即時保存し、開いている
     // ピアノロールへ即反映する (次に開く窓は openPianoRollFor で反映される)。
     dlg->midiPagingBtn.setToggleState(appPrefs.midiPagingEnabled, juce::dontSendNotification);
@@ -812,6 +830,7 @@ void MainComponent::showPreferences()
         // アプリ全体設定 (MIDI 書き出しメニュー / 広告表示 / 録音レイテンシ補正) も既定に戻す
         const AppPreferences defPrefs;
         appPrefs.showMidiExportMenu = defPrefs.showMidiExportMenu;
+        appPrefs.showExportCompleteDialog = defPrefs.showExportCompleteDialog;
         appPrefs.showAds            = defPrefs.showAds;
         appPrefs.midiPagingEnabled  = defPrefs.midiPagingEnabled;
         appPrefs.recLatencyAutoComp = defPrefs.recLatencyAutoComp;
@@ -831,6 +850,7 @@ void MainComponent::showPreferences()
         audioEngine.setMulticoreAudioEnabled(appPrefs.multicoreAudio);
         syncInputMonitorStateToEngine();   // モニタ FX 経路を既定 (ON) に戻す
         dlg->showMidiExportBtn.setToggleState(appPrefs.showMidiExportMenu, juce::dontSendNotification);
+        dlg->exportDoneDlgBtn.setToggleState(appPrefs.showExportCompleteDialog, juce::dontSendNotification);
         dlg->midiPagingBtn.setToggleState(appPrefs.midiPagingEnabled, juce::dontSendNotification);
         if (AppPreferences::adsCompiledIn())
             dlg->showAdsBtn.setToggleState(appPrefs.showAds, juce::dontSendNotification);

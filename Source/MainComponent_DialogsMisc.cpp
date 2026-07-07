@@ -800,15 +800,81 @@ void MainComponent::showExportDialog()
                     outFolder.startAsProcess();
             }
 
-            juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                .withIconType(juce::MessageBoxIconType::InfoIcon)
-                .withTitle(tr(u8"書き出し完了"))
-                .withMessage(stems
+            // 完了ダイアログは環境設定「書き出し完了ダイアログを表示」(2 ミックス / stems 共用) が
+            // ON のときだけ出す。出力フォルダを開く (revealAfter) はこの設定とは独立。
+            if (appPrefs.showExportCompleteDialog)
+            {
+                const juce::String msg = stems
                     ? (tr(u8"トラック書き出しが完了しました（")
                        + juce::String(done) + tr(u8" ファイル）：\n")
                        + folderPath.getFullPathName())
-                    : (tr(u8"書き出しが完了しました:\n") + lastWritten.getFullPathName()))
-                .withButton("OK"), nullptr);
+                    : (tr(u8"書き出しが完了しました:\n") + lastWritten.getFullPathName());
+
+                // 「次回から表示しない」チェック付きダイアログ。チェックすると設定を OFF にする
+                // (環境設定のトグルと同じ appPrefs.showExportCompleteDialog を共有)。
+                class ExportDoneContent : public juce::Component
+                {
+                public:
+                    juce::TextEditor   msgBox;
+                    juce::ToggleButton dontShowBtn;
+                    juce::TextButton   okBtn;
+                    std::function<void(bool)> onClose;   // (次回から非表示か)
+
+                    explicit ExportDoneContent(const juce::String& message)
+                    {
+                        msgBox.setMultiLine(true, true);
+                        msgBox.setReadOnly(true);
+                        msgBox.setScrollbarsShown(false);
+                        msgBox.setCaretVisible(false);
+                        msgBox.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff2a2a2a));
+                        msgBox.setColour(juce::TextEditor::outlineColourId,    juce::Colours::transparentBlack);
+                        msgBox.setColour(juce::TextEditor::textColourId,       juce::Colours::white);
+                        msgBox.setText(message, false);
+                        addAndMakeVisible(msgBox);
+
+                        dontShowBtn.setButtonText(tr(u8"次回から表示しない"));
+                        dontShowBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+                        addAndMakeVisible(dontShowBtn);
+
+                        okBtn.setButtonText("OK");
+                        addAndMakeVisible(okBtn);
+                        okBtn.onClick = [this] {
+                            if (onClose) onClose(dontShowBtn.getToggleState());
+                            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                                dw->exitModalState(0);
+                        };
+
+                        setSize(480, 170);
+                    }
+                    void paint(juce::Graphics& g) override { g.fillAll(juce::Colour(0xff2a2a2a)); }
+                    void resized() override
+                    {
+                        auto r = getLocalBounds().reduced(16);
+                        okBtn.setBounds(r.removeFromBottom(30).removeFromRight(90));
+                        r.removeFromBottom(10);
+                        dontShowBtn.setBounds(r.removeFromBottom(26));
+                        r.removeFromBottom(10);
+                        msgBox.setBounds(r);
+                    }
+                };
+
+                auto* content = new ExportDoneContent(msg);
+                content->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
+                                   (bool dontShow)
+                {
+                    if (auto* self = safe.getComponent())
+                        if (dontShow) { self->appPrefs.showExportCompleteDialog = false; self->appPrefs.save(); }
+                };
+
+                juce::DialogWindow::LaunchOptions opts;
+                opts.content.setOwned(content);
+                opts.dialogTitle = tr(u8"書き出し完了");
+                opts.dialogBackgroundColour = juce::Colour(0xff2a2a2a);
+                opts.escapeKeyTriggersCloseButton = true;
+                opts.useNativeTitleBar = true;
+                opts.resizable = false;
+                opts.launchAsync();
+            }
         }
         else if (err.isNotEmpty())
         {

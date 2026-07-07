@@ -62,6 +62,7 @@ AppPreferences AppPreferences::load()
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
+        p.showExportCompleteDialog = xml->getBoolAttribute("showExportCompleteDialog", p.showExportCompleteDialog);
         p.diskStreaming      = xml->getBoolAttribute("diskStreaming", p.diskStreaming);
         p.multicoreAudio     = xml->getBoolAttribute("multicoreAudio", p.multicoreAudio);
         // 範囲は LyricsView::kMinFont/kMaxFont と一致させる (UI へ依存させないため数値で持つ)
@@ -84,6 +85,7 @@ bool AppPreferences::save() const
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
+    xml.setAttribute("showExportCompleteDialog", showExportCompleteDialog);
     xml.setAttribute("diskStreaming", diskStreaming);
     xml.setAttribute("multicoreAudio", multicoreAudio);
     xml.setAttribute("lyricsFontSize", lyricsFontSize);
