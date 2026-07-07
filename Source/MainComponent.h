@@ -13,6 +13,7 @@
 #include "Edit/EditActions.h"
 #include "Project/ProjectManager.h"
 #include "Project/AppPreferences.h"
+#include "Export/ExportEngine.h"   // runExport の ExportEngine::Options 引数のため
 #include "UI/Toolbar.h"
 #include "UI/TrackHeaderPanel.h"
 #include "UI/TimelineView.h"
@@ -132,6 +133,11 @@ private:
     void importMidiFromFile(const juce::File& midiFile, double dropTimeOverride);
     void showPreferences();
     void showExportDialog();
+    // 書き出し本体 (ジョブ構築 → モーダル ExportTask → 完了処理)。showExportDialog の onExport
+    // ラムダから委譲する。ラムダ内でやると exitModalState 後の runThread (入れ子モーダル) 中に
+    // onExport クロージャ (ExportDialog 所有) が破棄され captured this が dangling になるため、
+    // this を明示レシーバに取れるメンバ関数へ分離している。
+    void runExport(const ExportEngine::Options& optionsIn);
     void showMidiExportDialog();   // MIDI (SMF) を書き出す。設定でメニュー表示を ON にした時のみ使用
     void showPluginManager();
     void showAboutDialog();

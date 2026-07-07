@@ -588,8 +588,20 @@ void MainComponent::showExportDialog()
     };
     dialog->onExport = [this, w](const ExportEngine::Options& optionsIn)
     {
+        // 書き出し本体はメンバ関数 runExport へ委譲する。この onExport クロージャは ExportDialog が
+        // 所有しており、下の exitModalState でダイアログ破棄が (非同期に) 予約される → 書き出し中の
+        // runThread (入れ子モーダル) でメッセージが回るとこのクロージャが解放される。ラムダ本体で
+        // captured this を触り続けると解放後に freed メモリを読む (v1.0.0 で書き出し完了時に UAF
+        // クラッシュ)。メンバ関数なら this は呼び出し時の明示レシーバ (スタック) で安定し、クロージャ
+        // 解放後の captured this 参照を避けられる。exitModalState は非同期削除なので、この直後の
+        // runExport 呼び出し (this の読み出し) はまだクロージャ生存下 = 安全。
         if (w) w->exitModalState(0);
+        runExport(optionsIn);
+    };
+}
 
+void MainComponent::runExport(const ExportEngine::Options& optionsIn)
+{
         // ピーク超過保護フラグは環境設定からセット
         ExportEngine::Options options = optionsIn;
         options.peakGuard = appSettings.exportPeakGuard;
@@ -913,7 +925,6 @@ void MainComponent::showExportDialog()
                 .withMessage(err)
                 .withButton("OK"), nullptr);
         }
-    };
 }
 
 
