@@ -183,6 +183,11 @@ private:
     // ヘッダー内のローカル座標 → INS スロットインデックス（外なら -1）
     int  findInsertSlotAt(juce::Point<int> localPos) const;
 
+    // トラック右クリックメニューの結果処理。showMenuAsync のコールバックから SafePointer で
+    // 生存確認してから呼ぶ (メニュー表示中に TrackHeaderPanel::refresh 等でこのビューが
+    // 破棄されると、生 this キャプチャのラムダは dangling になり UAF クラッシュするため)。
+    void handleTrackContextMenuResult(int result);
+
     // 入力レベル（dB）
     float inPeakL { -96.0f }, inPeakR { -96.0f };
     float inVUL   { -96.0f }, inVUR   { -96.0f };

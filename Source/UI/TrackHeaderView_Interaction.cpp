@@ -65,20 +65,25 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
                 m.addSeparator();
                 m.addItem(3, tr(u8"削除"));
                 const int slotIdx = i;
+                // メニュー表示中に TrackHeaderPanel::refresh 等でこのビューが破棄されうるため
+                // 生 this を捕捉せず SafePointer で生存確認する (クラッシュレポート id29 の UAF 対策)
+                juce::Component::SafePointer<TrackHeaderView> safe(this);
                 m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(fxChips[i]),
-                    [this, slotIdx](int result)
+                    [safe, slotIdx](int result)
                     {
+                        auto* self = safe.getComponent();
+                        if (self == nullptr) return;
                         switch (result)
                         {
-                            case 1: if (onPluginEditRequest) onPluginEditRequest(slotIdx); break;
-                            case 2: if (onPluginBypassRequest) onPluginBypassRequest(slotIdx);
+                            case 1: if (self->onPluginEditRequest) self->onPluginEditRequest(slotIdx); break;
+                            case 2: if (self->onPluginBypassRequest) self->onPluginBypassRequest(slotIdx);
                                     break;
-                            case 3: if (onPluginRemoveRequest) onPluginRemoveRequest(slotIdx); break;
-                            case 4: if (onPluginSwapRequest)
-                                        onPluginSwapRequest(slotIdx, slotIdx - 1);
+                            case 3: if (self->onPluginRemoveRequest) self->onPluginRemoveRequest(slotIdx); break;
+                            case 4: if (self->onPluginSwapRequest)
+                                        self->onPluginSwapRequest(slotIdx, slotIdx - 1);
                                     break;
-                            case 5: if (onPluginSwapRequest)
-                                        onPluginSwapRequest(slotIdx, slotIdx + 1);
+                            case 5: if (self->onPluginSwapRequest)
+                                        self->onPluginSwapRequest(slotIdx, slotIdx + 1);
                                     break;
                             default: break;
                         }
@@ -151,155 +156,15 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
         // マウス位置でポップアップ (デフォルトの withTargetComponent はコンポーネント基準で
         // 右クリックすると枠下に出てしまうため、現在のマウススクリーン座標を指定する)
         const auto mouseScr = juce::Desktop::getMousePosition();
+        // メニュー表示中に TrackHeaderPanel::refresh 等でこのビューが破棄されうるため
+        // 生 this を捕捉せず SafePointer で生存確認してからメンバ関数へ委譲する
+        // (クラッシュレポート id29 の UAF 対策)
+        juce::Component::SafePointer<TrackHeaderView> safe(this);
         m.showMenuAsync(juce::PopupMenu::Options()
                             .withTargetScreenArea({ mouseScr.x, mouseScr.y, 1, 1 }),
-            [this](int result) {
-                if (result >= 100 && result <= 107) {
-                    juce::Colour cols[8] = {
-                        juce::Colour(0xff3a6ea5), juce::Colour(0xff5aa55a),
-                        juce::Colour(0xffa55a5a), juce::Colour(0xffa5925a),
-                        juce::Colour(0xff7a5aa5), juce::Colour(0xff5a9ea5),
-                        juce::Colour(0xffa55a92), juce::Colour(0xff5a7aa5)
-                    };
-                    const juce::Colour newCol = cols[result - 100];
-                    editTrackUndoable([this, newCol] { track.setColour(newCol); });
-                    repaint();
-                    if (onChanged) onChanged();
-                }
-                else if (result == 200) {
-                    if (onDeleteRequest) onDeleteRequest();
-                }
-                else if (result == 201) {
-                    // Option (Mac) / Alt (Win) 押下中はテイクリストを複製しない (Lane 0 のみ)
-                    const bool excludeTakes = juce::ModifierKeys::getCurrentModifiers().isAltDown();
-                    if (onDuplicateRequest) onDuplicateRequest(!excludeTakes);
-                }
-                else if (result >= 400 && result < 500) {
-                    if (onPluginEditRequest) onPluginEditRequest(result - 400);
-                }
-                else if (result >= 500 && result < 600) {
-                    if (onPluginRemoveRequest) onPluginRemoveRequest(result - 500);
-                }
-                else if (result == 600) {
-                    // ラウドネスを -18 LUFS に合わせる: lane 0 の全クリップを連結して測定
-                    auto* lane = track.getLane(0);
-                    if (lane == nullptr || lane->clips.empty())
-                    {
-                        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                            .withIconType(juce::MessageBoxIconType::WarningIcon)
-                            .withTitle(tr(u8"ラウドネス測定"))
-                            .withMessage(tr(u8"このトラックには測定可能なクリップがありません。"))
-                            .withButton("OK"), nullptr);
-                        return;
-                    }
-
-                    auto& fmt = track.getFormatManager();
-                    // 最初に読めるクリップから sample rate / channels を取得
-                    double sr = 0.0; int numCh = 0;
-                    for (auto& c : lane->clips)
-                    {
-                        std::unique_ptr<juce::AudioFormatReader> r(fmt.createReaderFor(c->getFile()));
-                        if (r && r->sampleRate > 0.0 && r->numChannels > 0)
-                        {
-                            sr = r->sampleRate; numCh = (int) r->numChannels; break;
-                        }
-                    }
-                    if (sr <= 0.0 || numCh <= 0)
-                    {
-                        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                            .withIconType(juce::MessageBoxIconType::WarningIcon)
-                            .withTitle(tr(u8"ラウドネス測定"))
-                            .withMessage(tr(u8"クリップを読み込めませんでした。"))
-                            .withButton("OK"), nullptr);
-                        return;
-                    }
-
-                    LufsMeter::Measurer measurer(sr, numCh);
-                    // 開始位置順にソートして測定
-                    std::vector<AudioClip*> sorted;
-                    for (auto& c : lane->clips) sorted.push_back(c.get());
-                    std::sort(sorted.begin(), sorted.end(),
-                              [](AudioClip* a, AudioClip* b)
-                              { return a->getStartPosition() < b->getStartPosition(); });
-
-                    for (auto* c : sorted)
-                    {
-                        std::unique_ptr<juce::AudioFormatReader> reader(fmt.createReaderFor(c->getFile()));
-                        if (!reader || reader->sampleRate <= 0.0) continue;
-                        const double clipSr = reader->sampleRate;
-                        const int    clipCh = (int) reader->numChannels;
-                        if (std::abs(clipSr - sr) > 1.0 || clipCh != numCh) continue;
-
-                        const juce::int64 startS = (juce::int64) juce::jmax(0.0, c->getFileOffset() * clipSr);
-                        const juce::int64 endBy  = (juce::int64) ((c->getFileOffset() + c->getDuration()) * clipSr);
-                        const juce::int64 endS   = juce::jmin(reader->lengthInSamples, endBy);
-                        if (endS <= startS) continue;
-
-                        measurer.resetFilters();
-                        const int chunk = juce::jmax(1024, (int)(clipSr * 0.05));
-                        juce::AudioBuffer<float> buf(clipCh, chunk);
-                        juce::int64 pos = startS;
-                        while (pos < endS)
-                        {
-                            const int n = (int) juce::jmin((juce::int64) chunk, endS - pos);
-                            buf.clear();
-                            reader->read(&buf, 0, n, pos, true, true);
-                            juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), clipCh, 0, n);
-                            measurer.processBuffer(view, c->getGain());
-                            pos += n;
-                        }
-                    }
-
-                    const double measuredLufs = measurer.getIntegratedLufs();
-                    if (!std::isfinite(measuredLufs))
-                    {
-                        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                            .withIconType(juce::MessageBoxIconType::WarningIcon)
-                            .withTitle(tr(u8"ラウドネス測定"))
-                            .withMessage(tr(u8"ラウドネスを測定できませんでした。\nクリップが短すぎるか、無音が多すぎます。"))
-                            .withButton("OK"), nullptr);
-                        return;
-                    }
-
-                    // 現在の track Vol を反映した「出力ラウドネス」を表示用に算出
-                    const double currentVolDb    = (double) track.getVolume();
-                    const double effectiveLufs   = measuredLufs + currentVolDb;
-                    const double targetLufs      = (double) loudnessTargetLufs;
-                    const double newVolUnclamped = targetLufs - measuredLufs;
-                    const double newVolDb        = juce::jlimit(-60.0, 6.0, newVolUnclamped);
-                    const double adjustmentDb    = newVolDb - currentVolDb;
-
-                    auto fmt2 = [](double v) {
-                        return (v >= 0.0 ? juce::String("+") : juce::String())
-                               + juce::String(v, 1);
-                    };
-                    juce::String msg = tr(u8"現在のラウドネス: ")
-                        + juce::String(effectiveLufs, 1) + " LUFS\n"
-                        + tr(u8"ターゲット: ") + juce::String(targetLufs, 1) + " LUFS\n"
-                        + tr(u8"トラック Vol: ") + fmt2(currentVolDb) + " dB → "
-                        + fmt2(newVolDb) + " dB (" + fmt2(adjustmentDb) + " dB)";
-                    if (std::abs(newVolUnclamped - newVolDb) > 0.05)
-                        msg += tr(u8"\n※ Vol の上限/下限により制限されました");
-                    msg += tr(u8"\n\n適用しますか?");
-
-                    juce::Component::SafePointer<TrackHeaderView> safe(this);
-                    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                        .withIconType(juce::MessageBoxIconType::QuestionIcon)
-                        .withTitle(tr(u8"ラウドネス調整"))
-                        .withMessage(msg)
-                        .withButton(tr(u8"適用"))
-                        .withButton(tr(u8"キャンセル")),
-                        [safe, newVolDb](int r)
-                        {
-                            if (r != 1) return;
-                            auto* self = safe.getComponent();
-                            if (self == nullptr) return;
-                            self->getTrack().setVolume((float) newVolDb);
-                            self->volSlider.setValue(newVolDb, juce::dontSendNotification);
-                            if (self->onChanged) self->onChanged();
-                            self->repaint();
-                        });
-                }
+            [safe](int result) {
+                if (auto* self = safe.getComponent())
+                    self->handleTrackContextMenuResult(result);
             });
         return;
     }
@@ -372,6 +237,159 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
             }
             return;
         }
+    }
+}
+
+// トラック右クリックメニューの結果処理。showMenuAsync のコールバックは SafePointer で
+// 生存確認してからここへ委譲する (メニュー表示中にトラック削除/refresh でこのビューが
+// 破棄されると、生 this キャプチャのラムダは UAF になるため)。
+void TrackHeaderView::handleTrackContextMenuResult(int result)
+{
+    if (result >= 100 && result <= 107) {
+        juce::Colour cols[8] = {
+            juce::Colour(0xff3a6ea5), juce::Colour(0xff5aa55a),
+            juce::Colour(0xffa55a5a), juce::Colour(0xffa5925a),
+            juce::Colour(0xff7a5aa5), juce::Colour(0xff5a9ea5),
+            juce::Colour(0xffa55a92), juce::Colour(0xff5a7aa5)
+        };
+        const juce::Colour newCol = cols[result - 100];
+        editTrackUndoable([this, newCol] { track.setColour(newCol); });
+        repaint();
+        if (onChanged) onChanged();
+    }
+    else if (result == 200) {
+        if (onDeleteRequest) onDeleteRequest();
+    }
+    else if (result == 201) {
+        // Option (Mac) / Alt (Win) 押下中はテイクリストを複製しない (Lane 0 のみ)
+        const bool excludeTakes = juce::ModifierKeys::getCurrentModifiers().isAltDown();
+        if (onDuplicateRequest) onDuplicateRequest(!excludeTakes);
+    }
+    else if (result >= 400 && result < 500) {
+        if (onPluginEditRequest) onPluginEditRequest(result - 400);
+    }
+    else if (result >= 500 && result < 600) {
+        if (onPluginRemoveRequest) onPluginRemoveRequest(result - 500);
+    }
+    else if (result == 600) {
+        // ラウドネスを -18 LUFS に合わせる: lane 0 の全クリップを連結して測定
+        auto* lane = track.getLane(0);
+        if (lane == nullptr || lane->clips.empty())
+        {
+            juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle(tr(u8"ラウドネス測定"))
+                .withMessage(tr(u8"このトラックには測定可能なクリップがありません。"))
+                .withButton("OK"), nullptr);
+            return;
+        }
+
+        auto& fmt = track.getFormatManager();
+        // 最初に読めるクリップから sample rate / channels を取得
+        double sr = 0.0; int numCh = 0;
+        for (auto& c : lane->clips)
+        {
+            std::unique_ptr<juce::AudioFormatReader> r(fmt.createReaderFor(c->getFile()));
+            if (r && r->sampleRate > 0.0 && r->numChannels > 0)
+            {
+                sr = r->sampleRate; numCh = (int) r->numChannels; break;
+            }
+        }
+        if (sr <= 0.0 || numCh <= 0)
+        {
+            juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle(tr(u8"ラウドネス測定"))
+                .withMessage(tr(u8"クリップを読み込めませんでした。"))
+                .withButton("OK"), nullptr);
+            return;
+        }
+
+        LufsMeter::Measurer measurer(sr, numCh);
+        // 開始位置順にソートして測定
+        std::vector<AudioClip*> sorted;
+        for (auto& c : lane->clips) sorted.push_back(c.get());
+        std::sort(sorted.begin(), sorted.end(),
+                  [](AudioClip* a, AudioClip* b)
+                  { return a->getStartPosition() < b->getStartPosition(); });
+
+        for (auto* c : sorted)
+        {
+            std::unique_ptr<juce::AudioFormatReader> reader(fmt.createReaderFor(c->getFile()));
+            if (!reader || reader->sampleRate <= 0.0) continue;
+            const double clipSr = reader->sampleRate;
+            const int    clipCh = (int) reader->numChannels;
+            if (std::abs(clipSr - sr) > 1.0 || clipCh != numCh) continue;
+
+            const juce::int64 startS = (juce::int64) juce::jmax(0.0, c->getFileOffset() * clipSr);
+            const juce::int64 endBy  = (juce::int64) ((c->getFileOffset() + c->getDuration()) * clipSr);
+            const juce::int64 endS   = juce::jmin(reader->lengthInSamples, endBy);
+            if (endS <= startS) continue;
+
+            measurer.resetFilters();
+            const int chunk = juce::jmax(1024, (int)(clipSr * 0.05));
+            juce::AudioBuffer<float> buf(clipCh, chunk);
+            juce::int64 pos = startS;
+            while (pos < endS)
+            {
+                const int n = (int) juce::jmin((juce::int64) chunk, endS - pos);
+                buf.clear();
+                reader->read(&buf, 0, n, pos, true, true);
+                juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), clipCh, 0, n);
+                measurer.processBuffer(view, c->getGain());
+                pos += n;
+            }
+        }
+
+        const double measuredLufs = measurer.getIntegratedLufs();
+        if (!std::isfinite(measuredLufs))
+        {
+            juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle(tr(u8"ラウドネス測定"))
+                .withMessage(tr(u8"ラウドネスを測定できませんでした。\nクリップが短すぎるか、無音が多すぎます。"))
+                .withButton("OK"), nullptr);
+            return;
+        }
+
+        // 現在の track Vol を反映した「出力ラウドネス」を表示用に算出
+        const double currentVolDb    = (double) track.getVolume();
+        const double effectiveLufs   = measuredLufs + currentVolDb;
+        const double targetLufs      = (double) loudnessTargetLufs;
+        const double newVolUnclamped = targetLufs - measuredLufs;
+        const double newVolDb        = juce::jlimit(-60.0, 6.0, newVolUnclamped);
+        const double adjustmentDb    = newVolDb - currentVolDb;
+
+        auto fmt2 = [](double v) {
+            return (v >= 0.0 ? juce::String("+") : juce::String())
+                   + juce::String(v, 1);
+        };
+        juce::String msg = tr(u8"現在のラウドネス: ")
+            + juce::String(effectiveLufs, 1) + " LUFS\n"
+            + tr(u8"ターゲット: ") + juce::String(targetLufs, 1) + " LUFS\n"
+            + tr(u8"トラック Vol: ") + fmt2(currentVolDb) + " dB → "
+            + fmt2(newVolDb) + " dB (" + fmt2(adjustmentDb) + " dB)";
+        if (std::abs(newVolUnclamped - newVolDb) > 0.05)
+            msg += tr(u8"\n※ Vol の上限/下限により制限されました");
+        msg += tr(u8"\n\n適用しますか?");
+
+        juce::Component::SafePointer<TrackHeaderView> safe(this);
+        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::QuestionIcon)
+            .withTitle(tr(u8"ラウドネス調整"))
+            .withMessage(msg)
+            .withButton(tr(u8"適用"))
+            .withButton(tr(u8"キャンセル")),
+            [safe, newVolDb](int r)
+            {
+                if (r != 1) return;
+                auto* self = safe.getComponent();
+                if (self == nullptr) return;
+                self->getTrack().setVolume((float) newVolDb);
+                self->volSlider.setValue(newVolDb, juce::dontSendNotification);
+                if (self->onChanged) self->onChanged();
+                self->repaint();
+            });
     }
 }
 
