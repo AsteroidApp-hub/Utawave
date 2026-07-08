@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
 
 # ── macOS: Universal (Intel + Apple Silicon) バイナリ ──
 # 既定はビルドマシンのアーキのみ (ローカル開発を速く保つ)。配布ビルド (CI) は
