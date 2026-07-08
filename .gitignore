@@ -42,3 +42,4 @@
 
 # リリースごとの Windows シンボル (PDB) のローカル保管。配布物ではなくコミットしない
 release-symbols/
+/TestBuilds/
