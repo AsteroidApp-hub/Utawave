@@ -239,6 +239,9 @@ public:
     int  getAudioWorkerCount() const      { return workerPool.getNumWorkers(); }
     // テスト用: 次回 audioDeviceAboutToStart で起動するワーカー数を固定する (-1 = 自動 = コア数-2)。
     void setForcedAudioWorkerCountForTests(int n) { forcedWorkerCount = n; }
+    // テスト用: 書き出し中フラグを直接切り替える (書き出し中はモニタ返し/停止時プレビューが
+    // 休止することの検証用。本番は renderOfflineRange が RAII で set/reset する)。
+    void setOfflineRenderActiveForTests(bool v) { offlineRenderActive.store(v); }
 
     // Input monitoring
     void setInputMonitoringActive(bool b) { inputMonitoringActive.store(b); }
@@ -475,8 +478,9 @@ private:
 
     std::atomic<bool>  playing         { false };
     // オフライン書き出し (renderOfflineRange) の実行中フラグ。書き出しは別スレッドで同じ
-    // PluginChain の processBlock を叩くため、停止時ブランチのプラグインプレビューが同じ
-    // チェーンを並行処理して書き出し音声を壊さないよう、書き出し中はプレビューをスキップする。
+    // PluginChain の processBlock を叩くため、停止時ブランチのプラグインプレビューと
+    // 入力モニタ返し (mixInputMonitoring) が同じチェーンを並行処理して書き出し音声を
+    // 壊さないよう、書き出し中はプレビューとモニタ返しの両方をスキップする。
     std::atomic<bool>  offlineRenderActive { false };
     std::atomic<double> currentPosition { 0.0 };
     std::atomic<float> masterGain      { 1.0f };

@@ -17,8 +17,7 @@ void PluginChain::addPlugin(std::unique_ptr<juce::AudioPluginInstance> plugin)
     // 再 prepareToPlay する際は releaseResources してから行う（Nectar 4 等で必須）。
     plugin->releaseResources();
     plugin->disableNonMainBuses();
-    const double psr = preparedSampleRate.load();
-    const int    pbs = preparedBlockSize.load();
+    const auto [psr, pbs] = getPrepared();
     const double sr = psr > 0.0 ? psr : 48000.0;
     const int    bs = pbs > 0   ? pbs : 512;
     plugin->setPlayConfigDetails(2, 2, sr, bs);
@@ -41,8 +40,7 @@ void PluginChain::insertPluginAt(int slotIdx, std::unique_ptr<juce::AudioPluginI
 
     plugin->releaseResources();
     plugin->disableNonMainBuses();
-    const double psr = preparedSampleRate.load();
-    const int    pbs = preparedBlockSize.load();
+    const auto [psr, pbs] = getPrepared();
     const double sr = psr > 0.0 ? psr : 48000.0;
     const int    bs = pbs > 0   ? pbs : 512;
     plugin->setPlayConfigDetails(2, 2, sr, bs);
@@ -171,8 +169,7 @@ void PluginChain::prepareSlot(Slot* s, double sampleRate, int blockSize)
 
 void PluginChain::prepareToPlay(double sampleRate, int blockSize)
 {
-    preparedSampleRate.store(sampleRate);
-    preparedBlockSize.store(blockSize);
+    setPrepared(sampleRate, blockSize);
     const juce::ScopedLock sl(chainLock);
     for (auto* s : slots)
         prepareSlot(s, sampleRate, blockSize);
@@ -186,8 +183,7 @@ void PluginChain::releaseResources()
             s->plugin->releaseResources();
     // prepared 済みフラグを落とす。これをしないと releaseResources 後も isPreparedFor が
     // stale な true を返し、次の processBlock が未 prepare のプラグインを叩いてクラッシュしうる。
-    preparedSampleRate.store(0.0);
-    preparedBlockSize.store(0);
+    setPrepared(0.0, 0);
 }
 
 void PluginChain::setOfflineRenderMode(bool offline, double sampleRate, int blockSize)
@@ -195,8 +191,7 @@ void PluginChain::setOfflineRenderMode(bool offline, double sampleRate, int bloc
     if (sampleRate <= 0.0 || blockSize <= 0) return;
     const juce::ScopedLock sl(chainLock);
     if (slots.isEmpty()) return;
-    preparedSampleRate.store(sampleRate);
-    preparedBlockSize.store(blockSize);
+    setPrepared(sampleRate, blockSize);
     for (auto* s : slots)
     {
         if (s == nullptr || s->plugin == nullptr) continue;

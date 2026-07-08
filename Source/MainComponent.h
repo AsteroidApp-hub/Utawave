@@ -476,6 +476,13 @@ private:
     AppPreferences appPrefs { AppPreferences::load() };
     juce::UndoManager undoManager;
     bool projectDirty { false };   // 未保存変更があるかどうか
+    // 書き出し (ExportTask::runThread のモーダル) 実行中フラグ。モーダル中もメッセージループは
+    // 回るため、GlobalKeyMonitor (NSEvent ローカルモニタ) の Space/R や macOS メインメニューの
+    // ショートカットが素通りして transport / Undo / プロジェクト遷移を叩ける。書き出しスレッドと
+    // 同一チェーンの並行処理 (書き出し破損) やトラック破棄 (bouncedChains の生ポインタ UAF) に
+    // なるため、このフラグでキー/メニュー経路を全て無視する (進捗ウィンドウのキャンセルは
+    // モーダル側の操作なので影響しない)
+    bool exportInProgress { false };
     double loopStartSecs { 0.0 };
     double loopEndSecs   { 0.0 };
     bool   loopActive    { false };

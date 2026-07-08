@@ -993,6 +993,9 @@ MainComponent::MainComponent()
     globalKeyMonitor = std::make_unique<GlobalKeyMonitor>(
         [this](int unicode, int mods) -> bool
         {
+            // 書き出し中は transport を叩かない (書き出しスレッドと同一チェーンの並行処理 =
+            // 書き出し破損の防止)。イベントは消費せずモーダルの進捗ウィンドウへ流す
+            if (exportInProgress) return false;
             // テキスト入力中は GlobalKeyMonitor 側で既に除外されている
             switch (unicode)
             {

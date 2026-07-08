@@ -79,6 +79,10 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
 
 void MainComponent::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/)
 {
+    // 書き出し中はメニュー操作を無視する。macOS のメインメニューショートカット (Cmd+O 等) は
+    // モーダル中も発火し得るため、「開く/閉じる」でのプロジェクト差し替え → トラック破棄 →
+    // 書き出しスレッドの UAF を塞ぐ (MainComponent.h の exportInProgress 参照)
+    if (exportInProgress) return;
     switch (menuItemID)
     {
         case 1: confirmCloseIfDirty([this] { if (onNewProject)   onNewProject(); });   break;
@@ -151,6 +155,8 @@ void MainComponent::getCommandInfo(juce::CommandID commandID, juce::ApplicationC
 
 bool MainComponent::perform(const InvocationInfo& info)
 {
+    // 書き出し中は transport / ファイル操作を無視する (MainComponent.h の exportInProgress 参照)
+    if (exportInProgress) return true;
     switch (info.commandID)
     {
         case cmdPlayPause: togglePlay();        return true;
@@ -166,6 +172,10 @@ bool MainComponent::perform(const InvocationInfo& info)
 // ── キーボードショートカット ─────────────────────────────────────────
 bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
 {
+    // 書き出し中は全ショートカットを無視する。Undo でトラックが破棄されると書き出し側の
+    // bouncedChains (生ポインタ) が解放済み PluginChain を触る UAF になる
+    if (exportInProgress) return true;
+
     // Cmd+Z / Cmd+Shift+Z = Undo / Redo、Cmd+Y = Redo (Windows 標準・Mac でも受理)
     if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'z' || key.getKeyCode() == 'Z'))
     {

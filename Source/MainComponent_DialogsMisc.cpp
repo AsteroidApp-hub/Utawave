@@ -817,6 +817,10 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
         if (!jobs.empty()) lastWritten = jobs.back().opts.file;
 
         auto* task = new ExportTask(audioEngine, trackManager, std::move(jobs));
+        // 書き出し中はキー/メニュー操作 (transport / Undo / プロジェクト遷移) を無視する。
+        // モーダル中も GlobalKeyMonitor とメニューショートカットは素通りするため (MainComponent.h
+        // の exportInProgress 参照)。runThread が返れば例外/早期 return でも必ず false へ戻る
+        const juce::ScopedValueSetter<bool> exportGuard(exportInProgress, true);
         const bool finished = task->runThread();    // モーダルで完走を待つ
         if (!finished) { task->ok = false; }
         bool ok       = task->ok;

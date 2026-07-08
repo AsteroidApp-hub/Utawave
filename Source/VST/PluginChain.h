@@ -64,10 +64,14 @@ public:
     // 書き出し経路 (renderOfflineRange・別スレッド) が、同設定での二重 prepare
     // (プラグイン状態リセット = グリッチ) を避けるための軽量判定。prepared* は書き出しの
     // バックグラウンドスレッドからも読まれる (prepareToPlay の message thread 書き込みと競合し
-    // うる) ため atomic 化してある (torn read = UB を回避)。
+    // うる) ため、(SR, blockSize) を 1 組として preparedLock 下で読み書きする — 独立した
+    // atomic 2 本だと 2 つの store の間に読んで「新 SR + 旧 blockSize」の混合ペアを観測しうる
+    // (混合ペアがクエリ値に一致すると必要な prepare がスキップされる)。読み手は message /
+    // export thread のみ (audio thread からは呼ばない) なので SpinLock で問題ない。
     bool isPreparedFor(double sr, int bs) const noexcept
     {
-        return preparedSampleRate.load() == sr && preparedBlockSize.load() == bs;
+        const auto [psr, pbs] = getPrepared();
+        return psr == sr && pbs == bs;
     }
 
     // 変更通知
@@ -94,9 +98,24 @@ private:
     // chainLock 下でスロット構成を変えるたびに slots.size() を release-store する。
     // audio thread はこれを acquire-load してロック無しで「処理対象あり」を判定する。
     std::atomic<int> activePluginCount { 0 };
-    // 書き出しの別スレッドからも isPreparedFor 経由で読まれるため atomic (torn read 回避)。
-    std::atomic<double> preparedSampleRate { 0.0 };
-    std::atomic<int>    preparedBlockSize  { 0 };
+    // 書き出しの別スレッドからも isPreparedFor 経由で読まれるため、(SR, blockSize) を
+    // 1 組として preparedLock 下で読み書きする (torn read / 混合ペア観測の回避)。
+    // 直接触らず setPrepared / getPrepared を経由すること。
+    mutable juce::SpinLock preparedLock;
+    double preparedSampleRate { 0.0 };
+    int    preparedBlockSize  { 0 };
+
+    void setPrepared(double sr, int bs) noexcept
+    {
+        const juce::SpinLock::ScopedLockType l(preparedLock);
+        preparedSampleRate = sr;
+        preparedBlockSize  = bs;
+    }
+    std::pair<double, int> getPrepared() const noexcept
+    {
+        const juce::SpinLock::ScopedLockType l(preparedLock);
+        return { preparedSampleRate, preparedBlockSize };
+    }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginChain)
 };

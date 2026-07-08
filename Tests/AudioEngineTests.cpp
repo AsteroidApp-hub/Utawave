@@ -280,6 +280,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testStoppedPluginPreview();
         testDiskStreamingDeterminism();
         testMulticoreDeterminism();
+        testEmptyRangeOfflineRender();
 
         tempDir.deleteRecursively();
     }
@@ -311,6 +312,24 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             engine.setPosition(0.0);
         }
     };
+
+    void testEmptyRangeOfflineRender()
+    {
+        beginTest("offline render: sub-sample range returns a valid empty 2ch buffer");
+
+        // endSec > startSec だが丸めで 0 サンプルになる極小範囲 (1µs < 半サンプル @48k)。
+        // 最大ズームのルーラードラッグで作れる。旧実装は早期 return が outBuffer.setSize より
+        // 前にあり、呼び出し側 (ExportEngine::render) に 0 チャンネルバッファがそのまま返って
+        // writer の writeFromAudioSampleBuffer が debug で jassert していた (回帰テスト)。
+        Scene s;
+        s.tm->addTrack({}, false);
+        s.start();
+
+        juce::AudioBuffer<float> out;   // デフォルト構築 = 0ch (ExportEngine::render と同じ渡し方)
+        s.engine.renderOfflineRange(0.0, 1.0e-6, out);
+        expectEquals(out.getNumChannels(), 2, "empty range yields a 2-channel buffer");
+        expectEquals(out.getNumSamples(),  0, "empty range yields 0 samples");
+    }
 
     void testDiskStreamingDeterminism()
     {
@@ -913,6 +932,29 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
                 expect(std::abs(peak - 0.25f) < 0.01f,
                        "monitor target: clip bypasses the chain during playback (no double-process ~0.25)");
             }
+        }
+
+        // ── (4c) 書き出し中はモニタ返しが休止する (offlineRenderActive ガード・案 a) ──
+        // 書き出しスレッドとモニタ経路が同一プラグインインスタンスを交互に processBlock して
+        // 書き出しを破損させないため、書き出し中は返しを丸ごと止める。解除で復帰する。
+        {
+            Scene s;
+            auto* t = s.tm->addTrack({}, false);
+            t->setVolume(0.0f); t->setPan(0.0f);
+            t->getPluginChain().addPlugin(std::make_unique<GainFakePlugin>(2.0f));
+            s.start();
+            s.engine.setInputMonitoringActive(true);
+            s.engine.setMonitorReverbSend(0.0f);
+            s.engine.setMonitorChain(&t->getPluginChain(), t->getInputChannel(), t->isStereo(), t->getPan(), t->getVolume());
+
+            s.engine.setOfflineRenderActiveForTests(true);
+            const float pOff = runWithInput(s.engine, 4, 0.25f);
+            expect(pOff < 0.001f, "monitor return is muted while an offline render is active");
+
+            s.engine.setOfflineRenderActiveForTests(false);
+            const float pOn = runWithInput(s.engine, 4, 0.25f);
+            expect(std::abs(pOn - 0.5f) < 0.01f,
+                   "monitor return resumes (through the chain) after the render flag clears (~0.5)");
         }
 
         // ── (5) mono 入力の返しはセンター (L=R) になる (L/R 分離バグの回帰テスト) ──

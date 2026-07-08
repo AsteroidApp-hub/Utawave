@@ -1374,7 +1374,14 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 
     const double sr        = currentSampleRate;
     const int    totalSamp = (int)std::round((endSec - startSec) * sr);
-    if (totalSamp <= 0) return;   // 半サンプル未満の範囲 (round で 0) を弾く (progress の 0 除算防止)
+    if (totalSamp <= 0)   // 半サンプル未満の範囲 (round で 0) を弾く (progress の 0 除算防止)
+    {
+        // 呼び出し側 (ExportEngine::render) はデフォルト構築のバッファを渡してくるため、
+        // 0 チャンネルのまま返すと writer の writeFromAudioSampleBuffer が jassert する。
+        // 旧実装 (blockSize 1024 固定時代) と同じ「2ch / 0 サンプル = 空の有効 WAV」を保証する。
+        outBuffer.setSize(2, 0, false, true, true);
+        return;
+    }
 
     // 書き出し中は、audio thread の停止時ブランチが同じ PluginChain を並行 processBlock して
     // 書き出し音声を壊さないよう、プレビュー処理をスキップさせる (RAII で確実に戻す)。
@@ -1444,9 +1451,10 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     // プラグインは宣言した最大ブロックと異なるブロックで叩かれると内部で再バッファして報告外の遅延が
     // 乗るため、処理と同じブロックサイズで prepare されていれば報告値と実挙動が一致する。通常は
     // preparePlayback / audioDeviceAboutToStart が currentBufferSize で prepare 済みなので下の
-    // prepareAndLat は素通りする。**書き出しは再生は止めるが入力モニターは止めない** ので、
-    // 万一 prepare が必要なときのために isPreparedFor ガードを噛ませて再 prepare を避ける
-    // (下の prepareAndLat のコメント参照)。
+    // prepareAndLat は素通りする。書き出し中はモニタ返しも休止する (mixInputMonitoring の
+    // offlineRenderActive ガード) が、フラグ設定前に飛んでいた in-flight callback がまだモニタ
+    // チェーンを処理している可能性があるため、モニタチェーンだけは isPreparedFor ガード付きの
+    // realtime prepare に留める (下の bouncePrepareChain の除外参照)。
     std::unordered_map<int,int> pdcTrackLatById;   // 絶対トラック index → プラグイン遅延サンプル
     int  pdcMaxLat = 0, pdcMaxTrackIdx = -1, clickChainLat = 0;
     bool clickWillPlay = false;
@@ -1457,10 +1465,11 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     // 書き出しは JUCE のオフラインレンダーなので、各プラグインを setNonRealtime(true) にして
     // 再 prepare する (オーバーサンプリング/ルックアヘッド系が realtime 前提の確保のまま叩かれて
     // クラッシュするのを防ぐ)。書き出し後は setNonRealtime(false) で realtime へ復帰させる。
-    // **入力モニター中のチェーンは除外**する — 書き出し中も audio thread がそのチェーンを
-    // processBlock し続けるため、releaseResources+再確保が優先度逆転/グリッチを起こす。
-    // 書き出し中は再生停止 (offlineRenderActive でプレビューもスキップ) なので、モニター以外の
-    // チェーンは書き出しスレッドが唯一の使用者 = 安全に再 prepare できる。
+    // **入力モニター中のチェーンは除外**する — モニタ返し自体は書き出し中休止する (mixInputMonitoring
+    // の offlineRenderActive ガード) が、フラグ設定前に飛んでいた in-flight callback がまだこの
+    // チェーンを処理している可能性があり、chainLock 保持下の releaseResources がそれをブロック
+    // (優先度逆転) するため。書き出し中は再生停止 (offlineRenderActive でプレビューもスキップ) +
+    // モニタ休止なので、チェーンは書き出しスレッドが唯一の使用者 = 安全に再 prepare できる。
     PluginChain* monChainNow = nullptr;
     { const juce::SpinLock::ScopedLockType l(monConfigLock);
       if (activeMonConfig) monChainNow = activeMonConfig->chain; }
@@ -1493,23 +1502,30 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
         bouncePrepareChain(chain);   // setNonRealtime(true) + 再 prepare (モニタ中は除外)
         return chain.getTotalLatencySamples();
     };
+    // ── 書き出し対象フィルタ (書き出し全体で凍結・唯一の実体) ──
+    // 旧実装は per-block でも explicitFilter/anySolo/includeSet を再評価していた。(1) 毎ブロックの
+    // unordered_set 構築 = ヒープ確保 (blockSize が currentBufferSize になり、小バッファ環境では
+    // 数十万ブロックに達する)、(2) フィルタを live 評価すると書き出し中に mute/solo が変わった
+    // 場合にここで凍結する PDC 遅延マップと対象集合がずれる (遅延ライン無しのトラックが
+    // totalSkip 分早く焼かれる)、の 2 点から一度だけ計算し、PDC セットアップと per-block
+    // ループ (トラック / MIDI / クリックの全セクション) がこれを参照する。
+    const bool explicitFilter = !includeTracks.empty();
+    const std::unordered_set<int> includeSet(includeTracks.begin(), includeTracks.end());
+    bool anySolo = false;
+    if (!explicitFilter)
     {
-        const bool explicitFilter0 = !includeTracks.empty();
-        const std::unordered_set<int> includeSet0(includeTracks.begin(), includeTracks.end());
-        bool anySolo0 = false;
-        if (!explicitFilter0)
-        {
-            for (auto& [ti, trk] : snap0->clipTracks)
-                if (trk && trk->isSoloed()) { anySolo0 = true; break; }
-            if (!anySolo0)
-                for (auto& mp : snap0->midi)
-                    if (mp.track && mp.track->isSoloed()) { anySolo0 = true; break; }
-            if (!anySolo0 && snap0->clickTrack != nullptr && snap0->clickTrack->isSoloed())
-                anySolo0 = true;
-        }
+        for (auto& [ti, trk] : snap0->clipTracks)
+            if (trk && trk->isSoloed()) { anySolo = true; break; }
+        if (!anySolo)
+            for (auto& mp : snap0->midi)
+                if (mp.track && mp.track->isSoloed()) { anySolo = true; break; }
+        if (!anySolo && snap0->clickTrack != nullptr && snap0->clickTrack->isSoloed())
+            anySolo = true;
+    }
+    {
         auto noteLat = [&](int ti, Track* trk)
         {
-            if (!exportTrackActive(ti, trk, explicitFilter0, includeSet0, anySolo0)) return;
+            if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo)) return;
             // Pre-Fader は素のクリップ音のみ (プラグインを掛けない) なので遅延補正も不要 = 0。
             const int lat = preFader ? 0 : prepareAndLat(trk);
             pdcTrackLatById[ti] = lat;
@@ -1523,8 +1539,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
         // 同じ INS チェーンを通ってからマスター後に加算されるため、これを入れないとクリックに
         // 重いプラグインを挿したときクリックだけがずれる。
         Track* clickTr0 = snap0->clickTrack;
-        const bool clickAuto0 = !explicitFilter0 && clickTr0 != nullptr && !clickTr0->isMuted()
-                                && !(anySolo0 && !clickTr0->isSoloed());
+        const bool clickAuto0 = !explicitFilter && clickTr0 != nullptr && !clickTr0->isMuted()
+                                && !(anySolo && !clickTr0->isSoloed());
         clickWillPlay = (includeClick && clickTr0 != nullptr) || clickAuto0;
         if (clickWillPlay && clickTr0 != nullptr)
         {
@@ -1544,11 +1560,20 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
 
     // 書き出し完了 (早期 return / 例外含む) で必ず realtime へ復帰させる。
     // setNonRealtime(false) + 再 prepare を realtime のブロックサイズ (currentBufferSize) で。
+    // 復帰の SR/blockSize は開始時スナップショットではなく**破棄時点の現在値**を読む — 書き出し中に
+    // デバイス再起動 (デバイス切替 / SR 変更) が起きると audioDeviceAboutToStart が新 SR で
+    // 再 prepare するため、開始時値で上書きするとチェーン (と prepared フラグ) が誤った SR の
+    // まま次の preparePlayback まで残る。停止中 (現在値 0) は開始時値へフォールバック。
     struct BounceRestore
     {
-        std::vector<PluginChain*>& chains; double sr; int bs;
-        ~BounceRestore() { for (auto* c : chains) if (c) c->setOfflineRenderMode(false, sr, bs); }
-    } bounceRestore { bouncedChains, sr, restoreBlock };
+        AudioEngine& eng; std::vector<PluginChain*>& chains; double fbSr; int fbBs;
+        ~BounceRestore()
+        {
+            const double s = eng.currentSampleRate > 0.0 ? eng.currentSampleRate : fbSr;
+            const int    b = eng.currentBufferSize  > 0  ? eng.currentBufferSize  : fbBs;
+            for (auto* c : chains) if (c) c->setOfflineRenderMode(false, s, b);
+        }
+    } bounceRestore { *this, bouncedChains, sr, restoreBlock };
 
     // 各トラックの遅延ライン (index = 絶対トラック index)。delaySamples = pdcMaxLat - 自身の遅延。
     std::vector<TrackDelay> trackDelays;
@@ -1577,6 +1602,13 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
     }
     const int renderSamp = totalSamp + totalSkip;   // 絶対遅延分を余分にレンダリングして前詰めで読み飛ばす
 
+    // per-block で使い回す作業領域 (ループ外確保・毎ブロックのヒープ確保を避ける)。
+    // 中身は per-block snap から再構築するが、容量は保持される。
+    std::vector<int>    activeIdx;
+    std::vector<Track*> activeTracks;
+    juce::AudioBuffer<float> trackBuf(2, blockSize);
+    juce::AudioBuffer<float> offlineScratch(2, blockSize);   // 書き出しは単一スレッド = ローカル 1 本で十分
+
     int feedPos = 0;
     while (feedPos < renderSamp)
     {
@@ -1599,28 +1631,12 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             std::shared_ptr<PlaybackSnapshot> snap;
             { const juce::SpinLock::ScopedLockType l(snapshotLock); snap = activeSnapshot; }
 
-            // 明示的にトラックを指定された場合は Solo/Mute を無視
-            const bool explicitFilter = !includeTracks.empty();
-
-            // Solo 判定（明示フィルタ無しのときのみ、MIDI トラックも含める）。
-            // clipTracks は dedup 済みトラック一覧 (Click 除外) のため、CLICK トラックの
-            // ソロは明示チェックで含める (実時間の再生ブランチと同じ規則)
-            bool anySolo = false;
-            if (!explicitFilter)
-            {
-                for (auto& [ti, trk] : snap->clipTracks)
-                    if (trk && trk->isSoloed()) { anySolo = true; break; }
-                if (!anySolo)
-                    for (auto& mp : snap->midi)
-                        if (mp.track && mp.track->isSoloed()) { anySolo = true; break; }
-                if (!anySolo && snap->clickTrack != nullptr && snap->clickTrack->isSoloed())
-                    anySolo = true;
-            }
-
-            // アクティブトラック収集 (clipTracks ベースで O(トラック数)。全 clips 走査しない)
-            const std::unordered_set<int> includeSet(includeTracks.begin(), includeTracks.end());
-            std::vector<int>    activeIdx;
-            std::vector<Track*> activeTracks;
+            // アクティブトラック収集 (clipTracks ベースで O(トラック数)。全 clips 走査しない)。
+            // フィルタ (explicitFilter / includeSet / anySolo) はセットアップで凍結済みの
+            // 唯一の実体を参照する = PDC 遅延マップと構造的に一致 (書き出し中の mute/solo
+            // 変更で対象集合だけがずれない)。snap は per-block なので集合の再構築のみ行う。
+            activeIdx.clear();
+            activeTracks.clear();
             for (auto& [ti, trk] : snap->clipTracks)
             {
                 if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo)) continue;
@@ -1628,8 +1644,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 activeTracks.push_back(trk);
             }
 
-            juce::AudioBuffer<float> trackBuf(2, n);
-            juce::AudioBuffer<float> offlineScratch(2, n);   // 書き出しは単一スレッド = ローカル 1 本で十分
+            trackBuf.setSize(2, n, false, false, true);
+            offlineScratch.setSize(2, n, false, false, true);
             bool sendActive = false;                          // このブロックにリバーブ送りがあるか
 
             // トラックのドライを blockBuf へ、リバーブ送り (Rev スライダー) を sendBuf へ加算。
@@ -1764,12 +1780,12 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             //    リストを渡すため、呼び出し側が「鳴っている状態か」を判定してこのフラグで指示)
             //  - 明示選択なしの通常ミックスダウンでは非ミュート + Solo 規則で自動判定
             // stems (明示選択・フラグ無し) では従来どおり除外。
-            // 合成式・INS チェーン経由・vol/pan 後段は実時間 (audioDeviceIOCallback) と同一
+            // 合成式・INS チェーン経由・vol/pan 後段は実時間 (audioDeviceIOCallback) と同一。
+            // 混ぜるか自体はセットアップで凍結済み (clickWillPlay) — per-block でミュート/ソロを
+            // 再評価すると、クリック遅延ライン (clickDelay) の有無や PDC 算入と食い違うため。
+            // clickTr は per-block snap から取る (null になり得るのでガード)
             Track* clickTr = snap->clickTrack;
-            const bool clickAuto = !explicitFilter && clickTr != nullptr
-                                   && !clickTr->isMuted()
-                                   && !(anySolo && !clickTr->isSoloed());
-            if ((includeClick && clickTr != nullptr) || clickAuto)
+            if (clickWillPlay && clickTr != nullptr)
             {
                 const double bpmHere = (exportCfg && !exportCfg->bpmChanges.empty())
                                        ? exportCfg->bpmAtTime(posStart)
@@ -1925,7 +1941,14 @@ void AudioEngine::mixInputMonitoring(const float* const* inputChannelData, int n
                                      int numSamples, PluginChain* monChain,
                                      int monInputCh, bool monStereo, float monPan, float monGain)
 {
+    // 書き出し (renderOfflineRange) 中はモニタ返しを休止する (案 a)。書き出しスレッドの
+    // per-block ループと audio thread がモニタ対象チェーンの同一プラグインインスタンスを
+    // 交互に processBlock すると、内部状態 (ディレイライン/包絡) にマイク音声とクリップ音声が
+    // 混ざって書き出しファイルが破損し、モニタ返しもグリッチする (chainLock 待ちの優先度逆転も)。
+    // 休止により書き出しスレッドがチェーンの唯一の使用者になる。フラグ解除 (RenderFlagReset) は
+    // BounceRestore の realtime 復帰より後なので、再開時に offline のまま叩くことはない。
     const bool monitoring = inputMonitoringActive.load()
+                            && !offlineRenderActive.load()
                             && numInputChannels  > 0
                             && numOutputChannels > 0
                             && inputChannelData != nullptr;

@@ -23,7 +23,7 @@ public:
         bool       dither       { true };     // 16/24bit のみ有効（TPDF）
         bool       stems        { false };    // true: 1トラック=1ファイル、false: 1ミックスダウンファイル
         int        numChannels  { 2 };        // 出力チャンネル数（1=モノラル、2=ステレオ）
-        bool       preFader     { false };    // true: クリップゲインのみ（トラックVol/Pan/マスター無視）
+        bool       preFader     { false };    // true: 素のクリップ音のみ（プラグインもトラックVol/Pan/マスターも通さない）
         bool       peakGuard    { true };     // true: ピーク超過時に内部で減衰してクリップを防ぐ
         int        mp3BitrateKbps { 192 };    // MP3 出力時のビットレート（kbps）
         bool       autoRename     { true };   // 同名ファイル存在時に連番を付与
