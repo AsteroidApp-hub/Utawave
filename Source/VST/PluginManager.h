@@ -31,6 +31,14 @@ public:
     // スキャンの中止
     void cancelScan();
 
+    // 別プロセススキャナの応答待ちを中断 / 再開する (PluginManagerDialog の停止・破棄用)。
+    // abort でブロック中の findPluginTypesFor が 50ms 以内に「空結果の成功」で抜けるため、
+    // スキャンスレッドを自然終了させられる。これを呼ばずにスレッドを破棄すると、応答待ち中の
+    // Subprocess (mutex/condvar) が先に解放されて UAF クラッシュになる (クラッシュレポート id19/id32)。
+    // abort したまま次のスキャンを始めると全プラグインが空結果になるので、開始側は必ず reset を呼ぶ
+    void abortOutOfProcessScan();
+    void resetOutOfProcessScanAbortFlag();
+
     // 既知のプラグイン一覧
     const juce::KnownPluginList& getKnownPluginList() const { return knownList; }
     juce::KnownPluginList&        getKnownPluginListRW()    { return knownList; }

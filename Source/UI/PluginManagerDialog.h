@@ -80,6 +80,13 @@ private:
                       /*recursive*/ true, deadMansPedalFile,
                       /*allowAsync*/ true) {}
 
+        // メンバ scanner (PluginDirectoryScanner) の破棄より先に必ずスレッドを止める。
+        // 暗黙 dtor だと基底 juce::Thread の停止より先に scanner が破棄され、走行中の run()
+        // が破棄済み scanner (と scanFinished で解放される別プロセススキャナの応答待ち
+        // mutex/condvar) を触って UAF になる (クラッシュレポート id19/id32 の最後の砦。
+        // 通常は呼び出し側の abortOutOfProcessScan + 自然終了で即座に止まっている)
+        ~ScanThread() override { stopThread(5000); }
+
         void run() override
         {
             juce::String current;

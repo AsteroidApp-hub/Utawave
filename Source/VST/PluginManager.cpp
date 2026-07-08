@@ -116,6 +116,16 @@ void PluginManager::cancelScan()
     }
 }
 
+void PluginManager::abortOutOfProcessScan()
+{
+    if (oopScanner) oopScanner->abortScan();
+}
+
+void PluginManager::resetOutOfProcessScanAbortFlag()
+{
+    if (oopScanner) oopScanner->resetAbortFlag();
+}
+
 void PluginManager::save()
 {
     auto xml = knownList.createXml();

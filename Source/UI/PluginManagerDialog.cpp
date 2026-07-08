@@ -110,13 +110,15 @@ PluginManagerDialog::PluginManagerDialog(PluginManager& mgr)
 
 PluginManagerDialog::~PluginManagerDialog()
 {
-    // 強制停止せず、自然完了を待つ（AU 等は強制 kill するとクラッシュするため）。
-    // ただし wait は有限時間に制限する: 無限ハングは UI が完全に固まるため許容できない。
-    // 10 秒で大半のプラグインスキャンは完了する想定。それを超えるなら最終手段として
-    // Thread の通常終了 (notify + 強制終了) に委ねる (AU で稀にクラッシュリスクあり)。
     if (scanThread)
     {
         scanThread->signalThreadShouldExit();
+        // 別プロセススキャナの応答待ちを起こす (50ms 以内に空結果で抜ける)。これを呼ばないと
+        // 重い/ハングした子プロセススキャン中はスレッドが exit フラグを見られず下の wait が
+        // タイムアウトし、走行中スレッドの真下で scanner (PluginDirectoryScanner) が破棄されて
+        // 応答待ち中の Subprocess (mutex/condvar) ごと解放 = UAF クラッシュだった
+        // (クラッシュレポート id19/id32・MSVCP140 条件変数内部で read AV)
+        pm.abortOutOfProcessScan();
         scanThread->waitForThreadToExit(10000);
         scanThread.reset();
         pm.save();
@@ -127,6 +129,9 @@ PluginManagerDialog::~PluginManagerDialog()
 void PluginManagerDialog::startScan(juce::AudioPluginFormat& fmt, bool forceRescan)
 {
     cancelScan();   // 念のため
+    // 前回の停止/破棄で abort されたままだと全プラグインが空結果になるため必ず戻す
+    // (PluginManager::startScan と同じ作法)
+    pm.resetOutOfProcessScanAbortFlag();
     auto paths = pm.getSearchPathsForFormat(fmt.getName());
     scanThread = std::make_unique<ScanThread>(*this, fmt, paths,
                                               PluginManager::getDeadMansPedalFile(),
@@ -150,10 +155,12 @@ void PluginManagerDialog::cancelScan()
 {
     if (scanThread != nullptr && scanThread->isThreadRunning())
     {
-        // 協調キャンセル: フラグだけ立てて、現在処理中のプラグイン完了を待つ。
-        // 強制 kill すると AU プラグイン破棄の最中で WaitableEvent が破壊されてクラッシュするため、
-        // 必ず自然終了を待つ。
+        // 協調キャンセル: フラグを立てて自然終了を待つ (強制 kill はプラグイン破棄中の
+        // クラッシュリスクがあるため使わない)。別プロセススキャナの応答待ちも起こすことで、
+        // 重い/ハングした子スキャン中でも 50ms 以内に現在のプラグインを空結果で抜けて
+        // すぐ止まる (中断したプラグインはブラックリスト化されず次回スキャンで再走査される)
         scanThread->signalThreadShouldExit();
+        pm.abortOutOfProcessScan();
         cancelBtn.setEnabled(false);
         statusLabel.setText(juce::String::fromUTF8(
                 u8"停止中... 現在のプラグイン処理完了を待っています（数秒かかります）"),
