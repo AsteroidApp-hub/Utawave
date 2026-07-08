@@ -60,6 +60,7 @@ AppPreferences AppPreferences::load()
         p.recLatencyAutoComp = xml->getBoolAttribute("recLatencyAutoComp", p.recLatencyAutoComp);
         p.recLatencyManualMs = juce::jlimit(-300.0, 300.0,
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
+        p.retakeKeepsTake    = xml->getBoolAttribute("retakeKeepsTake", p.retakeKeepsTake);
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
         p.showExportCompleteDialog = xml->getBoolAttribute("showExportCompleteDialog", p.showExportCompleteDialog);
@@ -86,6 +87,7 @@ bool AppPreferences::save() const
     xml.setAttribute("midiPagingEnabled", midiPagingEnabled);
     xml.setAttribute("recLatencyAutoComp", recLatencyAutoComp);
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
+    xml.setAttribute("retakeKeepsTake", retakeKeepsTake);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
     xml.setAttribute("showExportCompleteDialog", showExportCompleteDialog);

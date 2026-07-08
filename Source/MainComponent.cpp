@@ -1656,12 +1656,12 @@ void MainComponent::startRecording()
     }
 }
 
-void MainComponent::stopRecording()
+void MainComponent::stopRecording(bool takesOnly)
 {
     if (!isRecording) return;
 
     double stopPos = audioEngine.getCurrentPositionSeconds();
-    recordingMgr.stopRecording(stopPos);
+    recordingMgr.stopRecording(stopPos, takesOnly);
     isRecording = false;
     markProjectDirty();   // 録音結果はプロジェクトの変更
     toolbar.setRecording(false);
@@ -1872,12 +1872,21 @@ void MainComponent::retakeRecording()
     // 戻り先 = R 押下位置 (パンチイン/ループ録音でも録音を始めた位置)
     const double anchor = recordingMgr.getActiveRecordStartPos(playPosition);
 
-    // 今のテイクを破棄 (テイクレーン配置済み分・録音ファイルとも残さない)。
-    // 破棄なので Undo アクションも積まない
-    recordingMgr.discardRecording();
-    isRecording = false;
-    preRecSnaps.clear();
-    toolbar.setRecording(false);
+    if (appPrefs.retakeKeepsTake)
+    {
+        // 設定 ON: 今のテイクをテイクレーンへ確定してから録り直す (Lane 0 には置かない。
+        // Undo トランザクションも通常停止と同じ経路で積まれる)
+        stopRecording(/*takesOnly*/ true);
+    }
+    else
+    {
+        // 既定: 今のテイクを破棄 (テイクレーン配置済み分・録音ファイルとも残さない)。
+        // 破棄なので Undo アクションも積まない
+        recordingMgr.discardRecording();
+        isRecording = false;
+        preRecSnaps.clear();
+        toolbar.setRecording(false);
+    }
 
     // 再生を止めて録音開始位置へ戻す (isRecording を落とした後なので seekTo が通る)
     isPlaying = false;

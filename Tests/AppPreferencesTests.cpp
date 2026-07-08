@@ -105,6 +105,17 @@ public:
             expect(approxEq(q.recLatencyManualMs, -37.0), "manual offset round trips");
         }
 
+        beginTest("save/load round trip for retake-keeps-take toggle");
+        {
+            // 既定 false (Q リテイクは完全破棄)。true を保存 → load で true が保たれる
+            expect(AppPreferences{}.retakeKeepsTake == false, "default is false (discard)");
+            AppPreferences p;
+            p.retakeKeepsTake = true;
+            expect(p.save(), "save succeeds");
+            expect(AppPreferences::load().retakeKeepsTake == true,
+                   "retakeKeepsTake round trips true");
+        }
+
         beginTest("save/load round trip for export-complete dialog toggle");
         {
             // 既定 true。false を保存 → load で false が保たれる (書き出し完了ダイアログの表示設定)

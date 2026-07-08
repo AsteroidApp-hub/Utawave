@@ -113,10 +113,13 @@ private:
     // Cmd+Shift+R の確定クリップが移動前の位置基準で置かれてずれる。シーク時に必ず呼ぶ。
     void restartRetrospectiveAt(double t);
     void startRecording();
-    void stopRecording();
+    // takesOnly=true は録音をテイクレーンだけに確定する (Lane 0 に置かない)。
+    // Q リテイクの「テイクを残す」設定 (AppPreferences::retakeKeepsTake) 専用
+    void stopRecording(bool takesOnly = false);
     void toggleRecord();
-    // リテイク (Q): 録音中のみ、今のテイクを破棄して録音開始位置 (R 押下位置) へ戻り
-    // すぐ録音をやり直す。録音中でなければ何もしない (Q で通常の録音開始はさせない)。
+    // リテイク (Q): 録音中のみ、今のテイクを破棄 (設定 ON ならテイクレーンへ確定) して
+    // 録音開始位置 (R 押下位置) へ戻り、すぐ録音をやり直す。
+    // 録音中でなければ何もしない (Q で通常の録音開始はさせない)。
     void retakeRecording();
     // 録音可能 (Rec アーム済み) トラックが無いまま R を押したときの案内。
     // 空の録音用トラックがあればアームして録音、無ければ追加して録音するか確認する

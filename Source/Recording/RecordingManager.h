@@ -21,7 +21,10 @@ public:
     bool startRecording(double recStartSec, double playFromSec = 0.0,
                         bool loopRecording = false,
                         double loopStart = 0.0, double loopEnd = 0.0);
-    void stopRecording(double endPositionSeconds);
+    // takesOnly=true (Q リテイクの「テイクを残す」設定) は確定先をテイクレーンだけにする:
+    // Lane 0 への配置 / トリム / クロスフェードを行わない (直後に同じ位置から録り直すため。
+    // 残したテイクは Shift+↑ で採用できる)。ループ録音も最後のテイクの Lane 0 配置だけを省く
+    void stopRecording(double endPositionSeconds, bool takesOnly = false);
     bool isRecording() const { return recording; }
 
     // リテイク用: 進行中の録音を破棄する。writer を閉じ、リアルタイム配置済みの

@@ -158,7 +158,7 @@ bool RecordingManager::startRecording(double recStartSec, double playFromSec,
     return recording;
 }
 
-void RecordingManager::stopRecording(double endPositionSeconds)
+void RecordingManager::stopRecording(double endPositionSeconds, bool takesOnly)
 {
     if (!recording) return;
 
@@ -186,7 +186,7 @@ void RecordingManager::stopRecording(double endPositionSeconds)
                                                  juce::jmax(0.0, recStart - fileStart),
                                                  retroLatencyComp, recStart);
                 auto* lane = retroTrack->getLane(0);
-                if (lane && p.dur > 0.01)
+                if (!takesOnly && lane && p.dur > 0.01)
                 {
                     auto* clip = lane->addClip(retroFile, p.start, p.dur,
                                                 retroTrack->getFormatManager(),
@@ -251,7 +251,18 @@ void RecordingManager::stopRecording(double endPositionSeconds)
             const auto p = compensateLatency(ar.startPosition, dur, preRecDur,
                                              activeLatencyComp, ar.startPosition);
             if (p.dur > 0.01 && ar.file.existsAsFile())
-                ar.track->finishLiveRecording(ar.file, p.start, p.dur, p.fileOffset);
+            {
+                if (takesOnly)
+                {
+                    // テイクレーンだけに確定 (Lane 0 は触らない = 録り直し前提)
+                    if (auto* bk = ar.track->backupToTakeLane(ar.file, p.start, p.dur,
+                                                              p.fileOffset))
+                        bk->refreshThumbnail();
+                    ar.track->cancelLiveRecording();
+                }
+                else
+                    ar.track->finishLiveRecording(ar.file, p.start, p.dur, p.fileOffset);
+            }
             else
                 ar.track->cancelLiveRecording();
             continue;
@@ -354,7 +365,8 @@ void RecordingManager::stopRecording(double endPositionSeconds)
         // テイクリストに入るだけだと Lane 0 が空のままで、停止後すぐに聴けない。
         // パンチインと同じ作法 (trimAndCrossfadeOnLane0) で既存クリップをトリムして置く。
         // 同じテイクはテイクレーンにも残っているので、別テイクの採用は Shift+↑ で可能
-        if (lastValid && lastDur > 0.01)
+        // (takesOnly = Q リテイクの「テイクを残す」ではこの Lane 0 配置だけを省く)
+        if (!takesOnly && lastValid && lastDur > 0.01)
         {
             if (auto* lane0 = ar.track->getLane(0))
             {
