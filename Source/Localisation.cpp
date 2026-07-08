@@ -503,6 +503,7 @@ static const char* const englishTranslations =
     "\"右クリック (マーカー / テンポ / 拍子上)\" = \"Right-click (on marker / tempo / meter)\"\n"
     // ── ショートカット一覧: アクション列 ──
     "\"録音 開始 / 停止 (パンチイン対応)\" = \"Start / stop recording (punch-in)\"\n"
+    "\"録音中: テイクを破棄して録り直し (リテイク)\" = \"While recording: discard take and re-record (retake)\"\n"
     "\"遡及録音を確定\" = \"Commit retrospective recording\"\n"
     "\"ループ再生 ON / OFF\" = \"Loop playback on / off\"\n"
     "\"メトロノーム (CLICK) ON / OFF\" = \"Metronome (CLICK) on / off\"\n"
@@ -1201,6 +1202,7 @@ static const char* const simplifiedChineseTranslations =
     "\"右クリック (マーカー / テンポ / 拍子上)\" = \"右键（在书签 / 速度 / 拍号上）\"\n"
     // ── ショートカット一覧: アクション列 ──
     "\"録音 開始 / 停止 (パンチイン対応)\" = \"开始 / 停止录音（支持插入录音）\"\n"
+    "\"録音中: テイクを破棄して録り直し (リテイク)\" = \"录音中：舍弃本次录音并重录（重录一遍）\"\n"
     "\"遡及録音を確定\" = \"确定追溯录音\"\n"
     "\"ループ再生 ON / OFF\" = \"循环播放 ON / OFF\"\n"
     "\"メトロノーム (CLICK) ON / OFF\" = \"节拍器 (CLICK) ON / OFF\"\n"
@@ -1895,6 +1897,7 @@ static const char* const traditionalChineseTranslations =
     "\"右クリック (マーカー / テンポ / 拍子上)\" = \"右鍵 (標記 / 速度 / 拍號上)\"\n"
     // ── ショートカット一覧: アクション列 ──
     "\"録音 開始 / 停止 (パンチイン対応)\" = \"開始 / 停止錄音（支援 Punch-In）\"\n"
+    "\"録音中: テイクを破棄して録り直し (リテイク)\" = \"錄音中：捨棄本次錄音並重錄（重錄）\"\n"
     "\"遡及録音を確定\" = \"確定追溯錄音\"\n"
     "\"ループ再生 ON / OFF\" = \"循環播放 ON / OFF\"\n"
     "\"メトロノーム (CLICK) ON / OFF\" = \"節拍器 (CLICK) ON / OFF\"\n"
@@ -2589,6 +2592,7 @@ static const char* const koreanTranslations =
     "\"右クリック (マーカー / テンポ / 拍子上)\" = \"오른쪽 클릭 (마커 / 템포 / 박자 위)\"\n"
     // ── ショートカット一覧: アクション列 ──
     "\"録音 開始 / 停止 (パンチイン対応)\" = \"녹음 시작 / 정지 (펀치인 지원)\"\n"
+    "\"録音中: テイクを破棄して録り直し (リテイク)\" = \"녹음 중: 테이크를 버리고 다시 녹음 (리테이크)\"\n"
     "\"遡及録音を確定\" = \"소급 녹음 확정\"\n"
     "\"ループ再生 ON / OFF\" = \"루프 재생 ON / OFF\"\n"
     "\"メトロノーム (CLICK) ON / OFF\" = \"메트로놈 (CLICK) ON / OFF\"\n"

@@ -573,6 +573,9 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
     if (key == juce::KeyPress::spaceKey)  { togglePlay();     return true; }
     if (key == juce::KeyPress('s'))       { stopTransport();  return true; }
     if (key == juce::KeyPress('r'))       { toggleRecord();   return true; }
+    // Q = リテイク: 録音中のみ、今のテイクを破棄して R 押下位置から録り直す。
+    // 録音中でなければ消費しない (Q で通常の録音開始はさせない)
+    if (key == juce::KeyPress('q') && isRecording) { retakeRecording(); return true; }
     // Shift+F = 全体フィット（末尾 + 2 小節がビューに収まる）
     if ((key.getKeyCode() == 'f' || key.getKeyCode() == 'F')
         && key.getModifiers().isShiftDown())

@@ -24,6 +24,19 @@ public:
     void stopRecording(double endPositionSeconds);
     bool isRecording() const { return recording; }
 
+    // リテイク用: 進行中の録音を破棄する。writer を閉じ、リアルタイム配置済みの
+    // テイククリップをレーンから外し (遅延破棄)、録音ファイルも削除する。
+    // クリップ配置・テイクバックアップは一切行わない (stopRecording の破棄版)
+    void discardRecording();
+
+    // アクティブ録音の R 押下位置 (リテイクの戻り先)。録音中でなければ fallback を返す
+    double getActiveRecordStartPos(double fallback) const
+    {
+        if (punchFromRetro)             return punchInRecStart;
+        if (!activeRecordings.empty())  return activeRecordings.front().startPosition;
+        return fallback;
+    }
+
     // 直前の startRecording でファイル/writer 作成に失敗したトラック名
     // (空でなければ呼び出し側がユーザーへ通知する。silent failure 防止)
     const juce::StringArray& getLastStartFailures() const { return lastStartFailures; }

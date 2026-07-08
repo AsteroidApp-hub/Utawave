@@ -115,6 +115,9 @@ private:
     void startRecording();
     void stopRecording();
     void toggleRecord();
+    // リテイク (Q): 録音中のみ、今のテイクを破棄して録音開始位置 (R 押下位置) へ戻り
+    // すぐ録音をやり直す。録音中でなければ何もしない (Q で通常の録音開始はさせない)。
+    void retakeRecording();
     // 録音可能 (Rec アーム済み) トラックが無いまま R を押したときの案内。
     // 空の録音用トラックがあればアームして録音、無ければ追加して録音するか確認する
     // (オケ等クリップを持つトラックには誤って重ねない)。詳細は MainComponent.cpp。

@@ -1005,6 +1005,11 @@ MainComponent::MainComponent()
                 case 'r': case 'R':
                     if (mods == 0) { juce::MessageManager::callAsync([this] { toggleRecord(); }); return true; }
                     return false;
+                case 'q': case 'Q':
+                    // リテイクは録音中のみ (録音中でなければキーを消費しない)
+                    if (mods == 0 && isRecording)
+                    { juce::MessageManager::callAsync([this] { retakeRecording(); }); return true; }
+                    return false;
                 default:
                     return false;
             }
@@ -1856,6 +1861,35 @@ void MainComponent::toggleRecord()
 {
     if (isRecording) { stopRecording(); return; }
     // 再生中でもパンチインで録音開始可能（R キー / REC ボタン共通）
+    startRecording();
+}
+
+void MainComponent::retakeRecording()
+{
+    // 録音中のみ (Q で通常の録音開始はさせない)
+    if (!isRecording) return;
+
+    // 戻り先 = R 押下位置 (パンチイン/ループ録音でも録音を始めた位置)
+    const double anchor = recordingMgr.getActiveRecordStartPos(playPosition);
+
+    // 今のテイクを破棄 (テイクレーン配置済み分・録音ファイルとも残さない)。
+    // 破棄なので Undo アクションも積まない
+    recordingMgr.discardRecording();
+    isRecording = false;
+    preRecSnaps.clear();
+    toolbar.setRecording(false);
+
+    // 再生を止めて録音開始位置へ戻す (isRecording を落とした後なので seekTo が通る)
+    isPlaying = false;
+    audioEngine.stop();
+    toolbar.setPlaying(false);
+    seekTo(anchor);
+
+    trackHeaderPanel.refresh();
+    timelineView.refresh();
+
+    // すぐ録音を再開。停止状態からの開始なので、カウントイン / プリロール設定が
+    // あれば通常の R と同じように適用される (助走付きで録り直せる)
     startRecording();
 }
 

@@ -375,6 +375,70 @@ void RecordingManager::stopRecording(double endPositionSeconds)
     recording = false;
 }
 
+void RecordingManager::discardRecording()
+{
+    if (!recording) return;
+
+    audioEngine.setRecordingActive(false);
+
+    // Punch From Retro: retro キャプチャごと破棄 (retro ファイルは R 押下前の
+    // 遡及区間も含むが、リテイクでは丸ごと録り直すので残さない)
+    if (punchFromRetro)
+    {
+        audioEngine.setRetrospectiveTarget(nullptr);
+        retroWriter.reset();
+        if (retroTrack) retroTrack->cancelLiveRecording();
+        if (retroFile.existsAsFile()) retroFile.deleteFile();
+        retroTrack     = nullptr;
+        retroFile      = juce::File();
+        retroActive    = false;
+        punchFromRetro = false;
+    }
+
+    // teardown バリア (audio が旧 config を手放すまで待つ) を通してから writer を破棄する
+    audioEngine.setRecordingTarget(nullptr, nullptr);
+
+    std::vector<std::unique_ptr<AudioClip>> discarded;
+    for (auto& ar : activeRecordings)
+    {
+        ar.writer.reset();   // フラッシュ・クローズ
+        if (!ar.track) continue;
+
+        ar.track->cancelLiveRecording();
+
+        // ループ録音でリアルタイム配置済みのテイクをレーンから所有権ごと外す
+        for (auto* clip : ar.realtimeClips)
+        {
+            if (!clip) continue;
+            bool found = false;
+            for (int li = 0; li < ar.track->getLaneCount() && !found; ++li)
+            {
+                auto* lane = ar.track->getLane(li);
+                if (!lane) continue;
+                for (auto it = lane->clips.begin(); it != lane->clips.end(); ++it)
+                    if (it->get() == clip)
+                    {
+                        discarded.push_back(std::move(*it));
+                        lane->clips.erase(it);
+                        found = true;
+                        break;
+                    }
+            }
+        }
+
+        // 録音ファイルは残さない (best-effort: サムネイルが開いたままの環境では
+        // 削除に失敗し得るが、クリップ参照は無いので孤児 WAV が残るだけで無害)
+        if (ar.file.existsAsFile()) ar.file.deleteFile();
+    }
+
+    // 再生スナップショットが生参照している可能性があるため即破棄せず遅延破棄へ
+    if (!discarded.empty())
+        audioEngine.deferClipDestruction(std::move(discarded));
+
+    activeRecordings.clear();
+    recording = false;
+}
+
 void RecordingManager::onLoopWrap()
 {
     if (!recording) return;
