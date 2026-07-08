@@ -33,7 +33,10 @@ juce::File RecordingManager::createRecordingFile(const juce::String& trackName) 
     auto ts   = juce::Time::getCurrentTime();
     auto name = juce::File::createLegalFileName(
         trackName + "_" + ts.formatted("%Y%m%d_%H%M%S") + ".wav");
-    return folder.getChildFile(name);
+    // タイムスタンプは秒精度なので、同じ秒内に録音を始め直す (Q リテイクの即時再録音等) と
+    // 同一パスになる。既存ファイルは前のテイクが参照している可能性があり、FileOutputStream で
+    // 開くと追記されて壊れるため、存在する場合は連番を足して必ず新規ファイルにする
+    return folder.getChildFile(name).getNonexistentSibling(false);
 }
 
 bool RecordingManager::startRecording(double recStartSec, double playFromSec,

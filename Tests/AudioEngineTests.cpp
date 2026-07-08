@@ -276,6 +276,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testRecordingLatencyComp();
         testRecordingWriteGate();
         testRecordingFirstWriteMarker();
+        testRetroFirstWriteMarker();
         testStereoWriterMonoInput();
         testLoopWrapFromOutside();
         testMonitorThroughInserts();
@@ -808,6 +809,58 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
                                       blockSecs * 1.5);
             expectWithinAbsoluteError(take->getFileOffset(), 0.0, 1e-6);
         }
+    }
+
+    void testRetroFirstWriteMarker()
+    {
+        // 遡及録音 (retro) 側の実書き込み開始マーカー。retro writer はゲート無しで登録直後の
+        // ブロックから書き始めるため、登録が再生開始より遅れるとファイル先頭は playStart より
+        // 後ろになる。旧実装は「ファイル先頭 = playStart」仮定で確定クリップを置いており、
+        // その分内容が手前へずれていた (targets 側と同じ登録遅れズレの retro 版)。
+        beginTest("retrospective: commit placement uses actual first-write position");
+        const double blockSecs = (double)kBlock / kSR;
+
+        Scene s;
+        s.start();
+
+        RecordingManager mgr(s.engine, *s.tm, s.fmt);
+        auto recDir = tempDir.getChildFile("retro_firstwrite");
+        mgr.getAudioFolder = [recDir] { return recDir; };
+
+        auto* track = s.tm->addTrack({}, false);
+
+        // 再生を先に回してから遡及キャプチャ登録 (登録遅れ 3 ブロックを模擬)
+        const int lateBlocks = 3;
+        s.engine.setPosition(1.0);
+        s.engine.play();
+        runBlocksWithInput(s.engine, lateBlocks, 0.25f);
+        expect(mgr.startRetrospective(track, 1.0), "retro capture starts");
+        runBlocksWithInput(s.engine, 40, 0.25f);
+
+        const double expFileStart = 1.0 + lateBlocks * blockSecs;
+        expectWithinAbsoluteError(s.engine.getRetroFirstWritePosSecs(0.0), expFileStart,
+                                  blockSecs * 1.5);
+
+        const double endPos = s.engine.getCurrentPositionSeconds();
+        mgr.stopRetrospective(true, endPos);   // Cmd+Shift+R の確定
+        s.engine.stop();
+
+        // クリップ左端 = 実ファイル先頭 / fileOffset 0 / 尺 = 実書き込み分
+        auto* lane0 = track->getLane(0);
+        expect(lane0 != nullptr && lane0->clips.size() == 1, "retro commit placed one clip");
+        if (lane0 != nullptr && !lane0->clips.empty())
+        {
+            auto* c = lane0->clips.front().get();
+            expectWithinAbsoluteError(c->getStartPosition(), expFileStart, blockSecs * 1.5);
+            expectWithinAbsoluteError(c->getFileOffset(), 0.0, 1e-6);
+            expectWithinAbsoluteError(c->getDuration(), endPos - expFileStart, blockSecs * 1.5);
+        }
+
+        // マーカーは解除では消えず (停止処理が配置で読むため)、次の登録でリセットされる
+        expect(s.engine.getRetroFirstWritePosSecs(-1.0) >= 0.0, "marker retained after teardown");
+        expect(mgr.startRetrospective(track, 2.0), "second retro capture starts");
+        expectWithinAbsoluteError(s.engine.getRetroFirstWritePosSecs(123.0), 123.0, 1e-9);
+        mgr.stopRetrospective(false, 2.0);   // 破棄 (後始末)
     }
 
     void testStereoWriterMonoInput()

@@ -56,6 +56,11 @@ public:
         testFindFreeTakeLane();
         testLoopTakeLaneReuse();
         testLoopLastTakeOnLane0();
+        testDiscardRecordingNormal();
+        testDiscardRecordingLoop();
+        testStopTakesOnlyNormal();
+        testStopTakesOnlyLoop();
+        testPunchFromRetroTakesOnlyAndDiscard();
     }
 
     // lane0 に直接クリップを足す (overlaps チェック無しでそのまま lane0 に入る)
@@ -799,6 +804,212 @@ public:
         auto* take2 = clipAtStart(t->getLane(2), 5.0);
         expect(take2 != nullptr && approxEq(take2->getFileOffset(), 4.0, 1e-6),
                "take2 remains in take lane");
+
+        tmpDir.deleteRecursively();
+    }
+    // ── Q リテイク (破棄): 通常録音の discardRecording ──
+    // クリップ/テイク/録音ファイルを一切残さず、既存 Lane 0 は触らない。
+    // getActiveRecordStartPos (リテイクの戻り先) の録音中/非録音中の値も固定する
+    void testDiscardRecordingNormal()
+    {
+        beginTest("discardRecording: normal recording leaves no clip / take / file");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveDiscardNormalTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+        const juce::File dummy("/tmp/utawave_discard_pre.wav");
+        addLane0(t, dummy, 0.0, 10.0);   // 既存の下地 (discard で触らないこと)
+
+        expect(approxEq(rm.getActiveRecordStartPos(9.9), 9.9, 1e-9), "anchor fallback when idle");
+
+        expect(rm.startRecording(2.0, 2.0), "recording starts");
+        expect(rm.isRecording(), "recording flag on");
+        expect(t->hasLiveRecording(), "live overlay armed");
+        expect(tmpDir.getNumberOfChildFiles(juce::File::findFiles, "*.wav") == 1,
+               "recording file created");
+        expect(approxEq(rm.getActiveRecordStartPos(9.9), 2.0, 1e-9),
+               "anchor = record start while recording");
+
+        rm.discardRecording();
+        expect(!rm.isRecording(), "recording flag off after discard");
+        expect(!t->hasLiveRecording(), "live overlay cancelled");
+        expect(t->getLaneCount() == 1 && (int) t->getLane(0)->clips.size() == 1,
+               "lane0 untouched and no take lanes added");
+        expect(tmpDir.getNumberOfChildFiles(juce::File::findFiles, "*.wav") == 0,
+               "recording file deleted");
+        expect(approxEq(rm.getActiveRecordStartPos(9.9), 9.9, 1e-9), "anchor fallback after discard");
+
+        tmpDir.deleteRecursively();
+    }
+
+    // ── Q リテイク (破棄): ループ録音のリアルタイム配置テイクもレーンから取り除く ──
+    // 外したクリップは遅延破棄 (deferClipDestruction) 経由なのでエンジンが延命所有する
+    void testDiscardRecordingLoop()
+    {
+        beginTest("discardRecording: loop recording removes realtime takes and file");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveDiscardLoopTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+
+        expect(rm.startRecording(6.0, 6.0, true, 5.0, 10.0), "loop recording starts");
+        rm.onLoopWrap();   // take1 [6,10) -> lane1
+        rm.onLoopWrap();   // take2 [5,10) -> lane2
+        expect(t->getLaneCount() == 3
+               && (int) t->getLane(1)->clips.size() == 1
+               && (int) t->getLane(2)->clips.size() == 1,
+               "realtime takes placed on take lanes");
+
+        rm.discardRecording();
+        expect(!rm.isRecording(), "recording flag off after discard");
+        expect(t->getLane(1)->clips.empty() && t->getLane(2)->clips.empty(),
+               "realtime takes removed from lanes");
+        expect(t->getLane(0)->clips.empty(), "lane0 stays empty");
+        expect(tmpDir.getNumberOfChildFiles(juce::File::findFiles, "*.wav") == 0,
+               "recording file deleted");
+
+        tmpDir.deleteRecursively();
+    }
+
+    // ── Q リテイク (テイクを残す): 通常録音の takesOnly 停止 ──
+    // テイクレーンにだけ確定し、Lane 0 は配置もトリムもしない
+    void testStopTakesOnlyNormal()
+    {
+        beginTest("stopRecording(takesOnly): normal recording -> take lane only, lane0 untouched");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveTakesOnlyNormalTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+        const juce::File dummy("/tmp/utawave_takesonly_pre.wav");
+        addLane0(t, dummy, 0.0, 10.0);   // 既存の下地 (トリムされないこと)
+
+        expect(rm.startRecording(2.0, 2.0), "recording starts");
+        rm.stopRecording(4.0, /*takesOnly*/ true);
+
+        expect(!rm.isRecording(), "recording flag off");
+        expect(!t->hasLiveRecording(), "live overlay cancelled");
+        auto* lane0 = t->getLane(0);
+        expect((int) lane0->clips.size() == 1, "lane0 clip count unchanged");
+        auto* pre = clipAtStart(lane0, 0.0);
+        expect(pre != nullptr && approxEq(pre->getDuration(), 10.0, 1e-9),
+               "lane0 clip untrimmed (no punch placement)");
+        expect(t->getLaneCount() >= 2, "take lane exists");
+        auto* take = clipAtStart(t->getLane(1), 2.0);
+        expect(take != nullptr && approxEq(take->getDuration(), 2.0, 1e-6)
+               && approxEq(take->getFileOffset(), 0.0, 1e-9),
+               "take = [2,4) with fileOffset 0 (same formula as normal stop)");
+        expect(tmpDir.getNumberOfChildFiles(juce::File::findFiles, "*.wav") == 1,
+               "recording file kept (referenced by the take)");
+
+        tmpDir.deleteRecursively();
+    }
+
+    // ── Q リテイク (テイクを残す): ループ録音は「最後のテイクの Lane 0 配置」だけを省く ──
+    void testStopTakesOnlyLoop()
+    {
+        beginTest("stopRecording(takesOnly): loop recording keeps takes, skips lane0 copy");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawaveTakesOnlyLoopTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+        const juce::File dummy("/tmp/utawave_takesonly_loop_pre.wav");
+        addLane0(t, dummy, 0.0, 20.0);   // 既存の下地 (トリムされないこと)
+
+        expect(rm.startRecording(6.0, 6.0, true, 5.0, 10.0), "loop recording starts");
+        rm.onLoopWrap();   // take1 [6,10)
+        rm.onLoopWrap();   // take2 [5,10) fileOffset 4
+        rm.stopRecording(10.0, /*takesOnly*/ true);
+
+        auto* lane0 = t->getLane(0);
+        expect((int) lane0->clips.size() == 1, "lane0 untouched (no last-take copy)");
+        auto* pre = clipAtStart(lane0, 0.0);
+        expect(pre != nullptr && approxEq(pre->getDuration(), 20.0, 1e-9),
+               "lane0 clip untrimmed");
+        expect(clipAtStart(t->getLane(1), 6.0) != nullptr, "take1 remains on take lane");
+        auto* take2 = clipAtStart(t->getLane(2), 5.0);
+        expect(take2 != nullptr && approxEq(take2->getFileOffset(), 4.0, 1e-6),
+               "take2 remains with loop-slice geometry");
+
+        tmpDir.deleteRecursively();
+    }
+
+    // ── Punch From Retro: takesOnly はテイクレーンのみ / discard は retro ファイルごと破棄 ──
+    void testPunchFromRetroTakesOnlyAndDiscard()
+    {
+        beginTest("punch-from-retro: takesOnly keeps take lane only, discard deletes retro file");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AudioEngine engine;
+        RecordingManager rm(engine, tm, fmt);
+
+        auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getChildFile("UtawavePunchRetroQTest");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+        rm.getAudioFolder = [tmpDir] { return tmpDir; };
+
+        auto* t = tm.addTrack({}, false);
+        t->setRecArmed(true);
+
+        // takesOnly: 遡及キャプチャ (再生 1.0〜) → 3.0 でパンチ → Q (テイクを残す)
+        expect(rm.startRetrospective(t, 1.0), "retro capture starts");
+        expect(rm.startRecording(3.0, 3.0), "punch from retro starts");
+        expect(approxEq(rm.getActiveRecordStartPos(0.0), 3.0, 1e-9), "anchor = punch position");
+        rm.stopRecording(5.0, /*takesOnly*/ true);
+        expect(!rm.isRecording() && !rm.hasRetrospective(), "recording and retro ended");
+        expect(t->getLane(0)->clips.empty(), "lane0 untouched (no punch placement)");
+        auto* take = clipAtStart(t->getLane(1), 3.0);
+        expect(take != nullptr && approxEq(take->getDuration(), 2.0, 1e-6)
+               && approxEq(take->getFileOffset(), 2.0, 1e-6),
+               "take = [3,5) with fileOffset = recStart - playStart");
+        expect(tmpDir.getNumberOfChildFiles(juce::File::findFiles, "*.wav") == 1,
+               "retro file kept (referenced by the take)");
+
+        // discard: 2 回目のパンチを破棄 → 新しいクリップは増えず 2 つ目の retro ファイルも消える
+        expect(rm.startRetrospective(t, 6.0), "retro capture restarts");
+        expect(rm.startRecording(8.0, 8.0), "second punch starts");
+        rm.discardRecording();
+        expect(!rm.isRecording() && !rm.hasRetrospective(), "second punch fully discarded");
+        expect((int) t->getLane(1)->clips.size() == 1 && t->getLane(0)->clips.empty(),
+               "no new clips from the discarded punch");
+        expect(tmpDir.getNumberOfChildFiles(juce::File::findFiles, "*.wav") == 1,
+               "second retro file deleted, first kept");
 
         tmpDir.deleteRecursively();
     }
