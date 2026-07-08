@@ -193,7 +193,14 @@ void AudioEngine::setRecordingTarget(juce::AudioFormatWriter::ThreadedWriter* wr
         }
     }
     if (writer != nullptr)
+    {
         next->targets.push_back({ writer, liveBuffer, inputCh, stereo });
+        // 新しい録音セッションの開始: 実書き込み開始位置マーカーをリセットする。
+        // config 公開前に store するので、audio thread が新 config で書き始めるより
+        // 必ず先になる (teardown の writer==nullptr ではリセットしない: 停止処理が
+        // クリップ配置のためこの値を読むのは teardown の後)
+        recFirstWritePos.store(-1.0);
+    }
     // 既存ターゲットを破棄するため teardown バリアを張る (録音停止時の writer.reset() 前提)。
     publishRecConfig(std::move(next), /*drain=*/ true);
 }
@@ -240,6 +247,10 @@ void AudioEngine::setRetrospectiveTarget(juce::AudioFormatWriter::ThreadedWriter
     next->retroLiveBuf = liveBuf;
     next->retroInputCh = inputCh;
     next->retroStereo  = stereo;
+    // 新しい遡及キャプチャの開始: 実書き込み開始位置マーカーをリセット
+    // (setRecordingTarget と同じ作法。解除時はリセットしない = 停止処理が配置で読む)
+    if (writer != nullptr)
+        retroFirstWritePos.store(-1.0);
     // writer==nullptr の確定時に直後 retroWriter.reset() するため teardown バリアを張る。
     publishRecConfig(std::move(next), /*drain=*/ true);
 }
@@ -2912,6 +2923,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             && inputChannelData != nullptr
             && posStart >= recordingWriteFromSecs.load() - 1e-6)
         {
+            // 最初に書き込んだブロックの位置 = ファイルのサンプル 0 のタイムライン位置。
+            // クリップ配置がこれを真のファイル先頭に使う (writeFrom 仮定の登録遅れズレ対策)
+            if (recFirstWritePos.load(std::memory_order_relaxed) < 0.0)
+                recFirstWritePos.store(posStart);
+
             // 各ターゲットに自分の input ch から書き込む (複数マイク同時録音対応)
             for (auto& tgt : recCfg->targets)
             {
@@ -2951,6 +2967,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         if (recCfg->retro != nullptr && playing.load()
             && numInputChannels > 0 && inputChannelData != nullptr)
         {
+            // 遡及ファイルのサンプル 0 のタイムライン位置 (targets 側と同じマーカー)
+            if (retroFirstWritePos.load(std::memory_order_relaxed) < 0.0)
+                retroFirstWritePos.store(posStart);
+
             int chL = juce::jlimit(0, numInputChannels - 1, recCfg->retroInputCh);
             if (inputChannelData[chL] == nullptr) chL = 0;
 

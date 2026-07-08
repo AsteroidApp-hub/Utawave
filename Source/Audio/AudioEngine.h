@@ -96,6 +96,25 @@ public:
     // 書き込まれたサンプル数。ループ録音の尺をサンプルベースで算出するために使う。
     juce::int64 getRecordedSampleCount() const { return recordedSamples.load(); }
 
+    // ── 録音ファイルの実書き込み開始位置 (ファイルのサンプル 0 のタイムライン位置) ──
+    // 書き込みは「ターゲット登録済み + posStart >= writeFrom」で始まるが、登録は play() の
+    // 後に message thread が行うため、再生開始〜登録完了の 0〜数ブロックは書き込まれない。
+    // 配置側が「ファイル先頭 = writeFrom」と仮定すると、この取りこぼし分だけ fileOffset の
+    // トリムが過剰になり内容が手前へずれる (テイクごとにランダムなブロック粒度のズレ)。
+    // audio thread が新しい録音 config で最初に書き込んだブロックの posStart を記録するので、
+    // クリップ配置はこちらを真のファイル先頭として使う (一度も書き込みが無ければ fallback)。
+    double getRecordingFirstWritePosSecs(double fallback) const
+    {
+        const double v = recFirstWritePos.load();
+        return v >= 0.0 ? v : fallback;
+    }
+    // 遡及録音側の同マーカー (retro writer はゲート無しで登録直後から書く)
+    double getRetroFirstWritePosSecs(double fallback) const
+    {
+        const double v = retroFirstWritePos.load();
+        return v >= 0.0 ? v : fallback;
+    }
+
     // ── 録音レイテンシ補正 ──
     // 録音は「出力レイテンシ分遅れて聞いた再生」に合わせて歌った声が「入力レイテンシ分
     // 遅れて」コールバックに届くため、入出力レイテンシの合計 (round trip) だけ遅れて
@@ -450,6 +469,12 @@ private:
     // 書き込み開始位置 (ゲート)。カウントイン/プリロールの遡及録音のため
     // recordingStartSecs (ミュート位置) より手前になり得る
     std::atomic<double> recordingWriteFromSecs { 0.0 };
+    // 実書き込み開始位置マーカー (-1 = 未書き込み)。リセットは setRecordingTarget /
+    // setRetrospectiveTarget (新 writer 登録時・config 公開前) が行い、audio thread は
+    // 新 config で最初に書いたブロックの posStart を store する (公開順で race しない)。
+    // 詳細は getRecordingFirstWritePosSecs のコメント
+    std::atomic<double> recFirstWritePos   { -1.0 };
+    std::atomic<double> retroFirstWritePos { -1.0 };
 
     // ループ範囲
     std::atomic<bool>   loopActive    { false };

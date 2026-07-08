@@ -171,7 +171,9 @@ void RecordingManager::stopRecording(double endPositionSeconds, bool takesOnly)
         audioEngine.setRetrospectiveTarget(nullptr);
         retroWriter.reset();  // フラッシュ・クローズ
 
-        const double fileStart = retroPlayStart;
+        // 遡及ファイルの先頭はエンジンの実書き込み開始位置 (writer 登録は play() 後の
+        // message thread なので retroPlayStart より 0〜数ブロック遅れ得る。登録遅れ対策)
+        const double fileStart = audioEngine.getRetroFirstWritePosSecs(retroPlayStart);
         const double recStart  = punchInRecStart;
         const double stopPos   = endPositionSeconds;
 
@@ -242,14 +244,26 @@ void RecordingManager::stopRecording(double endPositionSeconds, bool takesOnly)
             dur = endPositionSeconds - ar.startPosition;
         }
 
+        // ファイル先頭の実タイムライン位置。ターゲット登録は play() 後の message thread で
+        // 行われるため、書き込みはゲート位置 (ar.fileStartPos = writeFrom) より 0〜数ブロック
+        // 遅れて始まることがある。writeFrom 仮定のまま配置すると、その取りこぼし分だけ
+        // fileOffset のトリムが過剰になり内容が手前へずれる (テイクごとにランダムな
+        // ブロック粒度のズレ。Q リテイクの検証で顕在化)。エンジンが記録した
+        // 「最初に書き込んだブロックの位置」を真のファイル先頭として使う
+        const double fileStart = audioEngine.getRecordingFirstWritePosSecs(ar.fileStartPos);
+
         // カウントイン/プリロールの先行録音分 (ファイル先頭の読み飛ばし量)。
         // クリップ左端を伸ばすとこの区間 (ブレス等) を復元できる
-        const double preRecDur = juce::jmax(0.0, ar.startPosition - ar.fileStartPos);
+        const double preRecDur = juce::jmax(0.0, ar.startPosition - fileStart);
 
         if (!ar.loopRec)
         {
-            const auto p = compensateLatency(ar.startPosition, dur, preRecDur,
-                                             activeLatencyComp, ar.startPosition);
+            // 書き込みが R 位置より後から始まった場合 (カウントイン無し + 登録遅れ) は
+            // 左端をファイル先頭へ寄せる (fileOffset は負にできないため)
+            const double placeStart = juce::jmax(ar.startPosition, fileStart);
+            const auto p = compensateLatency(placeStart, endPositionSeconds - placeStart,
+                                             juce::jmax(0.0, placeStart - fileStart),
+                                             activeLatencyComp, placeStart);
             if (p.dur > 0.01 && ar.file.existsAsFile())
             {
                 if (takesOnly)
@@ -303,7 +317,7 @@ void RecordingManager::stopRecording(double endPositionSeconds, bool takesOnly)
             // (1 周目の途中で停止した場合は録音できた所まで)
             if (alreadyAdded == 0)
             {
-                const auto s0 = loopTakeSlice(0, ar.startPosition, ar.fileStartPos,
+                const auto s0 = loopTakeSlice(0, ar.startPosition, fileStart,
                                               ar.loopStart, ar.loopEnd);
                 const double take1Dur = juce::jmin(durFromStart, s0.dur);
                 const auto p = compensateLatency(s0.pos, take1Dur, s0.fileOffset,
@@ -334,7 +348,7 @@ void RecordingManager::stopRecording(double endPositionSeconds, bool takesOnly)
             const int numRestPasses = (rest > 0.0) ? (int)std::ceil(rest / loopDur) : 0;
             for (int it = juce::jmax(1, alreadyAdded); it <= numRestPasses; ++it)
             {
-                const auto sit = loopTakeSlice(it, ar.startPosition, ar.fileStartPos,
+                const auto sit = loopTakeSlice(it, ar.startPosition, fileStart,
                                                ar.loopStart, ar.loopEnd);
                 const double inRestOffset = (double)(it - 1) * loopDur;
                 const double sliceDur = juce::jmin(sit.dur, rest - inRestOffset);
@@ -462,9 +476,11 @@ void RecordingManager::onLoopWrap()
         if (loopDur < 0.05) continue;
 
         // テイクの位置/尺/fileOffset は純関数 loopTakeSlice (ヘッダ) に一本化。
-        // 停止時スライス (stopRecording) と RecordingTests も同じ式を使う
+        // 停止時スライス (stopRecording) と RecordingTests も同じ式を使う。
+        // ファイル先頭はエンジンの実書き込み開始位置 (登録遅れ対策・stopRecording と同じ)
         const int it = ar.takesAddedRealtime;
-        const auto slice = loopTakeSlice(it, ar.startPosition, ar.fileStartPos,
+        const double fileStart = audioEngine.getRecordingFirstWritePosSecs(ar.fileStartPos);
+        const auto slice = loopTakeSlice(it, ar.startPosition, fileStart,
                                          ar.loopStart, ar.loopEnd);
 
         const auto p = compensateLatency(slice.pos, slice.dur, slice.fileOffset,
@@ -557,9 +573,11 @@ void RecordingManager::stopRetrospective(bool commit, double playEndSec)
 
     if (commit && retroTrack && retroFile.existsAsFile())
     {
-        const double dur = playEndSec - retroPlayStart;
-        const auto p = compensateLatency(retroPlayStart, dur, 0.0, retroLatencyComp,
-                                         retroPlayStart);
+        // ファイル先頭 = 実書き込み開始位置 (登録遅れ対策・クリップ左端もそこへ置く)
+        const double fileStart = audioEngine.getRetroFirstWritePosSecs(retroPlayStart);
+        const double dur = playEndSec - fileStart;
+        const auto p = compensateLatency(fileStart, dur, 0.0, retroLatencyComp,
+                                         fileStart);
         if (dur > 0.05 && p.dur > 0.01)
         {
             auto* lane = retroTrack->getLane(0);

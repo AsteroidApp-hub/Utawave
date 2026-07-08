@@ -23,6 +23,7 @@
 #include "../Source/Tracks/Track.h"
 #include "../Source/Tracks/AudioClip.h"
 #include "../Source/VST/PluginChain.h"
+#include "../Source/Recording/RecordingManager.h"
 
 namespace
 {
@@ -274,6 +275,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testDeferredDestructionRebuild();
         testRecordingLatencyComp();
         testRecordingWriteGate();
+        testRecordingFirstWriteMarker();
         testStereoWriterMonoInput();
         testLoopWrapFromOutside();
         testMonitorThroughInserts();
@@ -738,6 +740,74 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         tw.reset();
         bg.stopThread(2000);
         expect(wav.existsAsFile() && wav.getSize() > 0, "recorded file has data");
+    }
+
+    void testRecordingFirstWriteMarker()
+    {
+        // 回帰テスト: 録音ターゲットの登録は play() 後の message thread で行われるため、
+        // 再生開始〜登録完了の 0〜数ブロックはファイルに書かれない (ファイル先頭が writeFrom
+        // より遅れる)。旧実装は「ファイル先頭 = writeFrom」仮定で配置しており、その取りこぼし
+        // 分だけクリップ内容が手前へずれていた (Q リテイクで並べたテイクがブロック粒度で
+        // ランダムにずれて見えた報告の原因)。エンジンの実書き込み開始マーカー
+        // (getRecordingFirstWritePosSecs) を使う修正で、登録が遅れても時間対応が正確になる。
+        beginTest("recording: placement uses actual first-write position (late target registration)");
+        const double blockSecs = (double)kBlock / kSR;
+
+        Scene s;
+        s.start();
+
+        RecordingManager mgr(s.engine, *s.tm, s.fmt);
+        auto recDir = tempDir.getChildFile("firstwrite_rec");
+        mgr.getAudioFolder = [recDir] { return recDir; };
+
+        auto* track = s.tm->addTrack({}, false);
+        track->setRecArmed(true);
+
+        // ── 通常録音: 再生を先に回してから録音登録 (登録遅れ 4 ブロックを模擬) ──
+        const int lateBlocks = 4;
+        s.engine.setPosition(1.0);
+        s.engine.play();
+        runBlocksWithInput(s.engine, lateBlocks, 0.25f);   // 登録前 = まだ書かれない
+        expect(mgr.startRecording(1.0, 1.0), "recording starts");
+        runBlocksWithInput(s.engine, 40, 0.25f);
+        mgr.stopRecording(s.engine.getCurrentPositionSeconds());
+        s.engine.stop();
+
+        // クリップ左端は実ファイル先頭 (1.0 + 4 ブロック) に置かれ fileOffset は 0 (comp 0)。
+        // 旧実装は start=1.0 / fileOffset=0 で内容が 4 ブロック手前にずれていた
+        const double expFileStart = 1.0 + lateBlocks * blockSecs;
+        auto* lane0 = track->getLane(0);
+        expect(lane0 != nullptr && lane0->clips.size() == 1, "one clip on lane 0");
+        if (lane0 != nullptr && !lane0->clips.empty())
+        {
+            auto* c = lane0->clips.front().get();
+            expectWithinAbsoluteError(c->getStartPosition(), expFileStart, blockSecs * 1.5);
+            expectWithinAbsoluteError(c->getFileOffset(), 0.0, 1e-6);
+        }
+
+        // ── Q リテイクの「テイクを残す」(takesOnly): テイクレーンにも同じ規則で置かれ、
+        //    Lane 0 は触らない (配置式が通常停止と一致するパリティの担保) ──
+        s.engine.setPosition(3.0);
+        s.engine.play();
+        runBlocksWithInput(s.engine, lateBlocks, 0.25f);
+        expect(mgr.startRecording(3.0, 3.0), "second recording starts");
+        runBlocksWithInput(s.engine, 40, 0.25f);
+        mgr.stopRecording(s.engine.getCurrentPositionSeconds(), /*takesOnly*/ true);
+        s.engine.stop();
+
+        expect(lane0 != nullptr && lane0->clips.size() == 1, "takesOnly leaves lane 0 untouched");
+        AudioClip* take = nullptr;
+        for (int li = 1; li < track->getLaneCount(); ++li)
+            if (auto* l = track->getLane(li))
+                for (auto& cp : l->clips)
+                    if (cp->getStartPosition() > 2.0) take = cp.get();
+        expect(take != nullptr, "takesOnly placed the take on a take lane");
+        if (take != nullptr)
+        {
+            expectWithinAbsoluteError(take->getStartPosition(), 3.0 + lateBlocks * blockSecs,
+                                      blockSecs * 1.5);
+            expectWithinAbsoluteError(take->getFileOffset(), 0.0, 1e-6);
+        }
     }
 
     void testStereoWriterMonoInput()
