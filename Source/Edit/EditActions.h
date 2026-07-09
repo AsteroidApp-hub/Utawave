@@ -55,6 +55,12 @@ struct ClipParams
     float        gain       { 1.0f };
     juce::String name;
     juce::Colour colour     { juce::Colour(0xff3a6ea5) };
+    // true の時だけ colour を明示色 (customColour) として焼き付ける。false (既定) は
+    // トラック色追従のまま。旧実装は無条件に setColour していたため、トラック色追従の
+    // クリップを移動/コピーすると getColour() の無意味な既定値 (青) が明示色として
+    // 焼き付き「移動すると色が変わる」バグになっていた。ソースクリップから作る時は
+    // 必ず customColour = src->hasCustomColour() を入れること
+    bool         customColour { false };
 };
 
 // クリップ全プロパティのスナップショット
@@ -189,7 +195,9 @@ public:
                 addedPtr->setFadeOutSecs(params.fadeOut);
                 addedPtr->setGain(params.gain);
                 if (params.name.isNotEmpty()) addedPtr->setName(params.name);
-                addedPtr->setColour(params.colour);
+                // setColour は無条件で customColour 化するため、明示色の時だけ焼き付ける
+                // (既定はトラック色追従のまま = 移動/コピーで色が変わらない)
+                if (params.customColour) addedPtr->setColour(params.colour);
             }
         }
         if (onChange) onChange();

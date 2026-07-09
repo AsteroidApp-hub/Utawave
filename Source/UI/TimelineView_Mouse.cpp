@@ -1276,6 +1276,7 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             p.gain    = clip->getGain();
             p.name    = clip->getName();
             p.colour  = clip->getColour();
+            p.customColour = clip->hasCustomColour();   // トラック色追従なら追従のまま移す
             return p;
         };
 

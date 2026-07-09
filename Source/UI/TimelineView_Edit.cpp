@@ -352,6 +352,7 @@ void TimelineView::copySelectedClips()
                     e.params.gain       = clip->getGain();
                     e.params.name       = clip->getName();
                     e.params.colour     = clip->getColour();
+                    e.params.customColour = clip->hasCustomColour();
                     e.sourceTrack       = track;
                     e.sourceLane        = lane;
                     clipboard.push_back(e);
@@ -381,6 +382,7 @@ void TimelineView::copySelectedClips()
         e.params.gain       = r.clip->getGain();
         e.params.name       = r.clip->getName();
         e.params.colour     = r.clip->getColour();
+        e.params.customColour = r.clip->hasCustomColour();
         e.sourceTrack       = r.track;
         e.sourceLane        = r.lane;
         clipboard.push_back(e);
@@ -587,6 +589,7 @@ void TimelineView::duplicateSelectedClips()
         p.gain       = c->getGain();
         p.name       = c->getName();
         p.colour     = c->getColour();
+        p.customColour = c->hasCustomColour();
 
         if (undoManager)
         {
@@ -1318,8 +1321,8 @@ AudioClip* TimelineView::makeSplitTail(Lane* lane, const EditActions::ClipParams
     if (tail != nullptr)
     {
         tail->setFadeOutCurve(srcFadeOutCurve);
-        // ClipAddAction / setColour は無条件で customColour 化するため、元がトラック色追従だった
-        // 場合は resetColour で追従に戻す (分割した末尾の色が変わるのを防ぐ)。
+        // 色は params.customColour に依らずここで確定する (setColour は無条件で
+        // customColour 化するため、元がトラック色追従なら resetColour で追従に戻す)。
         if (srcHasCustomColour) tail->setColour(params.colour);
         else                    tail->resetColour();
         // ゲインエンベロープの右側を時刻シフトして引き継ぐ

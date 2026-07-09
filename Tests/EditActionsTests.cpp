@@ -374,7 +374,7 @@ public:
         EditActions::ClipParams p;
         p.file = juce::File("/tmp/add.wav"); p.startPos = 2.0; p.duration = 3.0;
         p.fileOffset = 0.5; p.fadeIn = 0.05; p.fadeOut = 0.06; p.gain = 0.6f;
-        p.name = "Added"; p.colour = juce::Colour(0xff778899);
+        p.name = "Added"; p.colour = juce::Colour(0xff778899); p.customColour = true;
 
         int changes = 0;
         EditActions::ClipAddAction act(&lane, p, fmt, cache, [&] { ++changes; });
@@ -402,6 +402,17 @@ public:
         expect(lane.clips.size() == 1, "redo -> restored");
         expect(lane.clips[0].get() == firstInstance, "redo restores the SAME instance (stored unique_ptr)");
         expect(changes == 3, "onChange on perform/undo/redo");
+
+        // 既定 (customColour=false) はトラック色追従のまま。旧実装は colour を無条件に
+        // 焼き付けていたため、トラック色追従クリップの移動/コピーで既定の青に変わっていた
+        // (「移動すると色が変わる」回帰テスト)。
+        EditActions::ClipParams p2;
+        p2.file = juce::File("/tmp/add2.wav"); p2.startPos = 6.0; p2.duration = 1.0;
+        EditActions::ClipAddAction act2(&lane, p2, fmt, cache, nullptr);
+        act2.perform();
+        expect(act2.getAddedClip() != nullptr
+               && ! act2.getAddedClip()->hasCustomColour(),
+               "default params keep track-follow colour (no custom colour burned)");
     }
 
     // ── ClipDeleteAction ──
