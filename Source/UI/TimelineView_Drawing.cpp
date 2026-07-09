@@ -316,9 +316,15 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                         && cache.bigPixelScale == pixelScale;
                     const bool zoomSame = cache.bigPixelsPerBeat == pixelsPerBeat
                                        && cache.bigBpm == bpm;
+                    // クリップ Move (fileOffset 不変) では帯を再生成せず平行移動で追従させる。
+                    // 帯は生成時の開始位置基準の絶対 px なので、開始位置の差分だけずらして
+                    // カバレッジ判定と blit を行う (contentSame の時のみ意味を持つ)
+                    const double bandShiftPx = (clip.getStartPosition() - cache.bigStartPos)
+                                               * pixelsPerBeat * beatsPerSec;
                     // 可視範囲が帯に収まっているか (ppb 不変前提の絶対座標比較)
                     const bool covered = contentSame && zoomSame
-                        && visAbsL >= cache.bigBandL - 0.5 && visAbsR <= cache.bigBandR + 0.5;
+                        && visAbsL >= cache.bigBandL + bandShiftPx - 0.5
+                        && visAbsR <= cache.bigBandR + bandShiftPx + 0.5;
                     // ズーム中 / 高速スクロール中は内容一致なら再生成を抑止し、stale 帯を時刻写像で
                     // 拡縮 blit する (重い fillPath を走らせず滑らかに流す。止まるとタイマーで鮮明化)。
                     const bool reuseDeferred = contentSame && (zoomActive || deferBigClipRegen);
@@ -331,6 +337,7 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                         const int sW = juce::jmax(1, juce::roundToInt(bandW * pixelScale));
                         const int sH = juce::jmax(1, juce::roundToInt(needH * pixelScale));
                         cache.bigBandL = bandL; cache.bigBandR = bandR; cache.bigHeight = needH;
+                        cache.bigStartPos = clip.getStartPosition();
                         cache.bigPixelsPerBeat = pixelsPerBeat; cache.bigBpm = bpm;
                         cache.bigFileOffset = fo; cache.bigGain = clip.getGain(); cache.bigVZoom = waveformZoom;
                         cache.bigColourARGB = colourArgb; cache.bigSamplesFinished = samplesDone;
@@ -347,15 +354,23 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                     }
                     // 帯が表す「タイムライン秒」範囲 (描画時 ppb 基準) を現在の ppb でコンポーネント
                     // 座標へ写す。ppb 不変なら bandL - scrollX に一致し、ズーム中は stale 帯が拡縮される。
+                    // クリップ Move の分は開始位置の差分 (秒) で平行移動する。
                     const double cachedPxSec = juce::jmax(1e-9, cache.bigPixelsPerBeat * (cache.bigBpm / 60.0));
-                    const double secL    = cache.bigBandL / cachedPxSec;
-                    const double secR    = cache.bigBandR / cachedPxSec;
+                    const double moveShiftSec = clip.getStartPosition() - cache.bigStartPos;
+                    const double secL    = cache.bigBandL / cachedPxSec + moveShiftSec;
+                    const double secR    = cache.bigBandR / cachedPxSec + moveShiftSec;
                     const double curPxSec = juce::jmax(1e-9, pixelsPerBeat * beatsPerSec);
                     const double compL   = secL * curPxSec - scrollX;
                     const double compW   = juce::jmax(1.0, (secR - secL) * curPxSec);
                     const int    imgW    = juce::jmax(1, cache.bigImage.getWidth());
                     const int    imgH    = juce::jmax(1, cache.bigImage.getHeight());
                     g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+                    // 帯はクリップの現在の矩形にクリップして貼る (通常キャッシュ経路と同じ作法)。
+                    // これが無いと、右端トリム (fileOffset 不変 = contentSame) 後に旧クリップ末尾
+                    // まで含む stale 帯が全幅 blit され、削除した区間に波形の残像が残る
+                    // (範囲削除後の残像バグの修正)。トリムは内容不変なので再生成は不要。
+                    juce::Graphics::ScopedSaveState bigClip(g);
+                    g.reduceClipRegion(wfRect);
                     g.drawImageTransformed(cache.bigImage,
                         juce::AffineTransform::scale((float) (compW / imgW),
                                                      (float) needH / (float) imgH)

@@ -228,6 +228,10 @@ public:
         juce::Image  bigImage;
         double       bigBandL { 0.0 };         // 帯の左端 (絶対 px = time_sec * pxPerSec)
         double       bigBandR { -1.0 };        // 帯の右端 (絶対 px)。R<L で無効
+        // 帯生成時のクリップ開始位置 (秒)。クリップの Move (fileOffset 不変) では帯の内容は
+        // 変わらないため再生成せず、描画側が (現在の開始位置 − これ) だけ帯を平行移動して
+        // blit する (これが無いと移動後も帯が旧位置に描かれて波形が枠から剥がれる)
+        double       bigStartPos { 0.0 };
         int          bigHeight { 0 };
         double       bigPixelsPerBeat { -1.0 };
         double       bigBpm { -1.0 };
