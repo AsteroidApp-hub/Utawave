@@ -366,6 +366,11 @@ public:
     bool getSelectionTrackSpan(int& lo, int& hi) const;
     // 範囲選択が複数トラックをまたいでいるか (true ならフォーカスレーンは使わない)
     bool isSelectionMultiTrack() const;
+    // 範囲選択がこのトラックを対象にしているか (ハイライト表示と一致)。
+    // 範囲なし = false / スパン内 = true / フォーカス無効 (どのトラック上でもない選択
+    // = 全トラックが全高でハイライト) = true。テイク採用ボタンの活性などで
+    // 「別トラックの範囲選択に反応しない」ために使う。
+    bool selectionRangeCoversTrack(int trackIdx) const;
     // ±delta だけフォーカスレーンを上下に移動。範囲が合えば true
     bool moveSelectionFocusLane(int delta);
     // フォーカスレーンの選択範囲を Lane 0（録音レーン）にコピー

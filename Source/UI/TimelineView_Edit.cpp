@@ -635,6 +635,15 @@ bool TimelineView::isSelectionMultiTrack() const
     return getSelectionTrackSpan(lo, hi) && lo != hi;
 }
 
+bool TimelineView::selectionRangeCoversTrack(int trackIdx) const
+{
+    if (!hasSelectionRange()) return false;
+    int lo = 0, hi = 0;
+    if (!getSelectionTrackSpan(lo, hi))
+        return true;   // フォーカス無効 = 全トラック対象 (全高ハイライトと一致)
+    return trackIdx >= lo && trackIdx <= hi;
+}
+
 std::vector<int> TimelineView::getInvolvedTrackIndices() const
 {
     std::set<int> s;   // 自動でソート + 重複排除
@@ -1057,8 +1066,9 @@ bool TimelineView::canPromoteTakeLane(int trackIdx, int laneIdx) const
     auto* lane = track->getLane(laneIdx);
     if (!lane) return false;
 
-    // ① 範囲選択あり: そのレーンに範囲と重なるクリップがあれば採用可能
-    if (hasSelectionRange())
+    // ① 範囲選択あり: 範囲が「このトラック」を対象にしていて (別トラック上の範囲選択には
+    //    反応しない)、そのレーンに範囲と重なるクリップがあれば採用可能
+    if (selectionRangeCoversTrack(trackIdx))
     {
         for (auto& cp : lane->clips)
             if (cp->getStartPosition() < loopEndTV - 0.001
@@ -1085,8 +1095,10 @@ bool TimelineView::promoteTakeLane(int trackIdx, int laneIdx)
     if (!srcLane) return false;
 
     double t1 = 0.0, t2 = 0.0;
-    // 範囲選択が最優先。無ければ選択中クリップ全体を当てこむ。
-    if (hasSelectionRange())
+    // 範囲選択が最優先 (ただしこのトラックを対象にしている時のみ。別トラック上の
+    // 範囲選択は無視する = canPromoteTakeLane の活性条件と一致)。
+    // 無ければ選択中クリップ全体を当てこむ。
+    if (selectionRangeCoversTrack(trackIdx))
     {
         t1 = loopStartTV;
         t2 = loopEndTV;
