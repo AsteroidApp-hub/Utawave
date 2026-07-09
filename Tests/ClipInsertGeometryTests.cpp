@@ -8,7 +8,8 @@
 // #M1 (左右対称フェード) の境界クランプを 1 箇所取りこぼして「接合部レベルディップ」
 // バグが出た。ここで一本化したロジックを純関数として網羅検証する:
 //   重なり判定 (None/Covered) / 4 ケース (LeftCut/RightCut/Split) / #M1 対称性
-//   (フェード長 <= 残り尺/2) / fileOffset が負にならない / エンベロープ右シフト。
+//   (フェード長 <= 残り尺/2) / fileOffset が負にならない / エンベロープ右シフト /
+//   範囲削除経路 (deleteSelectionRange が使う kXf=0: 切り口が範囲境界に一致・フェード 0)。
 // ExportEngineTests.cpp が main() を持つので静的インスタンスを置くだけ。expect は ASCII。
 
 #include <JuceHeader.h>
@@ -39,6 +40,7 @@ public:
         testThinClipNoAsymmetry();
         testFileOffsetNeverNegative();
         testEnvelopeShift();
+        testRangeDeleteZeroXf();
     }
 
     // 各プランの「設定するフェードは新しい尺の半分以下」(=setFade*Secs の dur*0.5 クランプを
@@ -183,6 +185,50 @@ public:
                         if (p.kind == OverlapKind::RightCut || p.kind == OverlapKind::Split)
                             expect(p.rightFileOffsetDelta >= -1e-9, "fileOffset delta >= 0");
                     }
+    }
+
+    void testRangeDeleteZeroXf()
+    {
+        beginTest("Range delete path (kXf=0): cuts land exactly on range bounds, no fades");
+        // TimelineView::deleteSelectionRange は kXf=0 で呼ぶ (削除は接合相手がいないので
+        // クロスフェードを作らない)。切り口が範囲境界に正確に一致し、プランのフェードが
+        // すべて 0 になることを固定する。
+        const double eps = 1e-4;
+
+        // LeftCut: 既存 [4,6], 範囲 [5,8] → 左部分は範囲開始ちょうどで終わる
+        auto p = planInsertOverlap(4.0, 6.0, 5.0, 8.0, 3.0, 0.0, eps);
+        expect(p.kind == OverlapKind::LeftCut);
+        expect(approxEq(p.leftDuration, 1.0), "left part ends exactly at range start");
+        expect(approxEq(p.leftFadeOut, 0.0) && approxEq(p.insFadeIn, 0.0), "no crossfade");
+
+        // RightCut: 既存 [6,10], 範囲 [5,7] → 右部分は範囲終端ちょうどから始まり、
+        // fileOffset 前進量 = タイムライン前進量 (内容が動かない)
+        auto q = planInsertOverlap(6.0, 10.0, 5.0, 7.0, 2.0, 0.0, eps);
+        expect(q.kind == OverlapKind::RightCut);
+        expect(approxEq(q.rightStart, 7.0), "right part starts exactly at range end");
+        expect(approxEq(q.rightFileOffsetDelta, 1.0), "fileOffset delta == timeline shift");
+        expect(approxEq(q.rightDuration, 3.0), "right part keeps tail length");
+        expect(approxEq(q.rightFadeIn, 0.0) && approxEq(q.insFadeOut, 0.0), "no crossfade");
+
+        // Split: 既存 [0,10], 範囲 [3,5] → 隙間 [3,5] がぴったり空く
+        auto s = planInsertOverlap(0.0, 10.0, 3.0, 5.0, 2.0, 0.0, eps);
+        expect(s.kind == OverlapKind::Split);
+        expect(approxEq(s.leftDuration, 3.0), "left ends at range start");
+        expect(approxEq(s.rightStart, 5.0), "tail starts at range end");
+        expect(approxEq(s.rightFileOffsetDelta, 5.0), "tail fileOffset delta == rightStart - clipStart");
+        expect(approxEq(s.rightStart + s.rightDuration, 10.0), "tail ends at original clip end");
+        expect(approxEq(s.leftFadeOut, 0.0) && approxEq(s.rightFadeIn, 0.0)
+               && approxEq(s.insFadeIn, 0.0) && approxEq(s.insFadeOut, 0.0), "no crossfade");
+
+        // 最小尺クランプ: 端ぎりぎりの範囲でも left/right は 0.01 未満にならない
+        auto m = planInsertOverlap(0.0, 10.0, 0.005, 9.995, 9.99, 0.0, eps);
+        expect(m.kind == OverlapKind::Split);
+        expect(m.leftDuration  >= 0.01 - 1e-9, "left duration clamped to minimum");
+        expect(m.rightDuration >= 0.01 - 1e-9, "right duration clamped to minimum");
+
+        // 接触のみ (範囲端 == クリップ端) は触らない
+        expect(planInsertOverlap(0.0, 2.0, 2.0, 5.0, 3.0, 0.0, eps).kind == OverlapKind::None);
+        expect(planInsertOverlap(5.0, 7.0, 2.0, 5.0, 3.0, 0.0, eps).kind == OverlapKind::None);
     }
 
     void testEnvelopeShift()

@@ -63,6 +63,110 @@ void TimelineView::deleteSelectedClips()
     repaint();
 }
 
+void TimelineView::deleteSelectionRange()
+{
+    if (!hasSelectionRange() || !undoManager) return;
+    const double t1 = loopStartTV;
+    const double t2 = loopEndTV;
+
+    // 対象レーンはハイライト表示 (drawTrackRows の選択範囲描画) と一致させる:
+    // フォーカスレーンがあればそのレーンのみ、無ければ (どのトラック上でもない場所からの
+    // 選択 = 全トラックが全高でハイライトされる) 全トラック・全レーン。
+    std::vector<std::pair<Track*, Lane*>> targets;
+    if (selectionFocusTrackIdx >= 0 && selectionFocusTrackIdx < trackManager.getTrackCount())
+    {
+        auto* track = trackManager.getTrack(selectionFocusTrackIdx);
+        auto* lane  = track ? track->getLane(juce::jmax(0, selectionFocusLaneIdx)) : nullptr;
+        if (track && lane) targets.push_back({ track, lane });
+    }
+    else
+    {
+        for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+        {
+            auto* track = trackManager.getTrack(ti);
+            if (!track) continue;
+            for (int li = 0; li < track->getLaneCount(); ++li)
+                if (auto* lane = track->getLane(li))
+                    targets.push_back({ track, lane });
+        }
+    }
+    if (targets.empty()) return;
+
+    // クリップ選択は範囲編集で破棄され得るので先に解除 (stale ポインタ防止)。
+    // 範囲選択とフォーカスレーンは残す。
+    clearAllSelections();
+
+    using namespace ClipInsertGeometry;
+    constexpr double kEps = 1e-4;
+    const auto clipAlive = clipAliveValidator();
+
+    undoManager->beginNewTransaction();
+    for (auto& [track, lane] : targets)
+    {
+        // アクションがレーンを変更するので live イテレートしない
+        std::vector<AudioClip*> snap;
+        for (auto& cp : lane->clips) snap.push_back(cp.get());
+        for (auto* c : snap)
+        {
+            // kXf=0: 削除は接合相手がいないのでクロスフェードは作らない (隙間が残る)。
+            // 切り口には小さな既定フェード (0.010) を置いてプチッ音を防ぐ。
+            const Plan plan = planInsertOverlap(c->getStartPosition(), c->getEndPosition(),
+                                                t1, t2, t2 - t1, 0.0, kEps);
+            if (plan.kind == OverlapKind::None) continue;
+            if (plan.kind == OverlapKind::Covered)
+            {
+                undoManager->perform(new EditActions::ClipDeleteAction(lane, c, editChangeCb));
+                continue;
+            }
+
+            EditActions::ClipState before; before.capture(c);
+            const bool   isSplit    = (plan.kind == OverlapKind::Split);
+            const double splitLocal = plan.rightFileOffsetDelta;
+            const float  dbAtSplit  = (isSplit && ! before.gainPoints.empty())
+                                      ? c->getEnvelopeDBAt(splitLocal) : 0.0f;
+
+            if (plan.kind == OverlapKind::LeftCut || isSplit)
+            {
+                // 既存を「左部分」へ縮める
+                EditActions::ClipState after = before;
+                after.duration = plan.leftDuration;
+                after.fadeOut  = juce::jmin(0.010, plan.leftDuration * 0.5);
+                undoManager->perform(new EditActions::ClipsPropertyAction(
+                    { before }, { after }, editChangeCb, clipAlive));
+            }
+            else  // RightCut: 既存の頭を詰めて右部分にする
+            {
+                EditActions::ClipState after = before;
+                after.startPos   = plan.rightStart;
+                after.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
+                after.duration   = plan.rightDuration;
+                after.fadeIn     = juce::jmin(0.010, plan.rightDuration * 0.5);
+                undoManager->perform(new EditActions::ClipsPropertyAction(
+                    { before }, { after }, editChangeCb, clipAlive));
+            }
+
+            if (isSplit)
+            {
+                // 右側末尾を新クリップとして残す (色/カーブ/エンベロープ引き継ぎは makeSplitTail)
+                EditActions::ClipParams rp;
+                rp.file       = c->getFile();
+                rp.startPos   = plan.rightStart;
+                rp.duration   = plan.rightDuration;
+                rp.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
+                rp.gain       = before.gain;
+                rp.name       = before.name;
+                rp.colour     = c->getColour();
+                rp.fadeIn     = juce::jmin(0.010, plan.rightDuration * 0.5);
+                rp.fadeOut    = juce::jmin(before.fadeOut, plan.rightDuration * 0.5);
+                makeSplitTail(lane, rp, before.fadeOutCurve, c->hasCustomColour(),
+                              before.gainPoints, splitLocal, dbAtSplit,
+                              track->getFormatManager(), track->getThumbnailCache());
+            }
+        }
+    }
+    repaint();
+}
+
 void TimelineView::deleteSelectedMidiClip()
 {
     if (!selectedMidiClip || !selectedMidiTrack) return;

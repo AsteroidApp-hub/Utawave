@@ -309,6 +309,11 @@ public:
     void deleteSelectedClips();
     void deleteSelectedMidiClip();   // 選択中の MIDI クリップを削除
     void deleteSelectedCrossfade();
+    // 範囲選択内の波形を削除 (Delete/Backspace)。対象はハイライト表示と一致: フォーカス
+    // レーンがあればそのレーンのみ、無ければ全トラック・全レーン。範囲を跨ぐクリップは
+    // トリム / 分割し、切り口には小さな既定フェードを置く。範囲選択自体は残す
+    // (↑↓ でフォーカスレーンを移して別テイクも続けて削除できる)。
+    void deleteSelectionRange();
     void nudgeSelectedClips(double seconds);
     void copySelectedClips();
     void cutSelectedClips();

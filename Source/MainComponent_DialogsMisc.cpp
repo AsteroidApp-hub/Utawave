@@ -340,7 +340,7 @@ void MainComponent::showShortcutsDialog()
             { u8"Cmd+A",                  u8"クリップ全選択" },
             { u8"Cmd+C / Cmd+X / Cmd+V",  u8"コピー / カット / ペースト" },
             { u8"Cmd+D",                  u8"複製" },
-            { u8"Delete / Backspace",     u8"選択クリップ / クロスフェード削除" },
+            { u8"Delete / Backspace",     u8"選択クリップ / 範囲内の波形 / クロスフェード削除" },
             { u8"← / →",                  u8"クリップを左右にナッジ" },
             { u8"Shift+← / →",            u8"クリップを大きくナッジ" },
             { u8"F",                      u8"選択範囲で fade-in / fade-out" },

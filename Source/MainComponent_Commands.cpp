@@ -379,12 +379,20 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         }
     }
 
-    // Delete / Backspace = 選択クロスフェードまたは選択クリップ群を削除
+    // Delete / Backspace = 選択クロスフェード / 範囲選択内の波形 / 選択クリップ群を削除
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
         if (timelineView.hasSelectedCrossfade())
         {
             timelineView.deleteSelectedCrossfade();
+            return true;
+        }
+        // 範囲選択があれば範囲内の波形だけを削除 (クリップ全体削除より優先)。
+        // 範囲ドラッグはクリップ自体も選択状態にするため、先に判定しないと
+        // 「範囲を選んで Delete」でクリップが丸ごと消えてしまう。
+        if (timelineView.hasSelectionRange())
+        {
+            timelineView.deleteSelectionRange();
             return true;
         }
         if (timelineView.hasSelectedClip())

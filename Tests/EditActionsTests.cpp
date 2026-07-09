@@ -8,7 +8,8 @@
 //   ClipsPropertyAction (全フィールド往復) / ClipAddAction / ClipDeleteAction (同一インスタンス復帰) /
 //   ClipSplitAction (start/dur/fileOffset 再計算・フェード曲線継承・ゲインエンベロープ分割+境界補間) /
 //   StripSilenceAction (keep セグメント生成・境界フェード・エンベロープ破棄) /
-//   LaneSnapshotAction (全フィールド+gainPoints+カスタム色の往復・deferClips が clear 前に発火)
+//   LaneSnapshotAction (全フィールド+gainPoints+カスタム色の往復・deferClips が clear 前に発火) /
+//   範囲選択削除レシピ (TimelineView::deleteSelectionRange と同一作法の合成 Undo)
 //
 // 依存はリンク済み (Track.cpp / AudioClip.cpp)。EditActions.h はヘッダオンリー。
 // 各アクションは位置/フェード/エンベロープ操作のみでデコードしないためダミー File で可。
@@ -17,6 +18,7 @@
 #include <JuceHeader.h>
 #include <cmath>
 #include "../Source/Edit/EditActions.h"
+#include "../Source/Edit/ClipInsertGeometry.h"
 #include "../Source/Tracks/Track.h"
 #include "../Source/Tracks/AudioClip.h"
 
@@ -69,6 +71,130 @@ public:
         testMidiUndoStalePointerSafety();
         testClipNameUndo();
         testSnapshotAction();
+        testRangeDeleteRecipe();
+    }
+
+    // ── 範囲選択削除のレシピ (TimelineView::deleteSelectionRange と同じ作法) ──
+    // planInsertOverlap (kXf=0) の結果を ClipsPropertyAction / ClipDeleteAction /
+    // ClipAddAction (分割の右側末尾) へ写して 1 トランザクションに積む。契約:
+    // 範囲 [t1,t2] が空く / 残る内容が時間整合 (fileOffset がタイムライン前進量だけ進み
+    // 音が動かない) / Undo 1 回で全復元。TrackManagerTests の Move-to-new-track と同じ
+    // 「同一作法」回帰テスト (本体は GUI 側のため直接リンクできない)。
+    void testRangeDeleteRecipe()
+    {
+        beginTest("Range delete recipe: trim/covered leaves gap, undo round-trip");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        juce::AudioThumbnailCache cache(8);
+        juce::UndoManager um;
+        using namespace ClipInsertGeometry;
+        constexpr double kEps = 1e-4;
+
+        Lane lane;
+        auto* a = lane.addClip(juce::File("/tmp/rdA.wav"), 0.0, 2.0, fmt, cache);  // LeftCut
+        auto* b = lane.addClip(juce::File("/tmp/rdB.wav"), 2.5, 3.0, fmt, cache);  // Covered
+        auto* c = lane.addClip(juce::File("/tmp/rdC.wav"), 5.5, 2.5, fmt, cache);  // RightCut
+        c->setFileOffset(0.25);
+        const double t1 = 1.0, t2 = 6.0;
+
+        um.beginNewTransaction();
+        std::vector<AudioClip*> snap;
+        for (auto& cp : lane.clips) snap.push_back(cp.get());
+        for (auto* clip : snap)
+        {
+            const Plan plan = planInsertOverlap(clip->getStartPosition(), clip->getEndPosition(),
+                                                t1, t2, t2 - t1, 0.0, kEps);
+            if (plan.kind == OverlapKind::None) continue;
+            if (plan.kind == OverlapKind::Covered)
+            {
+                um.perform(new EditActions::ClipDeleteAction(&lane, clip, nullptr));
+                continue;
+            }
+            EditActions::ClipState before; before.capture(clip);
+            EditActions::ClipState after = before;
+            if (plan.kind == OverlapKind::LeftCut)
+            {
+                after.duration = plan.leftDuration;
+                after.fadeOut  = juce::jmin(0.010, plan.leftDuration * 0.5);
+            }
+            else  // RightCut
+            {
+                after.startPos   = plan.rightStart;
+                after.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
+                after.duration   = plan.rightDuration;
+                after.fadeIn     = juce::jmin(0.010, plan.rightDuration * 0.5);
+            }
+            um.perform(new EditActions::ClipsPropertyAction({ before }, { after }, nullptr, nullptr));
+        }
+
+        expect((int) lane.clips.size() == 2, "covered clip removed");
+        expect(approxEq(a->getStartPosition(), 0.0, 1e-9) && approxEq(a->getDuration(), 1.0, 1e-9),
+               "left clip trimmed to range start");
+        expect(approxEq(c->getStartPosition(), 6.0, 1e-9) && approxEq(c->getDuration(), 2.0, 1e-9),
+               "right clip starts at range end and keeps tail length");
+        expect(approxEq(c->getFileOffset(), 0.75, 1e-9),
+               "fileOffset advanced by trim amount (content stays in place)");
+        for (auto& cp : lane.clips)
+            expect(cp->getEndPosition() <= t1 + 1e-6 || cp->getStartPosition() >= t2 - 1e-6,
+                   "range is empty after delete");
+
+        um.undo();
+        expect((int) lane.clips.size() == 3, "undo restores covered clip");
+        bool bBack = false;
+        for (auto& cp : lane.clips) if (cp.get() == b) bBack = true;
+        expect(bBack, "covered clip restored as same instance");
+        expect(approxEq(a->getDuration(), 2.0, 1e-9)
+               && approxEq(c->getStartPosition(), 5.5, 1e-9)
+               && approxEq(c->getFileOffset(), 0.25, 1e-9),
+               "undo restores trim geometry");
+
+        um.redo();
+        expect((int) lane.clips.size() == 2
+               && approxEq(a->getDuration(), 1.0, 1e-9)
+               && approxEq(c->getStartPosition(), 6.0, 1e-9),
+               "redo re-applies range delete");
+        um.undo();
+
+        // ── 内包 (Split): 左トリム + 右側末尾の新クリップ ──
+        beginTest("Range delete recipe: split inside a clip keeps tail aligned, undo round-trip");
+        Lane lane2;
+        auto* d = lane2.addClip(juce::File("/tmp/rdD.wav"), 0.0, 10.0, fmt, cache);
+        d->setFileOffset(0.25);
+        const double s1 = 3.0, s2 = 5.0;
+        const Plan plan = planInsertOverlap(d->getStartPosition(), d->getEndPosition(),
+                                            s1, s2, s2 - s1, 0.0, kEps);
+        expect(plan.kind == OverlapKind::Split, "range inside clip -> Split");
+
+        um.beginNewTransaction();
+        EditActions::ClipState before; before.capture(d);
+        EditActions::ClipState after = before;
+        after.duration = plan.leftDuration;
+        after.fadeOut  = juce::jmin(0.010, plan.leftDuration * 0.5);
+        um.perform(new EditActions::ClipsPropertyAction({ before }, { after }, nullptr, nullptr));
+        EditActions::ClipParams rp;
+        rp.file       = d->getFile();
+        rp.startPos   = plan.rightStart;
+        rp.duration   = plan.rightDuration;
+        rp.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
+        um.perform(new EditActions::ClipAddAction(&lane2, rp, fmt, cache, nullptr));
+
+        expect((int) lane2.clips.size() == 2, "split -> left part + tail");
+        AudioClip* tail = nullptr;
+        for (auto& cp : lane2.clips) if (cp.get() != d) tail = cp.get();
+        expect(tail != nullptr, "tail clip created");
+        expect(approxEq(d->getDuration(), 3.0, 1e-9), "left part ends at range start");
+        expect(approxEq(tail->getStartPosition(), 5.0, 1e-9)
+               && approxEq(tail->getStartPosition() + tail->getDuration(), 10.0, 1e-9),
+               "tail spans range end to original clip end");
+        // アンカー (fileOffset - startPos) が左部分と一致 = 同一連続音声のまま (音が動かない)
+        expect(approxEq(tail->getFileOffset() - tail->getStartPosition(),
+                        d->getFileOffset() - d->getStartPosition(), 1e-9),
+               "tail anchor matches original (same continuous audio)");
+
+        um.undo();
+        expect((int) lane2.clips.size() == 1, "undo removes tail");
+        expect(approxEq(d->getDuration(), 10.0, 1e-9)
+               && approxEq(d->getFileOffset(), 0.25, 1e-9),
+               "undo restores original clip");
     }
 
     // ── ClipState: name の往復 (クリップ名変更の Undo) ──
