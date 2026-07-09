@@ -364,8 +364,14 @@ public:
     // 単一トラックなら lo == hi == フォーカストラック。フォーカス無効
     // (どのトラック上でもない場所からの選択) なら false。
     bool getSelectionTrackSpan(int& lo, int& hi) const;
-    // 範囲選択が複数トラックをまたいでいるか (true ならフォーカスレーンは使わない)
-    bool isSelectionMultiTrack() const;
+    // 範囲選択が対象にしている行 (trackIdx, laneIdx) の一覧 (視覚順)。
+    // アンカー行〜もう一端の行の間の全「可視」行 (途中トラックが折りたたみ中なら
+    // Lane 0 のみ・展開中ならテイクレーンも視覚どおり含む)。単一行選択なら
+    // フォーカス行 1 件。フォーカス無効なら空 (呼び出し側で全トラック扱い)。
+    std::vector<std::pair<int, int>> getSelectionLaneRows() const;
+    // 範囲選択が複数行 (トラック/テイクレーンまたぎ) か (true ならフォーカス
+    // レーン単体の強調ではなく行スパンでハイライト/編集する)
+    bool isSelectionMultiRow() const;
     // 範囲選択がこのトラックを対象にしているか (ハイライト表示と一致)。
     // 範囲なし = false / スパン内 = true / フォーカス無効 (どのトラック上でもない選択
     // = 全トラックが全高でハイライト) = true。テイク採用ボタンの活性などで
@@ -527,6 +533,11 @@ private:
     void resetVerticalZoom();                     // 波形振幅を既定値へリセット
     void scrollByTracks(int steps);               // steps>0 = 下(後ろ) / <0 = 上(前)へ N トラック
 
+    // コンテンツ域相対 y (スクロール込み) から (トラック, 可視レーン) 行を推定する。
+    // トラック域の外は端の行へクランプ (上 = 先頭トラック Lane 0 / 下 = 末尾トラックの
+    // 最終可視レーン)。トラックが 1 本も無ければ false。範囲選択の縦ドラッグで使う。
+    bool laneRowAtY(int relY, int& trackIdx, int& laneIdx) const;
+
     // 差し込みで内包クリップを分割した「右側末尾」を作る共通ヘルパ (ドラッグ別トラック /
     // ペースト / 同一レーンドラッグで共用)。undoManager があれば ClipAddAction、無ければ
     // 直接 addClip。色 (トラック色追従の維持) / フェードカーブ / ゲインエンベロープの右シフトを
@@ -658,11 +669,13 @@ private:
     // 選択範囲のフォーカスレーン（テイク比較）
     int selectionFocusTrackIdx { -1 };
     int selectionFocusLaneIdx  { -1 };
-    // 範囲選択の縦スパンの「もう一端」(複数トラックまたぎドラッグ)。-1 または
-    // フォーカスと同値なら単一トラック選択 (従来動作・フォーカスレーンが有効)。
-    // それ以外なら [min,max] のトラック群をまたいで選択している (レーン概念は持たず
-    // 各トラックの全レーンが対象。ハイライト/削除/ヘッダ連動がこのスパンに追従する)
+    // 範囲選択の縦スパンの「もう一端」の行 (トラック, 可視レーン)。複数トラック /
+    // 複数テイクレーンまたぎドラッグ用。EndIdx が -1 なら単一行選択 (従来動作・
+    // フォーカスレーンのみ)。選択される行は視覚順でアンカー行〜この行の全可視行
+    // (Lane 0 で止めればテイクレーンは含まれない = WYSIWYG)。実際の行集合は
+    // getSelectionLaneRows() が解決し、ハイライト/削除/ヘッダ連動が追従する
     int selectionFocusTrackEndIdx { -1 };
+    int selectionFocusLaneEndIdx  { -1 };
 
     AppSettings appSettings;
 

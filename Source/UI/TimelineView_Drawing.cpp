@@ -1464,36 +1464,46 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
             x2 = juce::jmin(x2, area.getRight());
 
             // フォーカスレーンが指定されている場合はそのレーンだけ強調。
-            // 複数トラックまたぎ (スパン) はまたいだトラック群の全高を強調
+            // 複数行 (トラック/テイクレーン) またぎは先頭行の上端〜最終行の下端を強調
+            // (行は視覚的に連続しているため 1 矩形で塗れる。Lane 0 で止めた選択は
+            // テイクレーンを覆わない = WYSIWYG)
             int yStart = area.getY();
             int yHeight = area.getHeight();
             bool focused = (selectionFocusTrackIdx >= 0 && selectionFocusLaneIdx >= 0
                             && selectionFocusTrackIdx < trackManager.getTrackCount());
-            if (isSelectionMultiTrack())
+
+            // 行 (トラック, 可視レーン) の縦位置と高さ (drawTrackRows と同じ式)
+            auto rowYH = [&](int t, int l, int& y, int& h)
             {
-                int lo = 0, hi = 0;
-                getSelectionTrackSpan(lo, hi);
-                auto* trHi = trackManager.getTrack(hi);
-                yStart  = area.getY() + trackManager.getTrackY(lo) - scrollY;
-                yHeight = trackManager.getTrackY(hi) - trackManager.getTrackY(lo)
-                          + (trHi ? trHi->getTotalHeight() : 0);
-                focused = true;   // スパン選択も強調 alpha で塗る
-            }
-            else if (focused)
-            {
-                auto* tr = trackManager.getTrack(selectionFocusTrackIdx);
-                int trackTop = area.getY() + trackManager.getTrackY(selectionFocusTrackIdx) - scrollY;
-                if (selectionFocusLaneIdx == 0)
+                auto* tr = trackManager.getTrack(t);
+                if (!tr) { y = area.getY(); h = 0; return; }
+                const int trackTop = area.getY() + trackManager.getTrackY(t) - scrollY;
+                if (l == 0)
                 {
-                    yStart = trackTop;
-                    yHeight = tr->isLanesCollapsed() ? tr->getTotalHeight() : tr->getMainHeight();
+                    y = trackTop;
+                    h = tr->isLanesCollapsed() ? tr->getTotalHeight() : tr->getMainHeight();
                 }
                 else
                 {
-                    yStart = trackTop + tr->getMainHeight()
-                             + (selectionFocusLaneIdx - 1) * tr->getLaneHeight();
-                    yHeight = tr->getLaneHeight();
+                    y = trackTop + tr->getMainHeight() + (l - 1) * tr->getLaneHeight();
+                    h = tr->getLaneHeight();
                 }
+            };
+
+            const auto selRows = getSelectionLaneRows();
+            if (selRows.size() > 1)
+            {
+                int y0 = 0, h0 = 0, y1 = 0, h1 = 0;
+                rowYH(selRows.front().first, selRows.front().second, y0, h0);
+                rowYH(selRows.back().first,  selRows.back().second,  y1, h1);
+                yStart  = y0;
+                yHeight = (y1 + h1) - y0;
+                focused = true;   // 行スパン選択も強調 alpha で塗る
+            }
+            else if (focused)
+            {
+                rowYH(selectionFocusTrackIdx, juce::jmax(0, selectionFocusLaneIdx),
+                      yStart, yHeight);
             }
             float alphaFill = loopActiveTV ? 0.20f : 0.13f;
             g.setColour(juce::Colour(0xff5a8aaa).withAlpha(focused ? alphaFill * 1.4f : alphaFill));

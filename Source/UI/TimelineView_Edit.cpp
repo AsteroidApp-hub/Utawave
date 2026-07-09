@@ -70,37 +70,31 @@ void TimelineView::deleteSelectionRange()
     const double t2 = loopEndTV;
 
     // 対象レーンはハイライト表示 (drawTrackRows の選択範囲描画) と一致させる:
-    // 単一トラック選択はフォーカスレーンのみ、複数トラックまたぎはスパン内の全トラック・
-    // 全レーン、フォーカス無効 (どのトラック上でもない場所からの選択 = 全トラックが
-    // 全高でハイライトされる) は全トラック・全レーン。
+    // 選択中の行 (トラック, 可視レーン) 群 = getSelectionLaneRows()。単一行選択は
+    // フォーカスレーンのみ、複数行またぎは Lane 0 / テイクレーンを視覚どおりに対象
+    // (Lane 0 で止めた選択はテイクレーンを含まない)。フォーカス無効 (どのトラック上
+    // でもない場所からの選択 = 全トラックが全高でハイライトされる) は全トラック・全レーン。
     std::vector<std::pair<Track*, Lane*>> targets;
-    auto addAllLanes = [&](int ti)
+    const auto rows = getSelectionLaneRows();
+    if (!rows.empty())
     {
-        auto* track = trackManager.getTrack(ti);
-        if (!track) return;
-        for (int li = 0; li < track->getLaneCount(); ++li)
-            if (auto* lane = track->getLane(li))
-                targets.push_back({ track, lane });
-    };
-    int spanLo = 0, spanHi = 0;
-    if (getSelectionTrackSpan(spanLo, spanHi))
-    {
-        if (spanLo == spanHi)
+        for (auto& [ti, li] : rows)
         {
-            auto* track = trackManager.getTrack(spanLo);
-            auto* lane  = track ? track->getLane(juce::jmax(0, selectionFocusLaneIdx)) : nullptr;
+            auto* track = trackManager.getTrack(ti);
+            auto* lane  = track ? track->getLane(li) : nullptr;
             if (track && lane) targets.push_back({ track, lane });
-        }
-        else
-        {
-            for (int ti = spanLo; ti <= spanHi; ++ti)
-                addAllLanes(ti);
         }
     }
     else
     {
         for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
-            addAllLanes(ti);
+        {
+            auto* track = trackManager.getTrack(ti);
+            if (!track) continue;
+            for (int li = 0; li < track->getLaneCount(); ++li)
+                if (auto* lane = track->getLane(li))
+                    targets.push_back({ track, lane });
+        }
     }
     if (targets.empty()) return;
 
@@ -612,6 +606,7 @@ void TimelineView::setSelectionFocus(int trackIdx, int laneIdx)
     selectionFocusTrackIdx    = trackIdx;
     selectionFocusLaneIdx     = laneIdx;
     selectionFocusTrackEndIdx = -1;   // 外部からの単一レーン指定はスパンを畳む
+    selectionFocusLaneEndIdx  = -1;
     repaint();
 }
 
@@ -629,10 +624,45 @@ bool TimelineView::getSelectionTrackSpan(int& lo, int& hi) const
     return true;
 }
 
-bool TimelineView::isSelectionMultiTrack() const
+std::vector<std::pair<int, int>> TimelineView::getSelectionLaneRows() const
 {
-    int lo = 0, hi = 0;
-    return getSelectionTrackSpan(lo, hi) && lo != hi;
+    std::vector<std::pair<int, int>> rows;
+    const int count = trackManager.getTrackCount();
+    if (selectionFocusTrackIdx < 0 || selectionFocusTrackIdx >= count) return rows;
+
+    // アンカー行ともう一端の行を視覚順 (トラック昇順 → レーン昇順) に正規化
+    int tA = selectionFocusTrackIdx;
+    int lA = juce::jmax(0, selectionFocusLaneIdx);
+    int tB = tA, lB = lA;
+    if (selectionFocusTrackEndIdx >= 0)
+    {
+        tB = juce::jlimit(0, count - 1, selectionFocusTrackEndIdx);
+        lB = juce::jmax(0, selectionFocusLaneEndIdx);
+    }
+    if (tB < tA || (tB == tA && lB < lA))
+    {
+        std::swap(tA, tB);
+        std::swap(lA, lB);
+    }
+
+    for (int t = tA; t <= tB; ++t)
+    {
+        auto* tr = trackManager.getTrack(t);
+        if (!tr) continue;
+        // 可視行のみ: 折りたたみ中は Lane 0 だけ (隠れているテイクレーンは対象にしない)
+        const bool expanded = !tr->isLanesCollapsed() && tr->getLaneCount() > 1;
+        const int lastLane  = expanded ? tr->getLaneCount() - 1 : 0;
+        const int from = (t == tA) ? juce::jmin(lA, lastLane) : 0;
+        const int to   = (t == tB) ? juce::jmin(lB, lastLane) : lastLane;
+        for (int l = from; l <= to; ++l)
+            rows.push_back({ t, l });
+    }
+    return rows;
+}
+
+bool TimelineView::isSelectionMultiRow() const
+{
+    return getSelectionLaneRows().size() > 1;
 }
 
 bool TimelineView::selectionRangeCoversTrack(int trackIdx) const
@@ -642,6 +672,39 @@ bool TimelineView::selectionRangeCoversTrack(int trackIdx) const
     if (!getSelectionTrackSpan(lo, hi))
         return true;   // フォーカス無効 = 全トラック対象 (全高ハイライトと一致)
     return trackIdx >= lo && trackIdx <= hi;
+}
+
+bool TimelineView::laneRowAtY(int relY, int& trackIdx, int& laneIdx) const
+{
+    const int count = trackManager.getTrackCount();
+    if (count <= 0) return false;
+
+    int t = trackManager.trackAtY(relY);
+    if (t < 0)
+    {
+        if (relY < 0) { trackIdx = 0; laneIdx = 0; return true; }   // 先頭より上
+        // 末尾より下 → 最後のトラックの最終可視レーンへクランプ
+        t = count - 1;
+        auto* tr = trackManager.getTrack(t);
+        trackIdx = t;
+        laneIdx  = (tr && !tr->isLanesCollapsed() && tr->getLaneCount() > 1)
+                   ? tr->getLaneCount() - 1 : 0;
+        return true;
+    }
+
+    auto* tr = trackManager.getTrack(t);
+    int l = 0;
+    if (tr && !tr->isLanesCollapsed() && tr->getLaneCount() > 1)
+    {
+        const int yInTrack = relY - trackManager.getTrackY(t);
+        const int mainH    = tr->getMainHeight();
+        if (yInTrack >= mainH)
+            l = juce::jmin(1 + (yInTrack - mainH) / tr->getLaneHeight(),
+                           tr->getLaneCount() - 1);
+    }
+    trackIdx = t;
+    laneIdx  = l;
+    return true;
 }
 
 std::vector<int> TimelineView::getInvolvedTrackIndices() const
@@ -670,11 +733,12 @@ bool TimelineView::moveSelectionFocusLane(int delta)
     if (selectionFocusTrackIdx < 0
         || selectionFocusTrackIdx >= trackManager.getTrackCount())
         return false;
-    // 複数トラックまたぎ選択中の ↑↓ はまずアンカートラック単体へ畳む
-    // (フォーカスレーン移動はテイク比較用の単一トラック操作のため)
-    if (isSelectionMultiTrack())
+    // 複数行 (トラック/テイクレーン) またぎ選択中の ↑↓ はまずアンカー行単体へ畳む
+    // (フォーカスレーン移動はテイク比較用の単一レーン操作のため)
+    if (isSelectionMultiRow())
     {
         selectionFocusTrackEndIdx = -1;
+        selectionFocusLaneEndIdx  = -1;
         repaint();
         return true;
     }

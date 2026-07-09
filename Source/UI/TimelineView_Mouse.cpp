@@ -323,6 +323,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             selectionFocusTrackIdx    = trackIdx;
             selectionFocusLaneIdx     = laneIdx;
             selectionFocusTrackEndIdx = -1;   // 新しいドラッグはスパンを畳んで開始
+            selectionFocusLaneEndIdx  = -1;
             // 既存範囲はクリア（mouseDrag で新規設定される）
             if (loopEndTV > loopStartTV + 0.001 && onSetSelectionRange)
                 onSetSelectionRange(0.0, 0.0);
@@ -487,6 +488,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         selectionFocusTrackIdx    = -1;
         selectionFocusLaneIdx     = -1;
         selectionFocusTrackEndIdx = -1;
+        selectionFocusLaneEndIdx  = -1;
     }
     notifySelectionChanged();  // 選択クリップ確定 → ヘッダの採用ボタン活性を更新
     if (!ref.valid()) { repaint(); return; }
@@ -501,6 +503,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         selectionFocusTrackIdx    = ref.trackIdx;
         selectionFocusLaneIdx     = ref.laneIdx;
         selectionFocusTrackEndIdx = -1;   // 新しいドラッグはスパンを畳んで開始
+        selectionFocusLaneEndIdx  = -1;
         // 再生バー追従: ドラッグ開始位置にシーク (Cmd 押下中はスナップを一時解除)
         if (appSettings.playheadFollowsSelection && onSeek)
             onSeek(e.mods.isCommandDown() ? dragStartSecs : snapTime(dragStartSecs));
@@ -1023,17 +1026,29 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
                 t2 = snapTime(t2);
             }
 
-            // 縦方向: ドラッグ先のトラックまでスパンを広げる (複数トラックまたぎ選択)。
-            // アンカー (フォーカス) は mouseDown のトラックのまま、もう一端だけを更新する。
-            // トラック域の外へ出たら端のトラックへクランプ (上=先頭 / 下=末尾)。
-            if (selectionFocusTrackIdx >= 0 && trackManager.getTrackCount() > 0)
+            // 縦方向: ドラッグ先の行 (トラック, 可視レーン) までスパンを広げる
+            // (複数トラック / 複数テイクレーンまたぎ選択)。アンカー (フォーカス) は
+            // mouseDown の行のまま、もう一端だけを更新する。Lane 0 で止めれば
+            // テイクレーンは含まれない。トラック域の外は端の行へクランプ。
+            if (selectionFocusTrackIdx >= 0)
             {
-                auto area  = getContentArea();
-                int  relY  = e.y - area.getY() + scrollY;
-                int  curTr = trackManager.trackAtY(relY);
-                if (curTr < 0)
-                    curTr = (relY < 0) ? 0 : trackManager.getTrackCount() - 1;
-                selectionFocusTrackEndIdx = (curTr == selectionFocusTrackIdx) ? -1 : curTr;
+                auto area = getContentArea();
+                int  relY = e.y - area.getY() + scrollY;
+                int  endT = -1, endL = -1;
+                if (laneRowAtY(relY, endT, endL))
+                {
+                    if (endT == selectionFocusTrackIdx
+                        && endL == juce::jmax(0, selectionFocusLaneIdx))
+                    {
+                        selectionFocusTrackEndIdx = -1;   // アンカー行に戻った = 単一行
+                        selectionFocusLaneEndIdx  = -1;
+                    }
+                    else
+                    {
+                        selectionFocusTrackEndIdx = endT;
+                        selectionFocusLaneEndIdx  = endL;
+                    }
+                }
             }
 
             if (onSetSelectionRange) onSetSelectionRange(t1, t2);
