@@ -309,8 +309,9 @@ public:
     void deleteSelectedClips();
     void deleteSelectedMidiClip();   // 選択中の MIDI クリップを削除
     void deleteSelectedCrossfade();
-    // 範囲選択内の波形を削除 (Delete/Backspace)。対象はハイライト表示と一致: フォーカス
-    // レーンがあればそのレーンのみ、無ければ全トラック・全レーン。範囲を跨ぐクリップは
+    // 範囲選択内の波形を削除 (Delete/Backspace)。対象はハイライト表示と一致:
+    // 単一トラック選択はフォーカスレーンのみ、複数トラックまたぎはスパン内の全トラック・
+    // 全レーン、フォーカス無効なら全トラック・全レーン。範囲を跨ぐクリップは
     // トリム / 分割し、切り口には小さな既定フェードを置く。範囲選択自体は残す
     // (↑↓ でフォーカスレーンを移して別テイクも続けて削除できる)。
     void deleteSelectionRange();
@@ -359,6 +360,12 @@ public:
     int  getSelectionFocusTrack() const { return selectionFocusTrackIdx; }
     int  getSelectionFocusLane()  const { return selectionFocusLaneIdx;  }
     void setSelectionFocus(int trackIdx, int laneIdx);
+    // 範囲選択のトラックスパン [lo, hi] (複数トラックまたぎドラッグ対応)。
+    // 単一トラックなら lo == hi == フォーカストラック。フォーカス無効
+    // (どのトラック上でもない場所からの選択) なら false。
+    bool getSelectionTrackSpan(int& lo, int& hi) const;
+    // 範囲選択が複数トラックをまたいでいるか (true ならフォーカスレーンは使わない)
+    bool isSelectionMultiTrack() const;
     // ±delta だけフォーカスレーンを上下に移動。範囲が合えば true
     bool moveSelectionFocusLane(int delta);
     // フォーカスレーンの選択範囲を Lane 0（録音レーン）にコピー
@@ -646,6 +653,11 @@ private:
     // 選択範囲のフォーカスレーン（テイク比較）
     int selectionFocusTrackIdx { -1 };
     int selectionFocusLaneIdx  { -1 };
+    // 範囲選択の縦スパンの「もう一端」(複数トラックまたぎドラッグ)。-1 または
+    // フォーカスと同値なら単一トラック選択 (従来動作・フォーカスレーンが有効)。
+    // それ以外なら [min,max] のトラック群をまたいで選択している (レーン概念は持たず
+    // 各トラックの全レーンが対象。ハイライト/削除/ヘッダ連動がこのスパンに追従する)
+    int selectionFocusTrackEndIdx { -1 };
 
     AppSettings appSettings;
 

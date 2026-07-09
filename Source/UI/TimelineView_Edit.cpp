@@ -70,25 +70,37 @@ void TimelineView::deleteSelectionRange()
     const double t2 = loopEndTV;
 
     // 対象レーンはハイライト表示 (drawTrackRows の選択範囲描画) と一致させる:
-    // フォーカスレーンがあればそのレーンのみ、無ければ (どのトラック上でもない場所からの
-    // 選択 = 全トラックが全高でハイライトされる) 全トラック・全レーン。
+    // 単一トラック選択はフォーカスレーンのみ、複数トラックまたぎはスパン内の全トラック・
+    // 全レーン、フォーカス無効 (どのトラック上でもない場所からの選択 = 全トラックが
+    // 全高でハイライトされる) は全トラック・全レーン。
     std::vector<std::pair<Track*, Lane*>> targets;
-    if (selectionFocusTrackIdx >= 0 && selectionFocusTrackIdx < trackManager.getTrackCount())
+    auto addAllLanes = [&](int ti)
     {
-        auto* track = trackManager.getTrack(selectionFocusTrackIdx);
-        auto* lane  = track ? track->getLane(juce::jmax(0, selectionFocusLaneIdx)) : nullptr;
-        if (track && lane) targets.push_back({ track, lane });
+        auto* track = trackManager.getTrack(ti);
+        if (!track) return;
+        for (int li = 0; li < track->getLaneCount(); ++li)
+            if (auto* lane = track->getLane(li))
+                targets.push_back({ track, lane });
+    };
+    int spanLo = 0, spanHi = 0;
+    if (getSelectionTrackSpan(spanLo, spanHi))
+    {
+        if (spanLo == spanHi)
+        {
+            auto* track = trackManager.getTrack(spanLo);
+            auto* lane  = track ? track->getLane(juce::jmax(0, selectionFocusLaneIdx)) : nullptr;
+            if (track && lane) targets.push_back({ track, lane });
+        }
+        else
+        {
+            for (int ti = spanLo; ti <= spanHi; ++ti)
+                addAllLanes(ti);
+        }
     }
     else
     {
         for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
-        {
-            auto* track = trackManager.getTrack(ti);
-            if (!track) continue;
-            for (int li = 0; li < track->getLaneCount(); ++li)
-                if (auto* lane = track->getLane(li))
-                    targets.push_back({ track, lane });
-        }
+            addAllLanes(ti);
     }
     if (targets.empty()) return;
 
@@ -597,9 +609,30 @@ void TimelineView::duplicateSelectedClips()
 
 void TimelineView::setSelectionFocus(int trackIdx, int laneIdx)
 {
-    selectionFocusTrackIdx = trackIdx;
-    selectionFocusLaneIdx  = laneIdx;
+    selectionFocusTrackIdx    = trackIdx;
+    selectionFocusLaneIdx     = laneIdx;
+    selectionFocusTrackEndIdx = -1;   // 外部からの単一レーン指定はスパンを畳む
     repaint();
+}
+
+bool TimelineView::getSelectionTrackSpan(int& lo, int& hi) const
+{
+    const int count = trackManager.getTrackCount();
+    if (selectionFocusTrackIdx < 0 || selectionFocusTrackIdx >= count) return false;
+    lo = hi = selectionFocusTrackIdx;
+    if (selectionFocusTrackEndIdx >= 0)
+    {
+        const int end = juce::jlimit(0, count - 1, selectionFocusTrackEndIdx);
+        lo = juce::jmin(lo, end);
+        hi = juce::jmax(hi, end);
+    }
+    return true;
+}
+
+bool TimelineView::isSelectionMultiTrack() const
+{
+    int lo = 0, hi = 0;
+    return getSelectionTrackSpan(lo, hi) && lo != hi;
 }
 
 std::vector<int> TimelineView::getInvolvedTrackIndices() const
@@ -613,9 +646,13 @@ std::vector<int> TimelineView::getInvolvedTrackIndices() const
     if (selectedMidiClip != nullptr && selectedMidiTrack != nullptr)
         for (int i = 0; i < trackManager.getTrackCount(); ++i)
             if (trackManager.getTrack(i) == selectedMidiTrack) { s.insert(i); break; }
-    if (hasSelectionRange() && selectionFocusTrackIdx >= 0
-        && selectionFocusTrackIdx < trackManager.getTrackCount())
-        s.insert(selectionFocusTrackIdx);
+    if (hasSelectionRange())
+    {
+        int lo = 0, hi = 0;
+        if (getSelectionTrackSpan(lo, hi))
+            for (int ti = lo; ti <= hi; ++ti)
+                s.insert(ti);
+    }
     return std::vector<int>(s.begin(), s.end());
 }
 
@@ -624,6 +661,14 @@ bool TimelineView::moveSelectionFocusLane(int delta)
     if (selectionFocusTrackIdx < 0
         || selectionFocusTrackIdx >= trackManager.getTrackCount())
         return false;
+    // 複数トラックまたぎ選択中の ↑↓ はまずアンカートラック単体へ畳む
+    // (フォーカスレーン移動はテイク比較用の単一トラック操作のため)
+    if (isSelectionMultiTrack())
+    {
+        selectionFocusTrackEndIdx = -1;
+        repaint();
+        return true;
+    }
     auto* track = trackManager.getTrack(selectionFocusTrackIdx);
     if (!track) return false;
 

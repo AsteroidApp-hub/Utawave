@@ -320,8 +320,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                     if (laneIdx >= tr->getLaneCount()) laneIdx = tr->getLaneCount() - 1;
                 }
             }
-            selectionFocusTrackIdx = trackIdx;
-            selectionFocusLaneIdx  = laneIdx;
+            selectionFocusTrackIdx    = trackIdx;
+            selectionFocusLaneIdx     = laneIdx;
+            selectionFocusTrackEndIdx = -1;   // 新しいドラッグはスパンを畳んで開始
             // 既存範囲はクリア（mouseDrag で新規設定される）
             if (loopEndTV > loopStartTV + 0.001 && onSetSelectionRange)
                 onSetSelectionRange(0.0, 0.0);
@@ -483,8 +484,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     if (ref.valid() && (loopEndTV > loopStartTV + 0.001))
     {
         if (onSetSelectionRange) onSetSelectionRange(0.0, 0.0);
-        selectionFocusTrackIdx = -1;
-        selectionFocusLaneIdx  = -1;
+        selectionFocusTrackIdx    = -1;
+        selectionFocusLaneIdx     = -1;
+        selectionFocusTrackEndIdx = -1;
     }
     notifySelectionChanged();  // 選択クリップ確定 → ヘッダの採用ボタン活性を更新
     if (!ref.valid()) { repaint(); return; }
@@ -496,8 +498,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     // 範囲選択ドラッグはクリックしたクリップの (track, lane) をフォーカス対象に
     if (dragMode == DragMode::Selection)
     {
-        selectionFocusTrackIdx = ref.trackIdx;
-        selectionFocusLaneIdx  = ref.laneIdx;
+        selectionFocusTrackIdx    = ref.trackIdx;
+        selectionFocusLaneIdx     = ref.laneIdx;
+        selectionFocusTrackEndIdx = -1;   // 新しいドラッグはスパンを畳んで開始
         // 再生バー追従: ドラッグ開始位置にシーク (Cmd 押下中はスナップを一時解除)
         if (appSettings.playheadFollowsSelection && onSeek)
             onSeek(e.mods.isCommandDown() ? dragStartSecs : snapTime(dragStartSecs));
@@ -1019,6 +1022,20 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
                 t1 = snapTime(t1);
                 t2 = snapTime(t2);
             }
+
+            // 縦方向: ドラッグ先のトラックまでスパンを広げる (複数トラックまたぎ選択)。
+            // アンカー (フォーカス) は mouseDown のトラックのまま、もう一端だけを更新する。
+            // トラック域の外へ出たら端のトラックへクランプ (上=先頭 / 下=末尾)。
+            if (selectionFocusTrackIdx >= 0 && trackManager.getTrackCount() > 0)
+            {
+                auto area  = getContentArea();
+                int  relY  = e.y - area.getY() + scrollY;
+                int  curTr = trackManager.trackAtY(relY);
+                if (curTr < 0)
+                    curTr = (relY < 0) ? 0 : trackManager.getTrackCount() - 1;
+                selectionFocusTrackEndIdx = (curTr == selectionFocusTrackIdx) ? -1 : curTr;
+            }
+
             if (onSetSelectionRange) onSetSelectionRange(t1, t2);
             break;
         }

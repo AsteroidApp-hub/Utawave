@@ -1463,12 +1463,23 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
             x1 = juce::jmax(x1, area.getX());
             x2 = juce::jmin(x2, area.getRight());
 
-            // フォーカスレーンが指定されている場合はそのレーンだけ強調
+            // フォーカスレーンが指定されている場合はそのレーンだけ強調。
+            // 複数トラックまたぎ (スパン) はまたいだトラック群の全高を強調
             int yStart = area.getY();
             int yHeight = area.getHeight();
             bool focused = (selectionFocusTrackIdx >= 0 && selectionFocusLaneIdx >= 0
                             && selectionFocusTrackIdx < trackManager.getTrackCount());
-            if (focused)
+            if (isSelectionMultiTrack())
+            {
+                int lo = 0, hi = 0;
+                getSelectionTrackSpan(lo, hi);
+                auto* trHi = trackManager.getTrack(hi);
+                yStart  = area.getY() + trackManager.getTrackY(lo) - scrollY;
+                yHeight = trackManager.getTrackY(hi) - trackManager.getTrackY(lo)
+                          + (trHi ? trHi->getTotalHeight() : 0);
+                focused = true;   // スパン選択も強調 alpha で塗る
+            }
+            else if (focused)
             {
                 auto* tr = trackManager.getTrack(selectionFocusTrackIdx);
                 int trackTop = area.getY() + trackManager.getTrackY(selectionFocusTrackIdx) - scrollY;
