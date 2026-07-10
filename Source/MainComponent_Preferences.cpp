@@ -235,9 +235,10 @@ void MainComponent::showPreferences()
             };
             addAndMakeVisible(folderTracksBtn);
 
-            // フォルダトラックの Pan/Rev/INS 表示 (表示のみの設定。値・効果は非表示でも生きる)
+            // フォルダトラックの Pan/Rev 表示 (表示のみの設定。値・効果は非表示でも生きる。
+            // INS スロットは他トラックとレイアウトを揃えるため常に表示 = 設定対象外)
             folderExtrasBtn.setButtonText(
-                tr(u8"Pan・Rev・INS スロットをフォルダトラックに表示する"));
+                tr(u8"Pan・Rev をフォルダトラックに表示する"));
             folderExtrasBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
             folderExtrasBtn.onClick = [this] {
                 if (onFolderExtrasChanged) onFolderExtrasChanged(folderExtrasBtn.getToggleState());
@@ -775,14 +776,12 @@ void MainComponent::showPreferences()
         appPrefs.enableFolderTracks = v;
         appPrefs.save();
     };
-    // フォルダの Pan/Rev/INS 表示 (アプリ全体設定)。即時保存 + ヘッダへ即反映
-    // (resized で全体レイアウト = ヘッダ幅も再計算し、各ビューの refresh で表示を確定)。
-    dlg->folderExtrasBtn.setToggleState(appPrefs.showFolderPanRevIns, juce::dontSendNotification);
+    // フォルダの Pan/Rev 表示 (アプリ全体設定)。即時保存 + ヘッダへ即反映。
+    dlg->folderExtrasBtn.setToggleState(appPrefs.showFolderPanRev, juce::dontSendNotification);
     dlg->onFolderExtrasChanged = [this](bool v) {
-        appPrefs.showFolderPanRevIns = v;
+        appPrefs.showFolderPanRev = v;
         appPrefs.save();
         trackHeaderPanel.refresh();
-        resized();
     };
     // 画面の表示倍率 (アプリ全体設定。ハードウェア依存のためプロジェクト設定ではない)。
     // 即時に適用 (setGlobalScaleFactor) + 保存。次回起動でも Main.cpp が同じ倍率で復元する。

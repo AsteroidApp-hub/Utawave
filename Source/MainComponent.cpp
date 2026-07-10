@@ -119,8 +119,8 @@ MainComponent::MainComponent()
     trackHeaderPanel.onAddMidiTrack        = [this] { addMidiTrack(); };
     // フォルダトラック: 環境設定「フォルダトラックを追加できるようにする」ON の時だけメニューに出る
     trackHeaderPanel.folderTracksEnabled   = [this] { return appPrefs.enableFolderTracks; };
-    // フォルダトラックの Pan/Rev/INS 表示 (環境設定「Pan・Rev・INS スロットを…表示する」)
-    trackHeaderPanel.folderExtrasEnabled   = [this] { return appPrefs.showFolderPanRevIns; };
+    // フォルダトラックの Pan/Rev 表示 (環境設定「Pan・Rev をフォルダトラックに表示する」)
+    trackHeaderPanel.folderExtrasEnabled   = [this] { return appPrefs.showFolderPanRev; };
     trackHeaderPanel.onAddFolderTrack      = [this] { addFolderTrack(); };
     // 右クリック「フォルダへ移動 / フォルダから出す」(Undo 対応・複数選択はまとめて移動)
     trackHeaderPanel.onTracksMoveToFolder  = [this](const std::vector<int>& trackIdxs, int folderIdx)
@@ -2420,12 +2420,10 @@ void MainComponent::resized()
     masterPanel.setBounds(b.removeFromRight(mpW));
 
     // いずれかのトラックで INS スロットが表示されていればトラックヘッダー列を広げる
-    // (フォルダトラックは表示設定 showFolderPanRevIns が OFF なら INS を出さないので数えない)
+    // (INS はフォルダトラックでも常に表示 = レイアウト統一。表示設定の対象は Pan/Rev のみ)
     bool anyInsVisible = false;
     for (int i = 0; i < trackManager.getTrackCount(); ++i)
-        if (auto* t = trackManager.getTrack(i);
-            t && t->isInsertSlotsVisible()
-            && (!t->isFolderTrack() || appPrefs.showFolderPanRevIns))
+        if (auto* t = trackManager.getTrack(i); t && t->isInsertSlotsVisible())
         { anyInsVisible = true; break; }
     const int headerW = trackHeaderWidth + (anyInsVisible ? Track::insertAreaWidth : 0);
 

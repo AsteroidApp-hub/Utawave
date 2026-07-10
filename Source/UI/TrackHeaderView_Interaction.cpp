@@ -492,7 +492,7 @@ void TrackHeaderView::mouseUp(const juce::MouseEvent&)
 
 int TrackHeaderView::findInsertSlotAt(juce::Point<int> localPos) const
 {
-    if (!insSlotsShown()) return -1;   // フォルダは表示設定 (showFolderPanRevIns) も見る
+    if (!track.isInsertSlotsVisible()) return -1;
     const int w = getWidth();
     if (w <= controlsWidth) return -1;
 

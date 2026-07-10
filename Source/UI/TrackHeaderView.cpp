@@ -754,7 +754,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
     //    ハイライトはコントロール領域 (0..controlsWidth) のみに限定する。
     if (selected)
     {
-        const int selW = (insSlotsShown() && w > controlsWidth) ? controlsWidth : w;
+        const int selW = (track.isInsertSlotsVisible() && w > controlsWidth) ? controlsWidth : w;
         g.setColour(AppColours::accent.withAlpha(0.12f));
         g.fillRect(0, 0, selW, mainH);
         g.setColour(AppColours::accent.withAlpha(0.6f));
@@ -769,7 +769,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
     //  Open/Close ボタンで足りる)
     if (track.isFolderTrack())
     {
-        const int selW = (insSlotsShown() && w > controlsWidth) ? controlsWidth : w;
+        const int selW = (track.isInsertSlotsVisible() && w > controlsWidth) ? controlsWidth : w;
         g.setColour(track.getColour().withAlpha(0.10f));
         g.fillRect(4, 0, selW - 4, mainH);
     }
@@ -781,7 +781,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
     }
 
     // ── INS スロット枠 (トラック右側に固定スロット) ──
-    if (insSlotsShown() && w > controlsWidth + 8)
+    if (track.isInsertSlotsVisible() && w > controlsWidth + 8)
     {
         const int frameX = controlsWidth + 4;
         const int frameY = 0;            // 上端から
@@ -1018,7 +1018,7 @@ void TrackHeaderView::resized()
     // 既存コントロールは左寄せの controlsWidth（基本幅）に収める。
     // INS スロット列が global で開いていると header が広くなるが、
     // その追加幅は INS 列専用とし、コントロールは常に同じ位置に揃える。
-    const bool slotsVisible = insSlotsShown();
+    const bool slotsVisible = track.isInsertSlotsVisible();
     const int w = juce::jmin(getWidth(), controlsWidth);
     const int insAreaW = juce::jmax(0, getWidth() - controlsWidth);
     const int bW = 20, bH = 17, bY = 8, gap = 2;
