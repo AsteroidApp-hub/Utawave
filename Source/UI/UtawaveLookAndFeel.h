@@ -32,14 +32,16 @@ public:
     void drawLinearSlider(juce::Graphics& g,
                           int x, int y, int width, int height,
                           float sliderPos,
-                          float /*minSliderPos*/, float /*maxSliderPos*/,
+                          float minSliderPos, float maxSliderPos,
                           juce::Slider::SliderStyle style,
-                          juce::Slider& /*slider*/) override
+                          juce::Slider& slider) override
     {
         if (style != juce::Slider::LinearVertical)
         {
+            // 実スライダー参照を必ず渡すこと。旧実装は nullptr 参照を渡す UB で、
+            // JUCE 8.0.14 の基底実装が slider.isBar() を呼ぶようになり実機クラッシュした
             LookAndFeel_V4::drawLinearSlider(g, x, y, width, height,
-                                             sliderPos, 0, 0, style, *((juce::Slider*)nullptr));
+                                             sliderPos, minSliderPos, maxSliderPos, style, slider);
             return;
         }
 

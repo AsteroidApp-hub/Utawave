@@ -527,10 +527,10 @@ private:
     // 横/縦ズーム用の +/- ボタン (Cmd+スクロールと同等の挙動・再生バー起点)
     juce::TextButton hZoomOutBtn { tr(u8"−") };
     juce::TextButton hZoomInBtn  { "+" };
-    juce::TextButton hZoomResetBtn { u8"↺" };  // 横ズームを全体表示にリセット (Shift+F と同じ)
+    juce::TextButton hZoomResetBtn { tr(u8"↺") };  // 横ズームを全体表示にリセット (Shift+F と同じ)
     juce::TextButton vZoomOutBtn { tr(u8"−") };
     juce::TextButton vZoomInBtn  { "+" };
-    juce::TextButton vZoomResetBtn { u8"↺" };  // 波形振幅を既定 (1.0) に戻す
+    juce::TextButton vZoomResetBtn { tr(u8"↺") };  // 波形振幅を既定 (1.0) に戻す
     void applyHorizontalZoomStep(double deltaY);  // deltaY > 0 で拡大
     void applyVerticalZoomStep(double deltaY);    // deltaY > 0 で拡大 (波形振幅)
     void resetVerticalZoom();                     // 波形振幅を既定値へリセット

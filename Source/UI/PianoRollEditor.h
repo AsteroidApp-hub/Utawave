@@ -187,6 +187,10 @@ private:
     // 編集が完了したタイミング (callAsync) で MidiNotesAction として確定する。
     juce::MidiMessageSequence pendingBeforeSeq;
     bool                       pendingCommit { false };
+    // ドラッグ (ジェスチャ) 中は true。commit を mouseUp まで保留してドラッグ全体を
+    // 1 つの Undo アクションにまとめる (callAsync 頼みだとドラッグイベントの合間に
+    // commit が発火して微小トランザクションに分割されうる)
+    bool                       gestureActive { false };
     void commitPendingUndoAction();
 
     // 既定値

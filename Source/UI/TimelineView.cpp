@@ -846,6 +846,11 @@ TimelineView::TimelineView(TrackManager& tm) : trackManager(tm)
         ruler.setPlayheadX(playheadSecs * bps * pixelsPerBeat);
         ruler.setScrollX(scrollX);
         hScrollBar.setCurrentRange(scrollX, hScrollBar.getCurrentRangeSize());
+        // Cmd+スクロールの横ズームと同じく、連続ズーム中は波形キャッシュの再生成を抑止して
+        // 既存を拡縮 blit するだけにする (イベント毎の全可視クリップ再生成でカクつくため)。
+        // ドラッグが止まって 70ms 後にタイマーが 1 度だけ綺麗に再描画する
+        zoomActive = true;
+        startTimer(70);
         resized();
         repaint();
     };

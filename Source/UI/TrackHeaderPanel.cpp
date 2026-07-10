@@ -889,16 +889,31 @@ void TrackHeaderPanel::resized()
     const int listTop = rulerH - scrollY;
     int y = listTop;
 
-    for (int i = 0; i < (int)headerViews.size(); ++i)
+    // プロジェクト切替中は、トラック集合が差し替わった後・refresh() 前に resized() が
+    // 来ることがある。その間 headerViews は破棄済み Track を参照しているため、集合が
+    // 一致しない時はトラック行のレイアウトをスキップする (直後の refresh() が再構築
+    // して resized() をやり直す)。一致確認をしないと getTrack(i) の範囲外アクセスや
+    // 破棄済み Track の getTotalHeight() でクラッシュする
+    bool inSync = (int) headerViews.size() == trackManager.getTrackCount()
+               && (int) displayedTracks.size() == trackManager.getTrackCount();
+    if (inSync)
+        for (int i = 0; i < trackManager.getTrackCount(); ++i)
+            if (displayedTracks[(size_t) i] != trackManager.getTrack(i))
+                { inSync = false; break; }
+
+    if (inSync)
     {
-        auto* t = trackManager.getTrack(i);
-        // 閉じたフォルダ配下は高さ 0 = 行ごと非表示
-        const int h = t->getTotalHeight();
-        // フォルダ配下の子は少し字下げして階層を見せる
-        const int indent = (t->getFolderParent() != nullptr) ? 14 : 0;
-        headerViews[(size_t)i]->setVisible(h > 0);
-        headerViews[(size_t)i]->setBounds(indent, y, getWidth() - 1 - indent, h);
-        y += h;
+        for (int i = 0; i < (int)headerViews.size(); ++i)
+        {
+            auto* t = trackManager.getTrack(i);
+            // 閉じたフォルダ配下は高さ 0 = 行ごと非表示
+            const int h = t->getTotalHeight();
+            // フォルダ配下の子は少し字下げして階層を見せる
+            const int indent = (t->getFolderParent() != nullptr) ? 14 : 0;
+            headerViews[(size_t)i]->setVisible(h > 0);
+            headerViews[(size_t)i]->setBounds(indent, y, getWidth() - 1 - indent, h);
+            y += h;
+        }
     }
 
     updateInsToggleState();

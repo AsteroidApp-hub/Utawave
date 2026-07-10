@@ -266,7 +266,7 @@ void BuiltInEQEditor::paint(juce::Graphics& g)
             txt += "   Q " + juce::String(eq.getP(nd.qParam), 2);
 
         g.setFont(12.0f);
-        const int tw = juce::jmax(72, g.getCurrentFont().getStringWidth(txt) + 16);
+        const int tw = juce::jmax(72, juce::GlyphArrangement::getStringWidthInt(g.getCurrentFont(), txt) + 16);
         const auto p = nodePos(nd);
         // lo<=hi を保証 (狭ウィンドウで getRight()-tw が getX() を下回っても jlimit を壊さない)
         const float bxHi = juce::jmax((float) graph.getX(), (float) graph.getRight() - tw);

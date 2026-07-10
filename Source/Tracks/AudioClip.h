@@ -13,14 +13,17 @@ struct GainPoint
 
 enum class FadeCurve { Linear, Logarithmic, EqualPower, SCurve };
 
-// ファイル内容 (パス + サイズ + 更新日時) から算出するサムネイルキャッシュ用ハッシュ。
+// ファイル内容 (ファイル名 + サイズ + 更新日時) から算出するサムネイルキャッシュ用ハッシュ。
 // 同一パスでも内容が差し替わるとハッシュが変わるので、AudioThumbnailCache がそのファイル
 // だけ自動的にミス → 再デコードする (ファイル単位の stale 判定)。逆に「同一内容の確定済み
 // ファイル」は常に同じハッシュになるため、それを参照する複数クリップ (録音の lane0 +
 // テイク退避など) は同一キャッシュエントリを共有し、必ず同じ波形になる。
+// キーは絶対パスでなく「ファイル名」を使う: 音声は全て <projectFolder>/Audio/ 直下で
+// ファイル名が一意なので衝突せず、プロジェクトフォルダの移動/リネームでもディスク
+// キャッシュ (thumbnails.bin) がヒットし続ける (絶対パスだと全ミス = 毎回フルデコード)。
 inline juce::int64 contentHashForFile(const juce::File& f)
 {
-    return (f.getFullPathName() + ":" + juce::String(f.getSize()) + ":"
+    return (f.getFileName() + ":" + juce::String(f.getSize()) + ":"
             + juce::String(f.getLastModificationTime().toMilliseconds())).hashCode64();
 }
 

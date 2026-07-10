@@ -54,8 +54,9 @@ public:
     // プラグインチェーンは AudioPluginInstance の生成が非同期なので別途呼び出し側でクローンする。
     Track* duplicateTrack(int sourceIdx, bool includeTakeLanes = true);
     int    getTrackCount() const { return (int)tracks.size(); }
-    Track* getTrack(int i)      { return tracks[(size_t)i].get(); }
-    const Track* getTrack(int i) const { return tracks[(size_t)i].get(); }
+    // 範囲外は nullptr (UI 側の一時的な件数不一致を UB にしない)
+    Track* getTrack(int i)      { return i >= 0 && i < (int) tracks.size() ? tracks[(size_t)i].get() : nullptr; }
+    const Track* getTrack(int i) const { return i >= 0 && i < (int) tracks.size() ? tracks[(size_t)i].get() : nullptr; }
 
     // y-offset of each track in the timeline (accounting for lane heights)
     int getTrackY(int index) const;

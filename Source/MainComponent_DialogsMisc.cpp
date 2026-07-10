@@ -768,6 +768,11 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
                 {
                     auto* t = trackManager.getTrack(i);
                     if (t->isClickTrack()) { t->setMuted(true); continue; }
+                    // フォルダはミュートしない (ミュートすると Mute 継承で書き出し対象の
+                    // 子まで黙る。フォルダは選択リストに出ないため include に決してならない)。
+                    // 子側の setMuted だけで対象を制御できる (含まれない子はミュート =
+                    // フォルダバスに何も入らない)。復元は restoreTrackStates が担う
+                    if (t->isFolderTrack()) { t->setMuted(false); continue; }
                     const bool include = std::find(inc.begin(), inc.end(), i) != inc.end()
                                             || inc.empty();
                     t->setMuted(!include);

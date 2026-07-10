@@ -296,6 +296,11 @@ void PianoRollEditor::firePreview(int note, float velocity, double durationSec)
 void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    // ジェスチャ (ドラッグ) 中は Undo の commit を保留する。callAsync の commit は
+    // ドラッグイベントの合間 (ランループが回った時) に発火しうるため、これが無いと
+    // 1 回のドラッグが複数の微小トランザクションに分割され、Undo 1 回でドラッグ全体が
+    // 戻らないことがある。mouseUp で 1 アクションとして確定する
+    gestureActive = true;
     dragStart   = e.getPosition();
     draggedIdx  = -1;
     velocityIdx = -1;
@@ -465,6 +470,9 @@ void PianoRollEditor::mouseUp(const juce::MouseEvent&)
     rubberBand  = {};
     draggedIdx  = -1;
     velocityIdx = -1;
+    // ジェスチャ終了: 保留していた Undo をドラッグ全体で 1 アクションとして確定する
+    gestureActive = false;
+    if (pendingCommit) commitPendingUndoAction();
     repaint();
 }
 
@@ -832,6 +840,9 @@ static bool midiSequencesEqual(const juce::MidiMessageSequence& a,
 void PianoRollEditor::commitPendingUndoAction()
 {
     if (!pendingCommit || externalUndoManager == nullptr) return;
+    // ドラッグ中は確定しない (pendingCommit は保持)。mouseUp が改めて呼び、
+    // ドラッグ開始前 → 終了後の差分を 1 つの Undo アクションにまとめる
+    if (gestureActive) return;
     pendingCommit = false;
 
     // 編集後のシーケンスを取得 (writeNotesToClip が同期化を担っているので
