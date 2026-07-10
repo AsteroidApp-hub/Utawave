@@ -284,6 +284,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testDiskStreamingDeterminism();
         testMulticoreDeterminism();
         testEmptyRangeOfflineRender();
+        testFolderBus();
 
         tempDir.deleteRecursively();
     }
@@ -315,6 +316,69 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             engine.setPosition(0.0);
         }
     };
+
+    void testFolderBus()
+    {
+        beginTest("folder track: bus routing, folder volume, mute/solo inheritance");
+
+        auto wav = tempDir.getChildFile("folderbus.wav");
+        expect(writeMonoConstWav(wav, (int)(kSR * 4.0), 0.5f), "write const wav");
+
+        Scene s;
+        auto* child   = s.addConstTrack(wav, 4.0);   // フォルダ配下にする
+        auto* sibling = s.addConstTrack(wav, 4.0);   // トップレベルのまま
+        auto* folder  = s.tm->addFolderTrack();
+        expect(folder != nullptr && folder->isFolderTrack(), "folder track created");
+        child->setFolderParent(folder);
+        s.tm->normalizeFolderContiguity();           // 子=フォルダ直後の不変条件を回復
+        s.start();
+        s.engine.play();
+
+        // (1) フォルダ Vol 0dB: 子 0.5 (バス経由) + 兄弟 0.5 = ~1.0 (センター素通り)
+        float pL = 0, pR = 0;
+        runBlocks(s.engine, 12, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.03f, "child routes through folder at unity");
+        expectWithinAbsoluteError(pR, 1.0f, 0.03f, "R matches L");
+
+        // (2) フォルダ Vol -6.02dB (gain 0.5): 子だけ半分 → 0.25 + 0.5 = 0.75
+        folder->setVolume(-6.0206f);
+        runBlocks(s.engine, 4, &pL, &pR);
+        runBlocks(s.engine, 4, &pL, &pR);   // 変更後の定常ブロックで測る
+        expectWithinAbsoluteError(pL, 0.75f, 0.03f, "folder volume scales children only");
+        folder->setVolume(0.0f);
+
+        // (3) フォルダ Mute → 子が黙る (兄弟のみ 0.5)
+        folder->setMuted(true);
+        runBlocks(s.engine, 4, &pL, &pR);
+        runBlocks(s.engine, 4, &pL, &pR);
+        expectWithinAbsoluteError(pL, 0.5f, 0.03f, "folder mute silences its children");
+        folder->setMuted(false);
+
+        // (4) フォルダ Solo → 配下の子だけが鳴る (0.5)
+        folder->setSoloed(true);
+        runBlocks(s.engine, 4, &pL, &pR);
+        runBlocks(s.engine, 4, &pL, &pR);
+        expectWithinAbsoluteError(pL, 0.5f, 0.03f, "folder solo plays only its children");
+        folder->setSoloed(false);
+
+        // (5) 兄弟の Solo → フォルダの子は黙る (0.5)
+        sibling->setSoloed(true);
+        runBlocks(s.engine, 4, &pL, &pR);
+        runBlocks(s.engine, 4, &pL, &pR);
+        expectWithinAbsoluteError(pL, 0.5f, 0.03f, "sibling solo silences folder children");
+        sibling->setSoloed(false);
+
+        // (6) 書き出し (renderOfflineRange) も同じ規則: フォルダ Vol -6.02dB で 0.75
+        s.engine.stop();
+        folder->setVolume(-6.0206f);
+        juce::AudioBuffer<float> out;
+        s.engine.renderOfflineRange(1.0, 1.5, out);
+        expect(out.getNumSamples() > 0, "offline render produced samples");
+        const float mid = out.getSample(0, out.getNumSamples() / 2);
+        expectWithinAbsoluteError(mid, 0.75f, 0.03f,
+                                  "offline render routes children through folder bus");
+        folder->setVolume(0.0f);
+    }
 
     void testEmptyRangeOfflineRender()
     {

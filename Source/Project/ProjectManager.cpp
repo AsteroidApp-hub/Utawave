@@ -198,6 +198,16 @@ bool ProjectManager::save(const juce::File& projectFile, const State& s)
         trackEl->setAttribute("lanesCollapsed",  tr->isLanesCollapsed() ? 1 : 0);
         trackEl->setAttribute("insertSlotsVisible", tr->isInsertSlotsVisible() ? 1 : 0);
         trackEl->setAttribute("isMidiTrack",     tr->isMidiTrack() ? 1 : 0);
+        trackEl->setAttribute("isFolderTrack",   tr->isFolderTrack() ? 1 : 0);
+        if (tr->isFolderTrack())
+            trackEl->setAttribute("folderOpen",  tr->isFolderOpen() ? 1 : 0);
+        // 所属フォルダは保存順 (= 読み込み後の index) で参照する (-1 = トップレベル)
+        {
+            const int parentIdx = (tr->getFolderParent() != nullptr)
+                                      ? s.trackManager->indexOf(tr->getFolderParent()) : -1;
+            if (parentIdx >= 0)
+                trackEl->setAttribute("folderParent", parentIdx);
+        }
         if (tr->isMidiTrack())
         {
             trackEl->setAttribute("synthWaveform", tr->getSynthWaveform());
@@ -494,6 +504,8 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
     // Tracks
     if (auto* tracks = xml->getChildByName("Tracks"))
     {
+        // フォルダ所属は全トラック生成後に index で解決する (親が後方にある場合も安全)
+        std::vector<std::pair<Track*, int>> pendingFolderParents;
         for (auto* trackEl : tracks->getChildIterator())
         {
             const bool isClick = trackEl->getIntAttribute("isClickTrack", 0) != 0;
@@ -526,6 +538,14 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
             tr->setLanesCollapsed(trackEl->getIntAttribute("lanesCollapsed", 1) != 0);
             tr->setInsertSlotsVisible(trackEl->getIntAttribute("insertSlotsVisible", 0) != 0);
             tr->setMidiTrack(trackEl->getIntAttribute("isMidiTrack", 0) != 0);
+            tr->setFolderTrack(trackEl->getIntAttribute("isFolderTrack", 0) != 0);
+            if (tr->isFolderTrack())
+                tr->setFolderOpen(trackEl->getIntAttribute("folderOpen", 1) != 0);
+            {
+                const int parentIdx = trackEl->getIntAttribute("folderParent", -1);
+                if (parentIdx >= 0)
+                    pendingFolderParents.emplace_back(tr, parentIdx);
+            }
             if (tr->isMidiTrack())
             {
                 tr->setSynthWaveform(trackEl->getIntAttribute("synthWaveform", 1));   // 既定: Saw
@@ -690,6 +710,16 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                 }
             }
         }
+
+        // フォルダ所属の解決 (保存時 index → 生成後の Track*)。フォルダでない親や範囲外は無視
+        for (auto& [child, parentIdx] : pendingFolderParents)
+        {
+            if (parentIdx < 0 || parentIdx >= s.trackManager->getTrackCount()) continue;
+            auto* parent = s.trackManager->getTrack(parentIdx);
+            if (parent != nullptr && parent->isFolderTrack() && parent != child)
+                child->setFolderParent(parent);
+        }
+        s.trackManager->normalizeFolderContiguity();
     }
 
     // ── マスターインサートチェーンの復元 ──

@@ -111,6 +111,14 @@ public:
             seq.updateMatchedPairs();
         }
 
+        // フォルダトラック + 配下の子 (フォルダ直後 = 連続ランの不変条件を満たす並びで保存)
+        auto* t2 = tmA.addFolderTrack();
+        t2->setName("Bus");
+        t2->setVolume(-3.0f);
+        t2->setFolderOpen(false);   // 閉じた状態も往復させる
+        auto* t3 = tmA.addTrack("Chorus", false);
+        t3->setFolderParent(t2);
+
         AppSettings setA;
         setA.initialBpm = 100.0;
         setA.meterNumerator = 3; setA.meterDenominator = 4;
@@ -172,8 +180,8 @@ public:
 
         expect(ProjectManager::load(projFile, sB), "load succeeds");
 
-        // トラック数 (Stale が消えて 2)
-        expect(tmB.getTrackCount() == 2, "load cleared the stale track and restored 2");
+        // トラック数 (Stale が消えて 4)
+        expect(tmB.getTrackCount() == 4, "load cleared the stale track and restored 4");
 
         // Track 0 属性
         auto* r0 = tmB.getTrack(0);
@@ -250,6 +258,20 @@ public:
                 expect(off != nullptr && approxEq(off->getTimeStamp(), 0.5, 1e-6),
                        "note-off timing preserved");
             }
+        }
+
+        // Track 2 (フォルダ) + Track 3 (配下の子)
+        auto* r2 = tmB.getTrack(2);
+        auto* r3 = tmB.getTrack(3);
+        expect(r2 != nullptr && r2->isFolderTrack(), "track 2 restored as folder track");
+        expect(r3 != nullptr && !r3->isFolderTrack(), "track 3 restored as normal track");
+        if (r2 && r3)
+        {
+            expect(r2->getName() == "Bus", "folder name");
+            expect(approxEq(r2->getVolume(), -3.0, 1e-5), "folder volume");
+            expect(! r2->isFolderOpen(), "folder open state (closed) restored");
+            expect(r3->getFolderParent() == r2, "child folder membership resolved to instance");
+            expect(r2->getFolderParent() == nullptr, "folder itself is top-level");
         }
 
         // Settings

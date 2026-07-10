@@ -652,6 +652,7 @@ std::vector<std::pair<int, int>> TimelineView::getSelectionLaneRows() const
     {
         auto* tr = trackManager.getTrack(t);
         if (!tr) continue;
+        if (tr->getTotalHeight() <= 0) continue;   // 閉じたフォルダ配下 (非表示行) は対象外
         // 可視行のみ: 折りたたみ中は Lane 0 だけ (隠れているテイクレーンは対象にしない)
         const bool expanded = !tr->isLanesCollapsed() && tr->getLaneCount() > 1;
         const int lastLane  = expanded ? tr->getLaneCount() - 1 : 0;
@@ -686,8 +687,12 @@ bool TimelineView::laneRowAtY(int relY, int& trackIdx, int& laneIdx) const
     if (t < 0)
     {
         if (relY < 0) { trackIdx = 0; laneIdx = 0; return true; }   // 先頭より上
-        // 末尾より下 → 最後のトラックの最終可視レーンへクランプ
+        // 末尾より下 → 最後の「可視」トラック (高さ 0 = 閉じたフォルダ配下は飛ばす) の
+        // 最終可視レーンへクランプ
         t = count - 1;
+        while (t > 0 && trackManager.getTrack(t)
+               && trackManager.getTrack(t)->getTotalHeight() <= 0)
+            --t;
         auto* tr = trackManager.getTrack(t);
         trackIdx = t;
         laneIdx  = (tr && !tr->isLanesCollapsed() && tr->getLaneCount() > 1)
@@ -1357,6 +1362,7 @@ void TimelineView::scrollByTracks(int steps)
     {
         auto* t = trackManager.getTrack(i);
         if (t == nullptr) continue;
+        if (t->getTotalHeight() <= 0) continue;           // 閉じたフォルダ配下は境界を作らない
         bounds.push_back(y);                              // トラック先頭 (メイン部)
         const int laneCount = t->getLaneCount();
         if (! t->isLanesCollapsed() && laneCount > 1)     // テイクリスト展開中

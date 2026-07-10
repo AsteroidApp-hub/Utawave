@@ -83,6 +83,107 @@ bool TrackManager::hasMidiTrack() const
     return false;
 }
 
+Track* TrackManager::addFolderTrack(int insertAfter)
+{
+    // "Folder N" 採番 (addTrack の "Track N" と同じ方式)
+    int maxN = 0;
+    for (auto& t : tracks)
+    {
+        const auto& tn = t->getName();
+        if (tn.startsWith("Folder "))
+        {
+            const int v = tn.substring(7).getIntValue();
+            if (v > maxN) maxN = v;
+        }
+    }
+    auto track = std::make_unique<Track>("Folder " + juce::String(maxN + 1),
+                                         formatManager, thumbnailCache,
+                                         Track::paletteColour(nextColourIndex++));
+    track->setStereo(true);
+    bool insVisible = false;
+    for (auto& t : tracks)
+        if (t->isInsertSlotsVisible()) { insVisible = true; break; }
+    track->setInsertSlotsVisible(insVisible);
+    Track* ptr = track.get();
+    // ヘッダビューは onChanged() で isFolderTrack() を読んで作られるので、その前に確定させる
+    ptr->setFolderTrack(true);
+    if (insertAfter >= 0 && insertAfter < (int) tracks.size())
+        tracks.insert(tracks.begin() + insertAfter + 1, std::move(track));
+    else
+        tracks.push_back(std::move(track));
+    if (onChanged) onChanged();
+    return ptr;
+}
+
+bool TrackManager::hasFolderTrack() const
+{
+    for (auto& t : tracks) if (t->isFolderTrack()) return true;
+    return false;
+}
+
+int TrackManager::folderRunEnd(int folderIdx) const
+{
+    if (folderIdx < 0 || folderIdx >= (int) tracks.size()) return folderIdx;
+    auto* f = tracks[(size_t) folderIdx].get();
+    if (!f || !f->isFolderTrack()) return folderIdx + 1;
+    int i = folderIdx + 1;
+    while (i < (int) tracks.size() && tracks[(size_t) i]->getFolderParent() == f)
+        ++i;
+    return i;
+}
+
+std::vector<Track*> TrackManager::getFolderChildren(const Track* folder) const
+{
+    std::vector<Track*> out;
+    if (folder == nullptr) return out;
+    for (auto& t : tracks)
+        if (t && t->getFolderParent() == folder)
+            out.push_back(t.get());
+    return out;
+}
+
+bool TrackManager::normalizeFolderContiguity()
+{
+    // (1) 親参照の整合: 消えた親 / フォルダ自身・Click が親を持つ (非対応) を解消
+    bool changedParents = false;
+    for (auto& t : tracks)
+    {
+        if (!t) continue;
+        auto* p = t->getFolderParent();
+        if (p == nullptr) continue;
+        const bool parentAlive = indexOf(p) >= 0 && p->isFolderTrack();
+        if (!parentAlive || t->isFolderTrack() || t->isClickTrack())
+        {
+            t->setFolderParent(nullptr);
+            changedParents = true;
+        }
+    }
+
+    // (2) 並び: 子は親フォルダの直後に相対順のまま連続させる
+    std::vector<Track*> desired;
+    desired.reserve(tracks.size());
+    for (auto& t : tracks)
+    {
+        if (!t) continue;
+        if (t->getFolderParent() != nullptr) continue;   // 子は親の直後で emit する
+        desired.push_back(t.get());
+        if (t->isFolderTrack())
+            for (auto& c : tracks)
+                if (c && c->getFolderParent() == t.get())
+                    desired.push_back(c.get());
+    }
+
+    bool same = desired.size() == tracks.size();
+    if (same)
+        for (size_t i = 0; i < tracks.size(); ++i)
+            if (tracks[i].get() != desired[i]) { same = false; break; }
+    if (same)
+        return changedParents;
+
+    reorderTo(desired);   // onChanged() は reorderTo が発火する
+    return true;
+}
+
 void TrackManager::moveTrack(int from, int to)
 {
     if (from < 0 || from >= (int) tracks.size()) return;
@@ -151,7 +252,8 @@ Track* TrackManager::duplicateTrack(int sourceIdx, bool includeTakeLanes)
 {
     if (sourceIdx < 0 || sourceIdx >= (int) tracks.size()) return nullptr;
     auto* src = tracks[(size_t) sourceIdx].get();
-    if (!src || src->isClickTrack()) return nullptr;  // Click は複製不可
+    if (!src || src->isClickTrack()) return nullptr;   // Click は複製不可
+    if (src->isFolderTrack())        return nullptr;   // フォルダは複製不可 (子は複製対象外のため)
 
     // 名前: 末尾に連番 "(1)" "(2)" … を付与 (空きの最小番号)。
     // 既に "名前 (N)" 形式なら末尾の番号を剥がして基底名にし、番号だけ繰り上げる。
@@ -203,6 +305,9 @@ Track* TrackManager::duplicateTrack(int sourceIdx, bool includeTakeLanes)
     dst->setCustomLaneHeight(src->getLaneHeight());
     dst->setInsertSlotsVisible(src->isInsertSlotsVisible());
     dst->setLanesCollapsed  (src->isLanesCollapsed());
+    // フォルダ所属は引き継ぐ (子の複製は同じフォルダ内に入る。挿入位置 sourceIdx+1 は
+    // 元トラックの直後 = フォルダのラン内なので連続性も保たれる)
+    dst->setFolderParent    (src->getFolderParent());
 
     // オーディオクリップ: 全レーンの全クリップをコピー。
     // includeTakeLanes=false なら Lane 0 (= メインレーン) のみで、テイクレーンは複製しない。

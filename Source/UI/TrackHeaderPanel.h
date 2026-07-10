@@ -52,6 +52,12 @@ public:
     std::function<void(bool, bool)> onAddTrackWithMode;  // false=mono, true=stereo
     std::function<void()>     onAddMidiTrack;      // 空の MIDI トラック（ハモリ/ガイド打ち込み用）
     std::function<void()>     onAddClickTrack;
+    std::function<void()>     onAddFolderTrack;    // フォルダトラック (グループバス)
+    // フォルダトラックの追加メニューを出すか (AppPreferences::enableFolderTracks)。未設定は出さない
+    std::function<bool()>     folderTracksEnabled;
+    // 右クリック「フォルダへ移動 / フォルダから出す」: trackIdx を folderIdx (-1 = 出す) へ。
+    // Undo (FolderAssignAction) は MainComponent 側で積む
+    std::function<void(int, int)> onTrackMoveToFolder;
     std::function<void()>     onTrackChanged;
     std::function<int()>     onGetNumInputChannels;
     std::function<void(int)> onTrackSelected;

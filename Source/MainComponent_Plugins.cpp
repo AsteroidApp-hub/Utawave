@@ -146,10 +146,11 @@ void MainComponent::pushTrackAddUndo(Track* t, bool newTransaction)
         }));
 }
 
-void MainComponent::pushTrackDeleteUndo(std::vector<Track*> tracks)
+void MainComponent::pushTrackDeleteUndo(std::vector<Track*> tracks, bool newTransaction)
 {
     if (tracks.empty()) return;
-    undoManager.beginNewTransaction();
+    if (newTransaction)
+        undoManager.beginNewTransaction();
     undoManager.perform(new EditActions::TrackDeleteAction(
         trackManager, std::move(tracks),
         /*willRemove*/ [this](Track* tr)

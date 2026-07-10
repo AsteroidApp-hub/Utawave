@@ -557,11 +557,12 @@ void MainComponent::showExportDialog()
                               : juce::String("Export");
     ctx.defaultFolder   = getProjectExportFolder();
 
-    // トラック一覧（クリックトラックを除く）
+    // トラック一覧（クリックトラックとフォルダトラックを除く。フォルダはクリップを持たない
+    // グループバスで、子トラックを選べばそのフォルダの INS/Vol は自動で乗る）
     for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
     {
         auto* track = trackManager.getTrack(ti);
-        if (!track || track->isClickTrack()) continue;
+        if (!track || track->isClickTrack() || track->isFolderTrack()) continue;
         ExportDialog::TrackInfo ti2;
         ti2.index             = ti;
         ti2.name              = track->getName();
@@ -682,7 +683,12 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
             inc.erase(std::remove_if(inc.begin(), inc.end(), [this](int ti)
                       {
                           auto* t = trackManager.getTrack(ti);
-                          return t != nullptr && t->isMuted();
+                          if (t == nullptr) return false;
+                          if (t->isMuted()) return true;
+                          // フォルダのミュートは子へ継承 (再生と同じ「聞こえているもの」規則)
+                          if (auto* f = t->getFolderParent())
+                              if (f->isMuted()) return true;
+                          return false;
                       }), inc.end());
             if (inc.empty())
             {

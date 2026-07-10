@@ -27,6 +27,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton exportDoneDlgBtn;    // 書き出し完了ダイアログ表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton tooltipsBtn;         // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton folderTracksBtn;     // フォルダトラック追加を有効化 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
         juce::ToggleButton recCompBtn;          // 録音レイテンシ自動補正 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton retakeKeepBtn;       // Q リテイクでテイクを残す (アプリ全体設定。初期状態は showPreferences 側)
@@ -63,6 +64,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onExportDoneDlgChanged;
         std::function<void(bool)>  onMidiPagingChanged;
         std::function<void(bool)>  onTooltipsChanged;
+        std::function<void(bool)>  onFolderTracksChanged;
         std::function<void(bool)>  onShowAdsChanged;
         std::function<void(bool)>  onRecCompChanged;
         std::function<void(double)> onRecCompOffsetChanged;
@@ -220,6 +222,16 @@ void MainComponent::showPreferences()
                 if (onTooltipsChanged) onTooltipsChanged(tooltipsBtn.getToggleState());
             };
             addAndMakeVisible(tooltipsBtn);
+
+            // フォルダトラック (アプリ全体設定。初期状態は showPreferences 側)。
+            // ON にすると「+ トラック追加」メニューに「フォルダトラックを追加」が出る。
+            folderTracksBtn.setButtonText(
+                tr(u8"フォルダトラックを追加できるようにする"));
+            folderTracksBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            folderTracksBtn.onClick = [this] {
+                if (onFolderTracksChanged) onFolderTracksChanged(folderTracksBtn.getToggleState());
+            };
+            addAndMakeVisible(folderTracksBtn);
 
             // 録音フロー
             // 「再生中バックグラウンド録音 (遡及録音)」のトグルは UI から撤去 (初心者が迷うため・
@@ -521,6 +533,7 @@ void MainComponent::showPreferences()
             y = check(zeroCrossBtn, y);
             y = check(midiPagingBtn, y);
             y = check(tooltipsBtn, y);
+            y = check(folderTracksBtn, y);
 
             // ── 録音フロー ──
             y += gSec; y = label(recLabel, y);
@@ -742,6 +755,13 @@ void MainComponent::showPreferences()
         appPrefs.showTooltips = v;
         appPrefs.save();
         applyTooltipVisibility();
+    };
+    // フォルダトラック追加の有効化 (アプリ全体設定)。即時保存のみ (「+ トラック追加」
+    // メニューは開くたびに再構築されるので次に開いた時から反映される)。
+    dlg->folderTracksBtn.setToggleState(appPrefs.enableFolderTracks, juce::dontSendNotification);
+    dlg->onFolderTracksChanged = [this](bool v) {
+        appPrefs.enableFolderTracks = v;
+        appPrefs.save();
     };
     // 画面の表示倍率 (アプリ全体設定。ハードウェア依存のためプロジェクト設定ではない)。
     // 即時に適用 (setGlobalScaleFactor) + 保存。次回起動でも Main.cpp が同じ倍率で復元する。

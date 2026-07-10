@@ -20,6 +20,19 @@ public:
     Track* addClickTrack();
     bool   hasClickTrack() const;
     Track* getClickTrack() const;   // CLICK トラック (無ければ nullptr)
+    // フォルダトラック (グループバス) を追加。"Folder N" 採番・色サイクル消費。
+    // setFolderTrack(true) を onChanged() の前に確定させる (midi と同じ作法)。
+    Track* addFolderTrack(int insertAfter = -1);
+    bool   hasFolderTrack() const;
+    // folderIdx のフォルダの連続する子ラン (フォルダ直後に並ぶ子トラック群) の直後の
+    // インデックスを返す (= フォルダ末尾への挿入位置)。フォルダでなければ folderIdx+1
+    int    folderRunEnd(int folderIdx) const;
+    // folder に所属する子トラック (現在の並び順)
+    std::vector<Track*> getFolderChildren(const Track* folder) const;
+    // フォルダ整合の正規化: (1) 消えた親 / 入れ子フォルダ / Click の親参照を解消
+    // (2) 子をフォルダ直後の連続ランへ並べ直す (相対順は維持)。変更があれば true。
+    // 並び替え/削除/読み込みの後に呼び、表示とエンジンの前提 (子=フォルダ直後) を保つ
+    bool   normalizeFolderContiguity();
     // MIDI トラックが 1 つでも存在するか (MIDI 書き出しメニューの活性判定などに使う)
     bool   hasMidiTrack() const;
     void   removeTrack(int index);

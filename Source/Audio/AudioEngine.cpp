@@ -478,6 +478,10 @@ void AudioEngine::preparePlayback(TrackManager& tm)
     {
         auto* track = tm.getTrack(ti);
         if (track->isClickTrack()) continue;  // Click Track はクリップ再生しない
+        // フォルダトラックはクリップを持たない (グループバス)。万一クリップが載っても再生対象に
+        // しない (自身のチェーンは bus 経路で処理されるため、ここで拾うと同一ブロックでチェーンを
+        // 二重に叩いて内部状態が壊れる)。
+        if (track->isFolderTrack()) continue;
         // Mute / Solo はオーディオスレッドでライブ判定するため、ここでは除外しない
 
         float trackGainLin = juce::Decibels::decibelsToGain(track->getVolume());
@@ -841,16 +845,62 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             for (auto& cs : snap->clipScratch)
                 cs.setSize(2, currentBufferSize, false, false, true);
 
+            // ── フォルダバス (グループバス) の構築 ──
+            // フォルダトラックごとに合算バッファを 1 本用意し、各トラックの所属を
+            // trackIdx → (バス index / 親 Track*) の配列に解決しておく (audio thread はルックアップのみ)。
+            snap->folderBusOfTrack.assign((size_t)(maxIdx + 1), -1);
+            snap->folderOfTrack.assign((size_t)(maxIdx + 1), nullptr);
+            for (int ti = 0; ti <= maxIdx; ++ti)
+            {
+                auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
+                if (!tr || !tr->isFolderTrack()) continue;
+                PlaybackSnapshot::FolderBus fb;
+                fb.trackIdx = ti;
+                fb.track    = tr;
+                fb.buf.setSize(2, currentBufferSize, false, false, true);
+                snap->folderBuses.push_back(std::move(fb));
+            }
+            for (int ti = 0; ti <= maxIdx; ++ti)
+            {
+                auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
+                if (!tr) continue;
+                auto* parent = tr->getFolderParent();
+                if (parent == nullptr || tr->isFolderTrack()) continue;
+                for (int bi = 0; bi < (int)snap->folderBuses.size(); ++bi)
+                    if (snap->folderBuses[(size_t)bi].track == parent)
+                    {
+                        snap->folderBusOfTrack[(size_t)ti] = bi;
+                        snap->folderOfTrack[(size_t)ti]    = parent;
+                        break;
+                    }
+            }
+
             // ── PDC: 全トラックの最大プラグイン遅延を求めて各トラックの補正量を確定 ──
+            // フォルダ配下の子は「自身のチェーン遅延 + 親フォルダのチェーン遅延」が合計経路遅延
+            // (バスはチェーン後に遅延ラインを通らないため、子側の遅延ラインで前借りして揃える)。
+            // フォルダトラック自身の遅延ラインは使わない (= 0)。
             int newMaxLat = 0;
             std::vector<int> trackLats((size_t)(maxIdx + 1), 0);
             for (int ti = 0; ti <= maxIdx; ++ti)
             {
                 auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
                 if (!tr) continue;
-                const int lat = tr->getPluginChain().getTotalLatencySamples();
-                trackLats[(size_t)ti] = lat;
-                newMaxLat = juce::jmax(newMaxLat, lat);
+                trackLats[(size_t)ti] = tr->getPluginChain().getTotalLatencySamples();
+            }
+            std::vector<int> totalLats((size_t)(maxIdx + 1), 0);
+            for (int ti = 0; ti <= maxIdx; ++ti)
+            {
+                auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
+                if (!tr || tr->isFolderTrack()) continue;   // フォルダ自身は遅延ライン対象外
+                int total = trackLats[(size_t)ti];
+                if (auto* parent = (ti < (int)snap->folderOfTrack.size())
+                                       ? snap->folderOfTrack[(size_t)ti] : nullptr)
+                {
+                    const int pi = tm.indexOf(parent);
+                    if (pi >= 0 && pi <= maxIdx) total += trackLats[(size_t)pi];
+                }
+                totalLats[(size_t)ti] = total;
+                newMaxLat = juce::jmax(newMaxLat, total);
             }
             maxPluginLatency = newMaxLat;
 
@@ -859,8 +909,11 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             const int delayBufLen = juce::jmax(1, newMaxLat + currentBufferSize);
             for (int ti = 0; ti <= maxIdx; ++ti)
             {
+                auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
                 auto& d = snap->trackDelays[(size_t)ti];
-                d.delaySamples = newMaxLat - trackLats[(size_t)ti];
+                d.delaySamples = (tr != nullptr && tr->isFolderTrack())
+                                     ? 0
+                                     : newMaxLat - totalLats[(size_t)ti];
                 d.buf.setSize(2, delayBufLen, false, true, true);
                 d.writePos = 0;
             }
@@ -1366,12 +1419,13 @@ static void appendMidiStateResend(juce::MidiBuffer& mb,
 // 書き出しで「このトラックをミックスに含めるか」の共通規則 (明示選択なら選択集合、無ければ
 // Mute/Solo)。PDC セットアップと per-block 収集の両方から呼び、規則の二重定義 (ドリフト) を防ぐ。
 static bool exportTrackActive(int ti, const Track* trk, bool explicitFilter,
-                              const std::unordered_set<int>& includeSet, bool anySolo)
+                              const std::unordered_set<int>& includeSet, bool anySolo,
+                              const Track* folder = nullptr)
 {
     if (trk == nullptr) return false;
     if (explicitFilter) return includeSet.find(ti) != includeSet.end();
-    if (trk->isMuted()) return false;
-    if (anySolo && !trk->isSoloed()) return false;
+    if (trk->isMuted() || (folder != nullptr && folder->isMuted())) return false;
+    if (anySolo && !trk->isSoloed() && !(folder != nullptr && folder->isSoloed())) return false;
     return true;
 }
 
@@ -1532,19 +1586,59 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 if (mp.track && mp.track->isSoloed()) { anySolo = true; break; }
         if (!anySolo && snap0->clickTrack != nullptr && snap0->clickTrack->isSoloed())
             anySolo = true;
+        // フォルダトラックのソロ (フォルダはクリップを持たず clipTracks に出ない)
+        if (!anySolo)
+            for (auto& fb : snap0->folderBuses)
+                if (fb.track != nullptr && fb.track->isSoloed()) { anySolo = true; break; }
     }
+    // 所属フォルダの解決 (スナップショットの trackIdx → 親フォルダ Track*)。
+    // 実時間ブランチと同じ配列を使い、Mute/Solo 継承とバスルーティングを一致させる
+    auto folderOfIn = [](const PlaybackSnapshot& s, int ti) -> Track*
     {
-        auto noteLat = [&](int ti, Track* trk)
+        return (ti >= 0 && ti < (int)s.folderOfTrack.size())
+                   ? s.folderOfTrack[(size_t)ti] : nullptr;
+    };
+    // ── フォルダバスの書き出し用ローカル実体 (実時間の snap->folderBuses は audio thread 専用) ──
+    struct OfflineFolderBus
+    {
+        Track* track { nullptr };
+        juce::AudioBuffer<float> buf;
+        bool   fed { false };
+    };
+    std::vector<OfflineFolderBus> offFolderBuses;
+    std::unordered_map<Track*, int> offFolderBusIdx;   // フォルダ Track* → offFolderBuses index
+    for (auto& fb : snap0->folderBuses)
+    {
+        if (fb.track == nullptr) continue;
+        offFolderBusIdx[fb.track] = (int) offFolderBuses.size();
+        offFolderBuses.push_back({ fb.track, juce::AudioBuffer<float>(2, blockSize), false });
+    }
+    // フォルダチェーンの bounce 準備 + 遅延取得 (フォルダ 1 つにつき 1 回)
+    std::unordered_map<Track*, int> folderChainLats;
+    auto folderLatFor = [&](Track* folder) -> int
+    {
+        if (folder == nullptr) return 0;
+        auto it = folderChainLats.find(folder);
+        if (it != folderChainLats.end()) return it->second;
+        const int l = prepareAndLat(folder);
+        folderChainLats[folder] = l;
+        return l;
+    };
+    {
+        auto noteLat = [&](int ti, Track* trk, Track* folder)
         {
-            if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo)) return;
+            if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo, folder)) return;
             // Pre-Fader は素のクリップ音のみ (プラグインを掛けない) なので遅延補正も不要 = 0。
-            const int lat = preFader ? 0 : prepareAndLat(trk);
+            // フォルダ配下の子は「自身のチェーン + 親フォルダのチェーン」が合計経路遅延
+            // (再生の preparePlayback と同じ式)。
+            const int lat = preFader ? 0 : (prepareAndLat(trk) + folderLatFor(folder));
             pdcTrackLatById[ti] = lat;
             pdcMaxLat      = juce::jmax(pdcMaxLat, lat);
             pdcMaxTrackIdx = juce::jmax(pdcMaxTrackIdx, ti);
         };
-        for (auto& [ti, trk] : snap0->clipTracks) noteLat(ti, trk);
-        for (auto& mp : snap0->midi)              noteLat(mp.trackIdx, mp.track);
+        for (auto& [ti, trk] : snap0->clipTracks) noteLat(ti, trk, folderOfIn(*snap0, ti));
+        for (auto& mp : snap0->midi)
+            noteLat(mp.trackIdx, mp.track, folderOfIn(*snap0, mp.trackIdx));
 
         // クリック (メトロノーム) トラックのチェーン遅延も最大遅延に含める。クリックはトラックと
         // 同じ INS チェーンを通ってからマスター後に加算されるため、これを入れないとクリックに
@@ -1650,7 +1744,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             activeTracks.clear();
             for (auto& [ti, trk] : snap->clipTracks)
             {
-                if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo)) continue;
+                if (!exportTrackActive(ti, trk, explicitFilter, includeSet, anySolo,
+                                       folderOfIn(*snap, ti))) continue;
                 activeIdx.push_back(ti);
                 activeTracks.push_back(trk);
             }
@@ -1664,11 +1759,11 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             // Pre-Fader: クリップの素の音のみ (Vol/Pan/Rev/master を一切通さない)。
             //   リバーブ送りは再生では post-fader なので、Pre では送り自体を出さない
             //   (Pre を選ぶ = 加工前の素材が欲しい、なので Rev も混ぜない・要望 2026-07)
-            auto addTrackOut = [&](Track* track, const juce::AudioBuffer<float>& buf)
+            auto addTrackOut = [&](int tidx, Track* track, const juce::AudioBuffer<float>& buf)
             {
                 if (preFader)
                 {
-                    // 素のクリップ音のみ (Vol/Pan/Rev なし)
+                    // 素のクリップ音のみ (Vol/Pan/Rev なし。フォルダバス/チェーンも通さない)
                     blockBuf.addFrom(0, 0, buf, 0, 0, n, 1.0f);
                     blockBuf.addFrom(1, 0, buf, 1, 0, n, 1.0f);
                     return;
@@ -1680,8 +1775,26 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 const float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
                 const float gL = vol * panL;
                 const float gR = vol * panR;
-                blockBuf.addFrom(0, 0, buf, 0, 0, n, gL);
-                blockBuf.addFrom(1, 0, buf, 1, 0, n, gR);
+
+                // フォルダ配下の子はフォルダバスへ、それ以外はドライミックスへ (再生と同じ)
+                juce::AudioBuffer<float>* dest = &blockBuf;
+                if (auto* fld = folderOfIn(*snap, tidx))
+                {
+                    auto it = offFolderBusIdx.find(fld);
+                    if (it != offFolderBusIdx.end())
+                    {
+                        auto& ob = offFolderBuses[(size_t)it->second];
+                        if (!ob.fed)
+                        {
+                            ob.buf.setSize(2, n, false, false, true);
+                            ob.buf.clear();
+                            ob.fed = true;
+                        }
+                        dest = &ob.buf;
+                    }
+                }
+                dest->addFrom(0, 0, buf, 0, 0, n, gL);
+                dest->addFrom(1, 0, buf, 1, 0, n, gR);
 
                 const float rs = track ? Track::reverbSendGain(track->getReverbSend()) : 0.0f;
                 if (rs > 0.0001f)
@@ -1719,7 +1832,7 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 // Pre-Fader は上でプラグインを通さない = 遅延補正も無効 (noteLat で lat=0)。
                 applyTrackDelay(trackDelays, tidx, trackBuf, n);
 
-                addTrackOut(track, trackBuf);
+                addTrackOut(tidx, track, trackBuf);
             }
 
             // ── MIDI トラック (内蔵シンセ / INS 音源) のレンダリング ──
@@ -1729,7 +1842,8 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
             const double posEndMidi = posStart + (double)n / sr;
             for (auto& mp : snap->midi)
             {
-                if (!exportTrackActive(mp.trackIdx, mp.track, explicitFilter, includeSet, anySolo))
+                if (!exportTrackActive(mp.trackIdx, mp.track, explicitFilter, includeSet, anySolo,
+                                       folderOfIn(*snap, mp.trackIdx)))
                     continue;
 
                 auto& syn = offlineSynths[mp.trackIdx];
@@ -1770,7 +1884,25 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 // PDC: 遅延の無い (または少ない) MIDI トラックも最遅トラックに合わせて遅延させる。
                 applyTrackDelay(trackDelays, mp.trackIdx, trackBuf, n);
 
-                addTrackOut(mp.track, trackBuf);
+                addTrackOut(mp.trackIdx, mp.track, trackBuf);
+            }
+
+            // ── フォルダバス: 子の合算に INS チェーン → フォルダ Vol を掛けてドライへ加算 ──
+            // 実時間ブランチと同じ順序 (トラック/MIDI 加算後・リバーブ送りウェットの前)。
+            // Pre-Fader では子が直接 blockBuf へ入る (fed が立たない) ため no-op。
+            for (auto& ob : offFolderBuses)
+            {
+                if (!ob.fed) continue;
+                ob.fed = false;
+                if (ob.track == nullptr) continue;
+                if (ob.track->getPluginChain().getNumPlugins() > 0)
+                {
+                    juce::MidiBuffer midi;
+                    ob.track->getPluginChain().processBlock(ob.buf, midi, &exportHead);
+                }
+                const float fVol = juce::Decibels::decibelsToGain(ob.track->getVolume());
+                blockBuf.addFrom(0, 0, ob.buf, 0, 0, n, fVol);
+                blockBuf.addFrom(1, 0, ob.buf, 1, 0, n, fVol);
             }
 
             // ── リバーブ送りバス: ウェットを生成してドライへ加算 (2026-07 追加) ──
@@ -2429,13 +2561,26 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         // これが無いと CLICK をソロにしても他トラックが鳴り続け「クリックだけ」にならない)
         if (!anySolo && snap->clickTrack != nullptr && snap->clickTrack->isSoloed())
             anySolo = true;
+        // フォルダトラックのソロも含める (フォルダはクリップを持たず clipTracks に出ないため
+        // 明示チェック。フォルダをソロにすると配下の子だけが鳴る)
+        if (!anySolo)
+            for (auto& fb : snap->folderBuses)
+                if (fb.track != nullptr && fb.track->isSoloed()) { anySolo = true; break; }
 
         clickSoloBlocked = anySolo
                            && (snap->clickTrack == nullptr
                                || !snap->clickTrack->isSoloed());
 
+        // 所属フォルダの解決 (非所属は nullptr)。Mute/Solo の継承判定に使う
+        auto folderOf = [&snap](int tidx) -> Track*
+        {
+            return (tidx >= 0 && tidx < (int)snap->folderOfTrack.size())
+                       ? snap->folderOfTrack[(size_t)tidx] : nullptr;
+        };
+
         // 各トラックの「有効性」を判定し、使うトラックのリストを作る。
         // スクラッチを再利用 (clear で長さ 0 に戻すと容量は保たれヒープ確保が起きない)。
+        // フォルダの Mute は子を黙らせ、フォルダの Solo は子を鳴らす (継承)。
         auto& activeTrackIdx = activeTrackIdxScratch;
         auto& activeTracks   = activeTracksScratch;
         activeTrackIdx.clear();
@@ -2443,8 +2588,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         for (auto& [tidx, trk] : snap->clipTracks)
         {
             if (trk == nullptr) continue;          // clipTracks は Click 除外・dedup 済み
-            if (trk->isMuted()) continue;
-            if (anySolo && !trk->isSoloed()) continue;
+            Track* fld = folderOf(tidx);
+            if (trk->isMuted() || (fld != nullptr && fld->isMuted())) continue;
+            if (anySolo && !trk->isSoloed() && !(fld != nullptr && fld->isSoloed())) continue;
             activeTrackIdx.push_back(tidx);
             activeTracks.push_back(trk);
         }
@@ -2502,10 +2648,24 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                                      trackOutVUL[tidx], trackOutVUR[tidx],
                                      vuCoef, gL, gR);
 
-                // master に加算
-                workBuffer.addFrom(0, 0, trackBuf, 0, 0, numSamples, gL);
-                if (workBuffer.getNumChannels() >= 2 && trackBuf.getNumChannels() >= 2)
-                    workBuffer.addFrom(1, 0, trackBuf, 1, 0, numSamples, gR);
+                // master (フォルダ配下ならフォルダバス) に加算
+                juce::AudioBuffer<float>* dest = &workBuffer;
+                const int busIdx = (tidx < (int)snap->folderBusOfTrack.size())
+                                       ? snap->folderBusOfTrack[(size_t)tidx] : -1;
+                if (busIdx >= 0)
+                {
+                    auto& fb = snap->folderBuses[(size_t)busIdx];
+                    if (!fb.fed)
+                    {
+                        fb.buf.setSize(2, numSamples, false, false, true);
+                        fb.buf.clear();
+                        fb.fed = true;
+                    }
+                    dest = &fb.buf;
+                }
+                dest->addFrom(0, 0, trackBuf, 0, 0, numSamples, gL);
+                if (dest->getNumChannels() >= 2 && trackBuf.getNumChannels() >= 2)
+                    dest->addFrom(1, 0, trackBuf, 1, 0, numSamples, gR);
 
                 // 簡易リバーブ送り (post-fader / post-pan)。スライダー値は二乗テーパーで
                 // 送りゲイン化する (低位置での効き過ぎ防止・Track::reverbSendGain に一元化)
@@ -2547,8 +2707,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         for (auto& mp : snap->midi)
         {
             if (mp.track == nullptr) continue;
-            if (mp.track->isMuted()) continue;
-            if (anySolo && !mp.track->isSoloed()) continue;
+            Track* midiFld = folderOf(mp.trackIdx);
+            if (mp.track->isMuted() || (midiFld != nullptr && midiFld->isMuted())) continue;
+            if (anySolo && !mp.track->isSoloed()
+                && !(midiFld != nullptr && midiFld->isSoloed())) continue;
             if (mp.trackIdx < 0 || mp.trackIdx >= (int)snap->trackBuffers.size()) continue;
             if (mp.trackIdx >= (int)snap->synths.size()) continue;
             auto& syn = snap->synths[(size_t)mp.trackIdx];
@@ -2660,9 +2822,26 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                                  trackOutVUL[mp.trackIdx], trackOutVUR[mp.trackIdx],
                                  vuCoef, gL, gR);
 
-            workBuffer.addFrom(0, 0, trackBuf, 0, 0, numSamples, gL);
-            if (workBuffer.getNumChannels() >= 2 && trackBuf.getNumChannels() >= 2)
-                workBuffer.addFrom(1, 0, trackBuf, 1, 0, numSamples, gR);
+            // master (フォルダ配下ならフォルダバス) に加算
+            {
+                juce::AudioBuffer<float>* dest = &workBuffer;
+                const int busIdx = (mp.trackIdx < (int)snap->folderBusOfTrack.size())
+                                       ? snap->folderBusOfTrack[(size_t)mp.trackIdx] : -1;
+                if (busIdx >= 0)
+                {
+                    auto& fb = snap->folderBuses[(size_t)busIdx];
+                    if (!fb.fed)
+                    {
+                        fb.buf.setSize(2, numSamples, false, false, true);
+                        fb.buf.clear();
+                        fb.fed = true;
+                    }
+                    dest = &fb.buf;
+                }
+                dest->addFrom(0, 0, trackBuf, 0, 0, numSamples, gL);
+                if (dest->getNumChannels() >= 2 && trackBuf.getNumChannels() >= 2)
+                    dest->addFrom(1, 0, trackBuf, 1, 0, numSamples, gR);
+            }
 
             const float rs = Track::reverbSendGain(mp.track->getReverbSend());
             if (rs > 0.0001f)
@@ -2673,6 +2852,37 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 if (trackBuf.getNumChannels() >= 2)
                     reverbSendBuf.addFrom(1, 0, trackBuf, 1, 0, numSamples, gR * rs);
             }
+        }
+
+        // ── フォルダバス: 子の合算に INS チェーン → フォルダ Vol を掛けてマスターへ ──
+        // trackIdx 昇順 (folderBuses 構築順) の直列処理なので加算順は決定論。
+        // 子が 1 つも鳴っていないブロックはチェーンを叩かない (非アクティブトラックの
+        // チェーンを処理しない既存のトラック挙動と同じ = テールはそこで切れる)。
+        for (auto& fb : snap->folderBuses)
+        {
+            if (!fb.fed) continue;
+            fb.fed = false;
+            if (fb.track == nullptr) continue;
+
+            if (fb.track->getPluginChain().getActivePluginCountAtomic() > 0)
+            {
+                chainMidiScratch.clear();
+                fb.track->getPluginChain().processBlock(fb.buf, chainMidiScratch, &playHead);
+            }
+
+            const float fVol = juce::Decibels::decibelsToGain(fb.track->getVolume());
+
+            // フォルダ出力メータ (Vol 適用後 = ポストフェーダー)
+            if (fb.trackIdx >= 0 && fb.trackIdx < kMaxTracksMeters)
+                measureStereoBuf(fb.buf, numSamples,
+                                 trackOutPeakL[fb.trackIdx], trackOutPeakR[fb.trackIdx],
+                                 trackOutVUSmoothL[fb.trackIdx], trackOutVUSmoothR[fb.trackIdx],
+                                 trackOutVUL[fb.trackIdx], trackOutVUR[fb.trackIdx],
+                                 vuCoef, fVol, fVol);
+
+            workBuffer.addFrom(0, 0, fb.buf, 0, 0, numSamples, fVol);
+            if (workBuffer.getNumChannels() >= 2 && fb.buf.getNumChannels() >= 2)
+                workBuffer.addFrom(1, 0, fb.buf, 1, 0, numSamples, fVol);
         }
     }
 

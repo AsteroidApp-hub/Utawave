@@ -246,6 +246,11 @@ AudioClip* Track::addClipToLane0(const juce::File& file, double startPos, double
 
 int Track::getTotalHeight() const
 {
+    // 閉じたフォルダ配下のトラックは行ごと非表示 (高さ 0)。TrackManager の
+    // getTrackY / trackAtY / getTotalHeight とヘッダ/タイムラインのレイアウトが
+    // すべてこの値を積算するため、ここで 0 を返すだけで全域が追従する。
+    if (isHiddenByFolder())
+        return 0;
     // メイン部 + レーン部（独立にリサイズ可能）
     int mainH = getMainHeight();
     if (lanesCollapsed || (int)lanes.size() <= 1)

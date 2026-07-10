@@ -81,6 +81,19 @@ public:
     // MIDI トラック判定（true なら midiClips を持ち、AudioClip は持たない）
     bool isMidiTrack()        const { return midiTrack; }
     void setMidiTrack(bool b)       { midiTrack = b; }
+    // フォルダトラック (グループバス)。クリップ/録音は持たず、子トラックの合算を
+    // 自分の INS チェーン → Vol に通してマスターへ送る。Mute/Solo は子へ継承される。
+    bool isFolderTrack()      const { return folderTrack; }
+    void setFolderTrack(bool b)     { folderTrack = b; }
+    // フォルダの開閉 (閉じると子トラックの行が非表示になる。ビュー状態・Undo 対象外)
+    bool isFolderOpen()       const { return folderOpen; }
+    void setFolderOpen(bool v)      { folderOpen = v; }
+    // 所属フォルダ (nullptr = トップレベル)。UI/message thread のみが読み書きする。
+    // audio thread はスナップショット経由 (preparePlayback で解決) でしか参照しない。
+    Track* getFolderParent()  const { return folderParent; }
+    void   setFolderParent(Track* f) { folderParent = f; }
+    // 閉じたフォルダ配下で行が非表示か (高さ 0 として扱う)
+    bool isHiddenByFolder()   const { return folderParent != nullptr && !folderParent->isFolderOpen(); }
     // 内蔵シンセ パラメータ
     int  getSynthWaveform()   const { return synthWaveform; }   // 0=Sine 1=Saw 2=Square
     void setSynthWaveform(int w)    { synthWaveform = juce::jlimit(0, 2, w); }
@@ -234,6 +247,9 @@ private:
     bool   inputMonitor       { false };
     std::atomic<bool> clickTrack { false };
     bool   midiTrack      { false };  // MIDI トラック判定
+    bool   folderTrack    { false };  // フォルダトラック (グループバス) 判定
+    bool   folderOpen     { true };   // フォルダの開閉 (閉じると子トラック行を隠す)
+    Track* folderParent   { nullptr };// 所属フォルダ (非所有。TrackManager が整合を管理)
     bool   stereo         { false };  // false=mono, true=stereo
     int    clickSound     { 0 };
     bool   clickAccent    { true };

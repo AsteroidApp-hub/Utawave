@@ -76,6 +76,14 @@ public:
     // D&D: プラグインを別トラックへ移動 (copy=false) / コピー (copy=true)
     // 引数: srcTrackIdx, srcSlotIdx, dstSlotIdx, copy
     std::function<void(int,int,int,bool)> onPluginDropFromOtherTrack;
+    // ── フォルダ所属 (右クリックメニュー「フォルダへ移動 / フォルダから出す」) ──
+    // 移動先候補のフォルダ一覧 (表示名, trackIdx)。Panel 側が trackManager から解決する。
+    std::function<std::vector<std::pair<juce::String, int>>()> getFolderTargets;
+    // 現在の親フォルダの trackIdx (-1 = 非所属)。メニューのチェック表示用。
+    std::function<int()> getFolderParentIdx;
+    // フォルダへ移動 (folderTrackIdx) / フォルダから出す (-1)。Undo は MainComponent 側。
+    std::function<void(int)> onMoveToFolder;
+
     // プロパティ編集 (名前/色/シンセ設定) を Undo 対応で適用する委譲。
     // 渡した mutate を実行し、その前後差分を 1 つの Undo として記録させる。
     // 未設定なら mutate を直接実行 (フォールバック)。

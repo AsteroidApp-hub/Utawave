@@ -412,7 +412,7 @@ void MainComponent::placeImportedAudioFiles(const juce::Array<juce::File>& audio
         Track* t = (selectedTrackIndex >= 0
                     && selectedTrackIndex < trackManager.getTrackCount())
                    ? trackManager.getTrack(selectedTrackIndex) : nullptr;
-        if (!t || t->isClickTrack())
+        if (!t || t->isClickTrack() || t->isFolderTrack())
             t = trackManager.addTrack(it.name, it.stereo);
         if (t)
         {

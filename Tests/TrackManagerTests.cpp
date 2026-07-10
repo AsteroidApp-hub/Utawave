@@ -42,6 +42,91 @@ public:
         testReorderTo();
         testTrackReorderAction();
         testMoveClipToNewTrackUndo();
+        testFolderTracks();
+        testFolderAssignAction();
+    }
+
+    // ── フォルダトラック: 追加/採番/ラン境界/正規化/複製ガード/getTotalHeight の非表示 0 ──
+    void testFolderTracks()
+    {
+        beginTest("folder tracks: add, run-end, contiguity normalisation, guards");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+
+        auto* a = tm.addTrack("A");
+        auto* f = tm.addFolderTrack();
+        auto* b = tm.addTrack("B");
+        auto* c = tm.addTrack("C");
+        expect(f != nullptr && f->isFolderTrack(), "addFolderTrack creates a folder track");
+        expect(f->getName() == "Folder 1", "folder auto-naming starts at 1");
+        expect(tm.addFolderTrack()->getName() == "Folder 2", "folder auto-naming increments");
+        expect(tm.hasFolderTrack(), "hasFolderTrack");
+
+        // 所属 + 正規化: c を f の子に (b の後ろにいる) → 正規化で f の直後へ寄る
+        c->setFolderParent(f);
+        expect(tm.normalizeFolderContiguity(), "normalisation moved the child");
+        expect(tm.indexOf(c) == tm.indexOf(f) + 1, "child is contiguous after its folder");
+        expect(tm.folderRunEnd(tm.indexOf(f)) == tm.indexOf(c) + 1, "folderRunEnd covers the run");
+        expect(tm.getFolderChildren(f).size() == 1 && tm.getFolderChildren(f)[0] == c,
+               "getFolderChildren finds the child");
+
+        // 入れ子は不可: フォルダ自身に親を付けても正規化で解除される
+        f->setFolderParent(tm.getTrack(tm.getTrackCount() - 1));
+        tm.normalizeFolderContiguity();
+        expect(f->getFolderParent() == nullptr, "nested folder parent is cleared");
+
+        // 閉じたフォルダ配下は高さ 0 (行非表示)。開けば復活
+        f->setFolderOpen(false);
+        expect(c->getTotalHeight() == 0, "child of a closed folder has zero height");
+        f->setFolderOpen(true);
+        expect(c->getTotalHeight() > 0, "child of an open folder has height again");
+
+        // フォルダは複製不可
+        expect(tm.duplicateTrack(tm.indexOf(f)) == nullptr, "folders cannot be duplicated");
+        // 子の複製は同じフォルダ所属を引き継ぐ
+        auto* cDup = tm.duplicateTrack(tm.indexOf(c));
+        expect(cDup != nullptr && cDup->getFolderParent() == f,
+               "duplicated child inherits folder membership");
+
+        // 消えた親の参照は正規化で解除される (ダングリング防止)
+        {
+            const int fi = tm.indexOf(f);
+            auto owned = tm.extractTrack(fi);   // f をマネージャから外す (延命所有)
+            tm.normalizeFolderContiguity();
+            expect(c->getFolderParent() == nullptr, "orphaned parent reference is cleared");
+            expect(cDup->getFolderParent() == nullptr, "orphaned parent reference is cleared (dup)");
+            (void) a; (void) b;
+        }
+    }
+
+    // ── FolderAssignAction: perform/undo/redo で所属と並びが往復する ──
+    void testFolderAssignAction()
+    {
+        beginTest("FolderAssignAction: membership + order round-trip");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+
+        auto* f = tm.addFolderTrack();   // idx 0
+        auto* a = tm.addTrack("A");      // idx 1
+        auto* b = tm.addTrack("B");      // idx 2
+
+        // 「b をフォルダ f へ」: after 順 = [f, b, a] (フォルダ直後へ移動)
+        std::vector<Track*> before { f, a, b };
+        std::vector<Track*> after  { f, b, a };
+        std::vector<EditActions::FolderAssignAction::ParentChange> ch;
+        ch.push_back({ b, nullptr, f });
+        EditActions::FolderAssignAction act(tm, std::move(ch), before, after, nullptr);
+
+        expect(act.perform(), "perform assigns membership");
+        expect(b->getFolderParent() == f, "b joined folder");
+        expect(tm.indexOf(b) == 1 && tm.indexOf(a) == 2, "b moved right after the folder");
+
+        expect(act.undo(), "undo restores membership");
+        expect(b->getFolderParent() == nullptr, "b left folder on undo");
+        expect(tm.indexOf(a) == 1 && tm.indexOf(b) == 2, "order restored on undo");
+
+        expect(act.perform(), "redo re-applies");
+        expect(b->getFolderParent() == f && tm.indexOf(b) == 1, "redo restored membership + order");
     }
 
     // ── 色サイクル: track i は paletteColour(i)、9 本目 (idx 8) は 1 本目と同色 ──

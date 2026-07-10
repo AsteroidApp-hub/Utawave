@@ -92,6 +92,9 @@ private:
 
     void addTrack();
     void addMidiTrack();   // 空の MIDI トラックを作成 (ハモリ/ガイド打ち込み用)
+    void addFolderTrack(); // フォルダトラック (グループバス) を作成 (環境設定で有効化)
+    // 右クリック「フォルダへ移動 (folderIdx) / フォルダから出す (-1)」(FolderAssignAction で Undo 可)
+    void moveTrackToFolder(int trackIdx, int folderIdx);
     // 入力モニター/Rec アーム/モニターリバーブ量をまとめてオーディオエンジンへ反映する。
     void syncInputMonitorStateToEngine();
     // CLICK トラックの Vol/Pan/Mute/Sound/Accent/Rate をメトロノームへ反映し、CLICK ボタンの点灯も
@@ -337,7 +340,8 @@ private:
                               std::vector<Track*> selected);
     // トラック削除を Undo 履歴へ積んで実行する (TrackDeleteAction)。延命所有なので Cmd+Z で
     // 同一インスタンス (プラグイン / クリップ / テイク含む) が元の位置へ復帰する。
-    void pushTrackDeleteUndo(std::vector<Track*> tracks);
+    // newTransaction=false は「フォルダ削除時の子の所属解除」など同一トランザクションに続けて積む用
+    void pushTrackDeleteUndo(std::vector<Track*> tracks, bool newTransaction = true);
 
     // 指定 index 群のトラックをまとめて削除する (Undo 可能・プラグイン後処理 + 再生スナップショット更新)。
     void deleteTracks(std::vector<int> indices);

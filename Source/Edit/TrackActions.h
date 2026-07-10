@@ -192,4 +192,63 @@ private:
     JUCE_DECLARE_NON_COPYABLE(TrackReorderAction)
 };
 
+// フォルダ所属変更 (フォルダへ移動 / フォルダから出す / フォルダ削除時の子解放) の Undo。
+//
+// 設計:
+//  - perform() が実際に after 状態 (親ポインタ + トラック順) を適用する (呼び出し側は
+//    未適用のまま undoManager.perform() に渡す)。undo() は before 状態へ戻す。
+//  - Track の生成/破棄はしないので延命所有は不要。child/parent の生存は indexOf で確認し、
+//    消えていれば安全にスキップ (親が消えていればトップレベルへ)。
+//  - 順序は before/after の Track* 列を reorderTo で復元する (「フォルダへ移動」は所属と
+//    同時に子をフォルダ直後へ動かすため、位置も往復させる)。集合が合わなければ
+//    reorderTo が false を返し、normalizeFolderContiguity が最低限の整合を回復する。
+class FolderAssignAction : public juce::UndoableAction
+{
+public:
+    struct ParentChange
+    {
+        Track* child        { nullptr };
+        Track* beforeParent { nullptr };
+        Track* afterParent  { nullptr };
+    };
+
+    FolderAssignAction(TrackManager& tmIn, std::vector<ParentChange> changesIn,
+                       std::vector<Track*> beforeOrder, std::vector<Track*> afterOrder,
+                       std::function<void()> onChangeCb)
+        : tm(tmIn), changes(std::move(changesIn)),
+          before(std::move(beforeOrder)), after(std::move(afterOrder)),
+          onChange(std::move(onChangeCb)) {}
+
+    bool perform() override { return apply(true); }
+    bool undo()    override { return apply(false); }
+
+private:
+    bool apply(bool useAfter)
+    {
+        bool any = false;
+        for (auto& c : changes)
+        {
+            if (c.child == nullptr || tm.indexOf(c.child) < 0) continue;   // 子が消えた
+            Track* p = useAfter ? c.afterParent : c.beforeParent;
+            if (p != nullptr && (tm.indexOf(p) < 0 || !p->isFolderTrack()))
+                p = nullptr;                                               // 親が消えた
+            c.child->setFolderParent(p);
+            any = true;
+        }
+        const auto& ord = useAfter ? after : before;
+        if (!ord.empty())
+            tm.reorderTo(ord);          // 集合が合わなければ false (並びは現状のまま)
+        tm.normalizeFolderContiguity(); // 子=フォルダ直後の不変条件を必ず回復
+        if (any && onChange) onChange();
+        return any;
+    }
+
+    TrackManager& tm;
+    std::vector<ParentChange> changes;
+    std::vector<Track*> before, after;   // 順序解決用 (参照外ししない)
+    std::function<void()> onChange;
+
+    JUCE_DECLARE_NON_COPYABLE(FolderAssignAction)
+};
+
 } // namespace EditActions

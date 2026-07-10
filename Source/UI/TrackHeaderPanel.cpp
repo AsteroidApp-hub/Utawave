@@ -83,6 +83,9 @@ void TrackHeaderPanel::showAddTrackMenu()
     m.addItem(1, tr(u8"モノラルトラックを追加"));
     m.addItem(2, tr(u8"ステレオトラックを追加"));
     m.addItem(4, tr(u8"MIDI トラックを追加"));
+    // フォルダトラックは環境設定「フォルダトラックを追加できるようにする」ON の時だけ出す
+    if (folderTracksEnabled && folderTracksEnabled())
+        m.addItem(5, tr(u8"フォルダトラックを追加"));
     m.addSeparator();
     m.addItem(3, tr(u8"クリックトラックを追加"),
               !trackManager.hasClickTrack());
@@ -91,6 +94,7 @@ void TrackHeaderPanel::showAddTrackMenu()
             if (result == 1 && onAddTrackWithMode) onAddTrackWithMode(false, /*appendAtBottom=*/false);
             else if (result == 2 && onAddTrackWithMode) onAddTrackWithMode(true, /*appendAtBottom=*/false);
             else if (result == 4 && onAddMidiTrack) onAddMidiTrack();
+            else if (result == 5 && onAddFolderTrack) onAddFolderTrack();
             else if (result == 3 && onAddClickTrack) onAddClickTrack();
         });
 }
@@ -251,6 +255,21 @@ void TrackHeaderPanel::performReorder(int dropIndex)
     for (int i : sel)
         if (auto* t = trackManager.getTrack(i)) movers.push_back(t);
 
+    // フォルダをドラッグしたら子トラックも一緒に動かす (相対順のまま直後に続ける)
+    {
+        std::vector<Track*> withChildren;
+        for (auto* m : movers)
+        {
+            if (std::find(withChildren.begin(), withChildren.end(), m) == withChildren.end())
+                withChildren.push_back(m);
+            if (m->isFolderTrack())
+                for (auto* c : trackManager.getFolderChildren(m))
+                    if (std::find(withChildren.begin(), withChildren.end(), c) == withChildren.end())
+                        withChildren.push_back(c);
+        }
+        movers = std::move(withChildren);
+    }
+
     // Undo 用に並べ替え前のトラック順を控える
     std::vector<Track*> beforeOrder;
     for (int i = 0; i < trackManager.getTrackCount(); ++i)
@@ -291,6 +310,10 @@ void TrackHeaderPanel::performReorder(int dropIndex)
         }
         if (from != to) trackManager.moveTrack(from, to);
     }
+
+    // フォルダ整合: ドラッグでは所属を変えない方針のため、子がフォルダのランから離れた
+    // 並びになったらフォルダ直後へ戻す (所属変更は右クリックメニューで行う)
+    trackManager.normalizeFolderContiguity();
 
     // 並べ替え後のトラック順を控える (Undo 用)
     std::vector<Track*> afterOrder;
@@ -542,6 +565,23 @@ void TrackHeaderPanel::refresh()
             if (onPluginDropAcrossTracks)
                 onPluginDropAcrossTracks(srcTrack, srcSlot, idx, dstSlot, copy);
         };
+        // フォルダ所属メニュー: 候補一覧 / 現在の親 / 移動要求 (Undo は MainComponent 側)
+        view->getFolderTargets = [this]() -> std::vector<std::pair<juce::String, int>>
+        {
+            std::vector<std::pair<juce::String, int>> out;
+            for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+                if (auto* t = trackManager.getTrack(ti); t && t->isFolderTrack())
+                    out.emplace_back(t->getName(), ti);
+            return out;
+        };
+        view->getFolderParentIdx = [this, track]() -> int
+        {
+            return trackManager.indexOf(track->getFolderParent());
+        };
+        view->onMoveToFolder = [this, idx](int folderIdx)
+        {
+            if (onTrackMoveToFolder) onTrackMoveToFolder(idx, folderIdx);
+        };
         view->setTrackIndex(idx);
         if (onGetNumInputChannels)
             view->getNumInputChannels = onGetNumInputChannels;
@@ -741,8 +781,13 @@ void TrackHeaderPanel::resized()
 
     for (int i = 0; i < (int)headerViews.size(); ++i)
     {
-        int h = trackManager.getTrack(i)->getTotalHeight();
-        headerViews[(size_t)i]->setBounds(0, y, getWidth() - 1, h);
+        auto* t = trackManager.getTrack(i);
+        // 閉じたフォルダ配下は高さ 0 = 行ごと非表示
+        const int h = t->getTotalHeight();
+        // フォルダ配下の子は少し字下げして階層を見せる
+        const int indent = (t->getFolderParent() != nullptr) ? 14 : 0;
+        headerViews[(size_t)i]->setVisible(h > 0);
+        headerViews[(size_t)i]->setBounds(indent, y, getWidth() - 1 - indent, h);
         y += h;
     }
 

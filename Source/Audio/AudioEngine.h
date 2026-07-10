@@ -710,6 +710,23 @@ private:
         // チェーン (EQ 等) に通すために保持する。clipTracks の Track* と同じく clearPlayback()
         // の drain バリアで保護される (トラック削除時に空スナップショットへ遷移してから破棄)。
         Track*                                      clickTrack { nullptr };
+
+        // ── フォルダトラック (グループバス) ──
+        // フォルダ配下の子トラック出力 (vol/pan 後) はマスターでなくフォルダバスへ加算し、
+        // フォルダの INS チェーン → フォルダ Vol を通してからマスターへ加算する。
+        // Mute/Solo は子へ継承 (アクティブトラック判定側で解決)。構造は公開後不変。
+        // buf/fed は単一 audio thread が毎ブロック書く scratch (書き出しはローカル実体を使う)。
+        // Track* は clipTracks と同じく clearPlayback() の drain バリアで保護される。
+        struct FolderBus
+        {
+            int    trackIdx { -1 };
+            Track* track    { nullptr };
+            juce::AudioBuffer<float> buf;
+            bool   fed { false };
+        };
+        std::vector<FolderBus> folderBuses;       // trackIdx 昇順 (加算順の決定論)
+        std::vector<int>       folderBusOfTrack;  // trackIdx → folderBuses index (-1 = 非所属)
+        std::vector<Track*>    folderOfTrack;     // trackIdx → 親フォルダ Track* (nullptr = 非所属)
     };
     double lastBlockPosStart { -1.0 };  // 不連続検知用
 

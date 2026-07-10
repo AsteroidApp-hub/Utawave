@@ -1221,11 +1221,53 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
         int   trackH   = track->getTotalHeight();
         int   trackBot = trackTop + trackH;
 
+        // 閉じたフォルダ配下 (高さ 0) は行ごと非表示 (レーン高で描かない)
+        if (trackH <= 0) continue;
         if (trackBot < area.getY() || trackTop > area.getBottom()) continue;
         // クリップ範囲外のトラックはスキップ（部分 repaint 時の高速化）
         if (trackBot < clipT || trackTop > clipB) continue;
 
         juce::Rectangle<int> trackBounds { area.getX(), trackTop, area.getWidth(), trackH };
+
+        // ── フォルダトラック行: 子トラックのクリップ範囲をサマリーバーで描く ──
+        // (閉じていても中身の分量が分かる。クリップ自体は持たないのでこれで描画終了)
+        if (track->isFolderTrack())
+        {
+            g.setColour(track->getColour().withAlpha(0.06f));
+            g.fillRect(trackBounds);
+
+            g.saveState();
+            g.reduceClipRegion(trackBounds);
+            const double bps2 = bpm / 60.0;
+            const int barY = trackTop + 6;
+            const int barH = juce::jmax(6, trackH - 12);
+            for (int ci2 = 0; ci2 < trackCount; ++ci2)
+            {
+                auto* child = trackManager.getTrack(ci2);
+                if (!child || child->getFolderParent() != track) continue;
+                auto drawSpan = [&](double s, double d)
+                {
+                    const int cx = (int)(s * bps2 * pixelsPerBeat - scrollX);
+                    const int cw = juce::jmax(2, (int)(d * bps2 * pixelsPerBeat));
+                    if (cx + cw < area.getX() || cx > area.getRight()) return;
+                    g.setColour(child->getColour().withAlpha(0.45f));
+                    g.fillRoundedRectangle((float)cx, (float)barY, (float)cw, (float)barH, 2.0f);
+                };
+                if (auto* lane0 = child->getLaneCount() > 0 ? child->getLane(0) : nullptr)
+                    for (auto& c : lane0->clips)
+                        if (c) drawSpan(c->getStartPosition(), c->getDuration());
+                for (int mi = 0; mi < child->getMidiClipCount(); ++mi)
+                    if (auto* mc = child->getMidiClip(mi))
+                        drawSpan(mc->getStartPosition(), mc->getDuration());
+            }
+            g.restoreState();
+
+            // 下端の区切り線 (通常トラックと同じ見た目を保つ)
+            g.setColour(AppColours::separator);
+            g.drawLine((float)area.getX(), (float)trackBot,
+                       (float)area.getRight(), (float)trackBot, 1.0f);
+            continue;
+        }
 
         // トラック背景は paint() の fillAll(trackBg) で既に塗られているため per-track の不透明塗りは
         // 不要 (冗長・per-track 塗りはグリッドを覆い隠す原因だった)。録音アーム中だけ赤みを重ねる。
@@ -1493,6 +1535,8 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
                 auto* tr = trackManager.getTrack(t);
                 if (!tr) { y = area.getY(); h = 0; return; }
                 const int trackTop = area.getY() + trackManager.getTrackY(t) - scrollY;
+                // 閉じたフォルダ配下 (高さ 0) は行なし
+                if (tr->getTotalHeight() <= 0) { y = trackTop; h = 0; return; }
                 if (l == 0)
                 {
                     y = trackTop;

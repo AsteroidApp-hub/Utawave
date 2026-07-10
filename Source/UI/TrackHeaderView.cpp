@@ -463,6 +463,31 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
         clickHalfBtn.addMouseListener(this, false);
         clickDoubleBtn.addMouseListener(this, false);
     }
+
+    // フォルダトラック (グループバス): 録音/モニター/入力/Pan/Rev は使わないので非表示。
+    // M/S/Vol/INS のみ (仕様)。TList ボタンはフォルダの Open/Close (子トラック行の開閉) に転用する。
+    if (track.isFolderTrack())
+    {
+        recBtn.setVisible(false);
+        monBtn.setVisible(false);
+        inputLabel.setVisible(false);
+        inputChBox.setVisible(false);
+        panSlider.setVisible(false);
+        revSlider.setVisible(false);
+        stereoBadge.setVisible(false);
+
+        // ラベルは操作 (これから起きること) を示す: 開いている間は "Close"、閉じている間は "Open"。
+        // トグルの点灯 (accent) は TList と同じく「展開中」を表す。
+        lanesBtn.setToggleState(track.isFolderOpen(), juce::dontSendNotification);
+        lanesBtn.setButtonText(track.isFolderOpen() ? "Close" : "Open");
+        lanesBtn.setTooltip(tr(u8"フォルダを開閉します (閉じると中のトラックが隠れます)"));
+        lanesBtn.onClick = [this]
+        {
+            track.setFolderOpen(lanesBtn.getToggleState());
+            lanesBtn.setButtonText(track.isFolderOpen() ? "Close" : "Open");
+            if (onChanged) onChanged();
+        };
+    }
 }
 
 TrackHeaderView::~TrackHeaderView()
@@ -602,7 +627,14 @@ void TrackHeaderView::refresh()
     soloBtn.setToggleState(track.isSoloed(),        juce::dontSendNotification);
     recBtn.setToggleState (track.isRecArmed(),      juce::dontSendNotification);
     monBtn.setToggleState (track.isInputMonitor(),  juce::dontSendNotification);
-    lanesBtn.setToggleState(!track.isLanesCollapsed(), juce::dontSendNotification);
+    if (track.isFolderTrack())
+    {
+        // フォルダは TList ボタンを Open/Close に転用している
+        lanesBtn.setToggleState(track.isFolderOpen(), juce::dontSendNotification);
+        lanesBtn.setButtonText(track.isFolderOpen() ? "Close" : "Open");
+    }
+    else
+        lanesBtn.setToggleState(!track.isLanesCollapsed(), juce::dontSendNotification);
     volSlider.setValue(track.getVolume(),     juce::dontSendNotification);
     panSlider.setValue(track.getPan(),        juce::dontSendNotification);
     revSlider.setValue(track.getReverbSend(), juce::dontSendNotification);
@@ -733,6 +765,22 @@ void TrackHeaderView::paint(juce::Graphics& g)
 
     g.setColour(track.getColour());
     g.fillRect(0, 0, 4, totalH);
+
+    // フォルダトラック: グループバスであることが分かるよう、トラック色の薄い下地 +
+    // "FOLDER" バッジを描く (Pan/Rev を隠した行 = y44 付近が空くのでそこへ。
+    // トラックを最小高さまで縮めた時は下地のみでバッジは省く)
+    if (track.isFolderTrack())
+    {
+        const int selW = (track.isInsertSlotsVisible() && w > controlsWidth) ? controlsWidth : w;
+        g.setColour(track.getColour().withAlpha(0.10f));
+        g.fillRect(4, 0, selW - 4, mainH);
+        if (mainH >= 58)
+        {
+            g.setColour(track.getColour().withAlpha(0.85f));
+            g.setFont(juce::FontOptions(8.5f, juce::Font::bold));
+            g.drawText("FOLDER", 30, 45, 60, 10, juce::Justification::centredLeft);
+        }
+    }
 
     if (track.isRecArmed())
     {

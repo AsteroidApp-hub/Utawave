@@ -63,6 +63,7 @@ AppPreferences AppPreferences::load()
         p.retakeKeepsTake    = xml->getBoolAttribute("retakeKeepsTake", p.retakeKeepsTake);
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
+        p.enableFolderTracks = xml->getBoolAttribute("enableFolderTracks", p.enableFolderTracks);
         p.showExportCompleteDialog = xml->getBoolAttribute("showExportCompleteDialog", p.showExportCompleteDialog);
         p.lastProjectSampleRate = xml->getDoubleAttribute("lastProjectSampleRate", p.lastProjectSampleRate);
         p.lastProjectBitDepth   = xml->getIntAttribute("lastProjectBitDepth", p.lastProjectBitDepth);
@@ -90,6 +91,7 @@ bool AppPreferences::save() const
     xml.setAttribute("retakeKeepsTake", retakeKeepsTake);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
+    xml.setAttribute("enableFolderTracks", enableFolderTracks);
     xml.setAttribute("showExportCompleteDialog", showExportCompleteDialog);
     xml.setAttribute("lastProjectSampleRate", lastProjectSampleRate);
     xml.setAttribute("lastProjectBitDepth", lastProjectBitDepth);

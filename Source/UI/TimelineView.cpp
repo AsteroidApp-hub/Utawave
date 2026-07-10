@@ -1388,6 +1388,10 @@ void TimelineView::filesDropped(const juce::StringArray& files, int x, int y)
     auto area = getContentArea();
     int relY = y - area.getY() + scrollY;
     int targetTrackIdx = trackManager.trackAtY(relY);
+    // フォルダトラックへは音声を置けない (クリップを持たないグループバス) → 新規トラック扱い
+    if (targetTrackIdx >= 0)
+        if (auto* tt = trackManager.getTrack(targetTrackIdx); tt && tt->isFolderTrack())
+            targetTrackIdx = -1;
 
     // ドロップ位置の時間
     double dropTime = juce::jmax(0.0, xToPosition(x));

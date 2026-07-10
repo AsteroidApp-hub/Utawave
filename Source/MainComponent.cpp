@@ -14,6 +14,7 @@
 #include "UI/PianoRollEditor.h"
 #include "MIDI/MidiImporter.h"
 #include "MIDI/MidiImportDialog.h"
+#include "Edit/TrackActions.h"   // フォルダ所属変更の Undo (FolderAssignAction)
 #include <algorithm>
 
 void MainComponent::applyTooltipVisibility()
@@ -116,6 +117,14 @@ MainComponent::MainComponent()
         markProjectDirty();
     };
     trackHeaderPanel.onAddMidiTrack        = [this] { addMidiTrack(); };
+    // フォルダトラック: 環境設定「フォルダトラックを追加できるようにする」ON の時だけメニューに出る
+    trackHeaderPanel.folderTracksEnabled   = [this] { return appPrefs.enableFolderTracks; };
+    trackHeaderPanel.onAddFolderTrack      = [this] { addFolderTrack(); };
+    // 右クリック「フォルダへ移動 / フォルダから出す」(Undo 対応)
+    trackHeaderPanel.onTrackMoveToFolder   = [this](int trackIdx, int folderIdx)
+    {
+        moveTrackToFolder(trackIdx, folderIdx);
+    };
     trackHeaderPanel.onAddClickTrack       = [this] {
         if (auto* t = trackManager.addClickTrack())
         {
@@ -1359,6 +1368,77 @@ void MainComponent::addMidiTrack()
     markProjectDirty();
 }
 
+void MainComponent::addFolderTrack()
+{
+    // 挿入位置: 選択がフォルダ/その配下なら、そのフォルダのラン直後へ (子ランを割らない)
+    int insertAfter = newTrackInsertAfter();
+    if (insertAfter >= 0 && insertAfter < trackManager.getTrackCount())
+    {
+        if (auto* sel = trackManager.getTrack(insertAfter))
+        {
+            Track* folder = sel->isFolderTrack() ? sel : sel->getFolderParent();
+            if (folder != nullptr)
+            {
+                const int fi = trackManager.indexOf(folder);
+                if (fi >= 0) insertAfter = trackManager.folderRunEnd(fi) - 1;
+            }
+        }
+    }
+    auto* t = trackManager.addFolderTrack(insertAfter);
+    if (!t) return;
+    pushTrackAddUndo(t);
+    audioEngine.invalidatePlayback();
+    markProjectDirty();
+}
+
+void MainComponent::moveTrackToFolder(int trackIdx, int folderIdx)
+{
+    if (trackIdx < 0 || trackIdx >= trackManager.getTrackCount()) return;
+    auto* child = trackManager.getTrack(trackIdx);
+    if (!child || child->isFolderTrack() || child->isClickTrack()) return;
+
+    Track* folder = nullptr;
+    if (folderIdx >= 0 && folderIdx < trackManager.getTrackCount())
+        folder = trackManager.getTrack(folderIdx);
+    if (folder != nullptr && !folder->isFolderTrack()) return;
+    if (child->getFolderParent() == folder) return;   // 変化なし
+
+    // after 順: child を抜いて挿入し直す。
+    //  - フォルダへ: そのフォルダのラン末尾 (子=フォルダ直後の不変条件を保つ)
+    //  - フォルダから出す: 元フォルダのラン直後 (トップレベルとして直下に残す)
+    std::vector<Track*> before;
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+        before.push_back(trackManager.getTrack(i));
+    std::vector<Track*> after = before;
+    after.erase(std::remove(after.begin(), after.end(), child), after.end());
+
+    Track* runFolder = (folder != nullptr) ? folder : child->getFolderParent();
+    size_t insertPos = after.size();
+    auto it = std::find(after.begin(), after.end(), runFolder);
+    if (it != after.end())
+    {
+        size_t p = (size_t)(it - after.begin()) + 1;
+        while (p < after.size() && after[p]->getFolderParent() == runFolder) ++p;
+        insertPos = p;
+    }
+    after.insert(after.begin() + (long)insertPos, child);
+
+    std::vector<EditActions::FolderAssignAction::ParentChange> changes;
+    changes.push_back({ child, child->getFolderParent(), folder });
+
+    undoManager.beginNewTransaction();
+    undoManager.perform(new EditActions::FolderAssignAction(
+        trackManager, std::move(changes), std::move(before), std::move(after),
+        /*onChange*/ [this]
+        {
+            trackHeaderPanel.refresh();
+            timelineView.refresh();
+            audioEngine.invalidatePlayback();
+            if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
+            markProjectDirty();
+        }));
+}
+
 void MainComponent::togglePlay()
 {
     isPlaying = !isPlaying;
@@ -1494,7 +1574,7 @@ int MainComponent::countRecArmedTracks() const
 Track* MainComponent::findEmptyRecordTrack()
 {
     auto recordable = [](const Track* t)
-    { return t != nullptr && !t->isMidiTrack() && !t->isClickTrack(); };
+    { return t != nullptr && !t->isMidiTrack() && !t->isClickTrack() && !t->isFolderTrack(); };
     auto isEmpty = [](const Track* t)
     {
         if (t->getMidiClipCount() > 0) return false;
@@ -1999,7 +2079,31 @@ void MainComponent::deleteTracks(std::vector<int> indices)
         if (auto* t = trackManager.getTrack(idx)) tracks.push_back(t);
     if (tracks.empty()) return;
 
-    pushTrackDeleteUndo(std::move(tracks));
+    // フォルダトラックを消す場合、配下の子 (同時削除されないもの) はフォルダから出してから
+    // 削除する (親参照を残さない)。同一トランザクションに積むので Cmd+Z 1 回で所属ごと戻る。
+    undoManager.beginNewTransaction();
+    {
+        std::vector<EditActions::FolderAssignAction::ParentChange> changes;
+        for (auto* t : tracks)
+        {
+            if (!t || !t->isFolderTrack()) continue;
+            for (auto* c : trackManager.getFolderChildren(t))
+                if (std::find(tracks.begin(), tracks.end(), c) == tracks.end())
+                    changes.push_back({ c, t, nullptr });
+        }
+        if (!changes.empty())
+            undoManager.perform(new EditActions::FolderAssignAction(
+                trackManager, std::move(changes), {}, {},
+                [this]
+                {
+                    trackHeaderPanel.refresh();
+                    timelineView.refresh();
+                    audioEngine.invalidatePlayback();
+                    markProjectDirty();
+                }));
+    }
+
+    pushTrackDeleteUndo(std::move(tracks), /*newTransaction*/ false);
 }
 
 // ───────────────────── 音楽情報 (マーカー/テンポ/拍子/曲BPM) の Undo ─────────────────────

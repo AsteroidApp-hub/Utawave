@@ -144,10 +144,35 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
             m.addItem(600, tr(u8"ラウドネスを ") + juce::String(loudnessTargetLufs, 1)
                               + tr(u8" LUFS に合わせる"));
         }
+        // ── フォルダ所属 (フォルダトラック以外・Click 以外) ──
+        if (!track.isFolderTrack() && !track.isClickTrack() && getFolderTargets)
+        {
+            const auto folders = getFolderTargets();
+            if (!folders.empty() || track.getFolderParent() != nullptr)
+            {
+                m.addSeparator();
+                if (!folders.empty())
+                {
+                    juce::PopupMenu folderMenu;
+                    for (size_t i = 0; i < folders.size() && i < 100; ++i)
+                        folderMenu.addItem(700 + (int)i, folders[i].first,
+                                           /*enabled*/ true,
+                                           /*ticked*/ track.getFolderParent() != nullptr
+                                                      && folders[i].second >= 0
+                                                      && getFolderParentIdx
+                                                      && getFolderParentIdx() == folders[i].second);
+                    m.addSubMenu(tr(u8"フォルダへ移動"), folderMenu);
+                }
+                if (track.getFolderParent() != nullptr)
+                    m.addItem(699, tr(u8"フォルダから出す"));
+            }
+        }
         m.addSeparator();
         // 通常複製はテイクリストごと複製。Option (Win は Alt) 押下時は Lane 0 のみ複製する。
-        m.addItem(201, tr(u8"トラックを複製")
-                          + platformShortcutText(tr(u8" (Option: TList を除く)")));
+        // フォルダトラックは複製不可 (子は複製対象外のため項目を出さない)
+        if (!track.isFolderTrack())
+            m.addItem(201, tr(u8"トラックを複製")
+                              + platformShortcutText(tr(u8" (Option: TList を除く)")));
         // 複数選択中はまとめて削除できることを示す (選択中の N 本)
         const int delCount = getDeleteCount ? getDeleteCount() : 1;
         m.addItem(200, delCount > 1
@@ -264,6 +289,17 @@ void TrackHeaderView::handleTrackContextMenuResult(int result)
         // Option (Mac) / Alt (Win) 押下中はテイクリストを複製しない (Lane 0 のみ)
         const bool excludeTakes = juce::ModifierKeys::getCurrentModifiers().isAltDown();
         if (onDuplicateRequest) onDuplicateRequest(!excludeTakes);
+    }
+    else if (result == 699) {
+        if (onMoveToFolder) onMoveToFolder(-1);   // フォルダから出す
+    }
+    else if (result >= 700 && result < 800) {
+        if (onMoveToFolder && getFolderTargets)
+        {
+            const auto folders = getFolderTargets();
+            const size_t i = (size_t)(result - 700);
+            if (i < folders.size()) onMoveToFolder(folders[i].second);
+        }
     }
     else if (result >= 400 && result < 500) {
         if (onPluginEditRequest) onPluginEditRequest(result - 400);
