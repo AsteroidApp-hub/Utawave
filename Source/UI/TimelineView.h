@@ -278,6 +278,9 @@ public:
     void repaintTimeRange(double startSec, double endSec);
     void setPlayheadPosition(double seconds);
     void setScrollY(int y);
+    // 指定トラックのメイン部が見えるまで縦スクロールする (テンキーの選択移動で使用)。
+    // 既に見えていれば何もしない。ヘッダ側へも onVerticalScroll で同期する。
+    void scrollTrackIntoView(int trackIdx);
 
     double getScrollX() const { return scrollX; }
     int    getScrollY() const { return scrollY; }

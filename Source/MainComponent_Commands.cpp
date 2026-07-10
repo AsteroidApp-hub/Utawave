@@ -428,7 +428,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         }
     }
 
-    // ↑ ↓ = 選択範囲のフォーカスレーンを上下に移動
+    // Option+↑ ↓ = 選択範囲のフォーカスレーンを上下に移動 (テイク比較)。
+    //   修飾なしの ↑↓ はトラック選択の移動 (下のブロック) に割り当てたため Option 付きへ移した。
     // Shift+↑ = フォーカスレーンの選択範囲を録音レーン (Lane 0) にコピペ
     // 注: KeyPress::operator==(int) は修飾キーありで false を返すため keyCode で比較
     {
@@ -447,13 +448,55 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
                 }
                 return false;
             }
-            if (!key.getModifiers().isAnyModifierKeyDown()
+            if (key.getModifiers().isAltDown()
+                && !key.getModifiers().isCommandDown() && !key.getModifiers().isShiftDown()
                 && timelineView.hasSelectionRange())
             {
                 int delta = isUp ? -1 : 1;
                 if (timelineView.moveSelectionFocusLane(delta))
                     return true;
             }
+        }
+    }
+
+    // ↑ / ↓ (テンキー 8 / 2 も同じ) = 選択トラックを上 / 下へ移動 (単一選択に集約)。
+    // 範囲選択の有無に依らず修飾なしの ↑↓ は常にここ (フォーカスレーン移動は Option+↑↓)。
+    // 選択先がビューポート外なら見える位置まで縦スクロールで追従する。
+    {
+        const int kc = key.getKeyCode();
+        const bool up   = (kc == juce::KeyPress::upKey   || kc == juce::KeyPress::numberPad8);
+        const bool down = (kc == juce::KeyPress::downKey || kc == juce::KeyPress::numberPad2);
+        if ((up || down) && !key.getModifiers().isAnyModifierKeyDown())
+        {
+            const int count = trackManager.getTrackCount();
+            if (count <= 0) return true;
+
+            // 閉じたフォルダ配下 (高さ 0 = 画面に出ていない) は飛ばす
+            auto visible = [this](int i)
+            {
+                auto* t = trackManager.getTrack(i);
+                return t != nullptr && t->getTotalHeight() > 0;
+            };
+            const int dir = up ? -1 : 1;
+            int target = -1;
+            if (selectedTrackIndex >= 0 && selectedTrackIndex < count)
+            {
+                for (int i = selectedTrackIndex + dir; i >= 0 && i < count; i += dir)
+                    if (visible(i)) { target = i; break; }
+            }
+            else
+            {
+                // 未選択: 上=末尾 / 下=先頭 の可視トラックから始める
+                for (int i = up ? count - 1 : 0; i >= 0 && i < count; i += dir)
+                    if (visible(i)) { target = i; break; }
+            }
+            if (target >= 0)
+            {
+                trackHeaderPanel.setSelectedTrack(target);
+                selectedTrackIndex = target;   // 主選択 index (setSelectedTrack は callback を呼ばない)
+                timelineView.scrollTrackIntoView(target);
+            }
+            return true;
         }
     }
 

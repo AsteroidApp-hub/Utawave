@@ -139,10 +139,17 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
     volSlider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     volSlider.setColour(juce::Slider::textBoxOutlineColourId,    juce::Colours::transparentBlack);
     volSlider.setColour(juce::Slider::textBoxHighlightColourId,  AppColours::accent.withAlpha(0.3f));
-    // JUCE Slider 内部 Label のフォントが大きすぎるので 9px に縮小
+    // JUCE Slider 内部 Label のフォントが大きすぎるので 9px に縮小。
+    // あわせてキーボードフォーカスを外す: 編集可能 Label は setEditable が自動で focus 有効に
+    // するため、dB 数値をクリックすると編集後も Label がフォーカスを保持し、↑↓ が Label → 親
+    // Slider へ伝播して Slider::keyPressed が Vol を ±step 変えてしまう (トラック選択の ↑↓
+    // 移動を吸う)。クリック編集は Label::mouseUp が担うので focus 無しでも従来どおり動く
     for (int i = 0; i < volSlider.getNumChildComponents(); ++i)
         if (auto* lbl = dynamic_cast<juce::Label*>(volSlider.getChildComponent(i)))
+        {
             lbl->setFont(juce::FontOptions(9.5f));
+            lbl->setWantsKeyboardFocus(false);
+        }
 
     volSlider.setValue(track.getVolume(),     juce::dontSendNotification);
     panSlider.setValue(track.getPan(),        juce::dontSendNotification);

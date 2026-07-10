@@ -1403,6 +1403,33 @@ void TimelineView::scrollByTracks(int steps)
     repaint();
 }
 
+void TimelineView::scrollTrackIntoView(int trackIdx)
+{
+    auto* t = trackManager.getTrack(trackIdx);
+    if (t == nullptr || t->getTotalHeight() <= 0) return;   // 閉じたフォルダ配下は対象外
+
+    const int viewportH = getContentArea().getHeight();
+    if (viewportH <= 0) return;
+    // maxScroll は vScrollBar / scrollByTracks と同じ「末尾余白込み」で計算する
+    const int maxScroll = juce::jmax(0, juce::jmax(400, trackManager.getTotalHeight() + 200)
+                                            - viewportH);
+
+    // メイン部 (テイクレーンを除くヘッダ相当の高さ) が収まる位置まで最小移動する
+    const int top = trackManager.getTrackY(trackIdx);
+    const int h   = juce::jmin(t->getMainHeight(), viewportH);
+
+    int target = scrollY;
+    if      (top < scrollY)                  target = top;                    // 上にはみ出し
+    else if (top + h > scrollY + viewportH)  target = top + h - viewportH;    // 下にはみ出し
+    target = juce::jlimit(0, maxScroll, target);
+    if (target == scrollY) return;
+
+    scrollY = target;
+    vScrollBar.setCurrentRange(scrollY, vScrollBar.getCurrentRangeSize());
+    if (onVerticalScroll) onVerticalScroll(scrollY);
+    repaint();
+}
+
 void TimelineView::applyVerticalZoomStep(double deltaY)
 {
     // Shift+Option+スクロールと同じ (波形振幅ズーム)
