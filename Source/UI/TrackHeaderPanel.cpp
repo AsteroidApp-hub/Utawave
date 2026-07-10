@@ -678,7 +678,14 @@ void TrackHeaderPanel::refresh()
         };
         view->onMoveToFolder = [this, idx](int folderIdx)
         {
-            if (onTrackMoveToFolder) onTrackMoveToFolder(idx, folderIdx);
+            // idx が複数選択に含まれていれば選択集合をまとめて移動 (削除の
+            // requestDeleteSelectedOrTrack と同じスコープ解決)。そうでなければ idx 単体。
+            std::vector<int> targets;
+            if (selectedIndices.count(idx) > 0 && selectedIndices.size() > 1)
+                targets.assign(selectedIndices.begin(), selectedIndices.end());
+            else
+                targets.push_back(idx);
+            if (onTracksMoveToFolder) onTracksMoveToFolder(targets, folderIdx);
         };
         view->setTrackIndex(idx);
         if (onGetNumInputChannels)

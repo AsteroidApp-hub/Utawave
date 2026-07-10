@@ -120,10 +120,10 @@ MainComponent::MainComponent()
     // フォルダトラック: 環境設定「フォルダトラックを追加できるようにする」ON の時だけメニューに出る
     trackHeaderPanel.folderTracksEnabled   = [this] { return appPrefs.enableFolderTracks; };
     trackHeaderPanel.onAddFolderTrack      = [this] { addFolderTrack(); };
-    // 右クリック「フォルダへ移動 / フォルダから出す」(Undo 対応)
-    trackHeaderPanel.onTrackMoveToFolder   = [this](int trackIdx, int folderIdx)
+    // 右クリック「フォルダへ移動 / フォルダから出す」(Undo 対応・複数選択はまとめて移動)
+    trackHeaderPanel.onTracksMoveToFolder  = [this](const std::vector<int>& trackIdxs, int folderIdx)
     {
-        moveTrackToFolder(trackIdx, folderIdx);
+        moveTracksToFolder(trackIdxs, folderIdx);
     };
     trackHeaderPanel.onAddClickTrack       = [this] {
         if (auto* t = trackManager.addClickTrack())
@@ -1399,50 +1399,76 @@ void MainComponent::addFolderTrack()
     markProjectDirty();
 }
 
-void MainComponent::moveTrackToFolder(int trackIdx, int folderIdx)
+void MainComponent::moveTracksToFolder(std::vector<int> trackIdxs, int folderIdx)
 {
-    if (trackIdx < 0 || trackIdx >= trackManager.getTrackCount()) return;
-    auto* child = trackManager.getTrack(trackIdx);
-    if (!child || child->isFolderTrack() || child->isClickTrack()) return;
-
     Track* folder = nullptr;
     if (folderIdx >= 0 && folderIdx < trackManager.getTrackCount())
         folder = trackManager.getTrack(folderIdx);
     if (folder != nullptr && !folder->isFolderTrack()) return;
-    if (child->getFolderParent() == folder) return;   // 変化なし
 
-    // after 順: child を抜いて挿入し直す。
-    //  - フォルダへ: そのフォルダのラン末尾 (子=フォルダ直後の不変条件を保つ)
-    //  - フォルダから出す: 元フォルダのラン直後 (トップレベルとして直下に残す)
+    // 対象の解決: 重複排除 + 昇順 (現在の並び順で処理し、複数移動でも相対順を保つ)。
+    // フォルダ / Click / 範囲外 / 変化なし (既にその所属) は除外する。
+    std::sort(trackIdxs.begin(), trackIdxs.end());
+    trackIdxs.erase(std::unique(trackIdxs.begin(), trackIdxs.end()), trackIdxs.end());
+    std::vector<Track*> movers;
+    std::vector<EditActions::FolderAssignAction::ParentChange> changes;
+    for (int ti : trackIdxs)
+    {
+        auto* t = (ti >= 0 && ti < trackManager.getTrackCount()) ? trackManager.getTrack(ti)
+                                                                 : nullptr;
+        if (!t || t->isFolderTrack() || t->isClickTrack()) continue;
+        if (t->getFolderParent() == folder) continue;   // 変化なし
+        movers.push_back(t);
+        changes.push_back({ t, t->getFolderParent(), folder });
+    }
+    if (changes.empty()) return;
+
     std::vector<Track*> before;
     for (int i = 0; i < trackManager.getTrackCount(); ++i)
         before.push_back(trackManager.getTrack(i));
+
+    // after 順:
+    //  - フォルダへ: 対象を抜いて、そのフォルダのラン末尾へ相対順のまま挿入
+    //    (子=フォルダ直後の不変条件を保つ)
+    //  - フォルダから出す (folder == nullptr): 位置は変えない。FolderAssignAction::apply の
+    //    normalizeFolderContiguity が各トラックを「元フォルダのラン直後」へ確定させる
+    //    (複数トラックが別々のフォルダから出る場合も、それぞれの元フォルダ直後に残る)
     std::vector<Track*> after = before;
-    after.erase(std::remove(after.begin(), after.end(), child), after.end());
-
-    Track* runFolder = (folder != nullptr) ? folder : child->getFolderParent();
-    size_t insertPos = after.size();
-    auto it = std::find(after.begin(), after.end(), runFolder);
-    if (it != after.end())
+    if (folder != nullptr)
     {
-        size_t p = (size_t)(it - after.begin()) + 1;
-        while (p < after.size() && after[p]->getFolderParent() == runFolder) ++p;
-        insertPos = p;
+        after.erase(std::remove_if(after.begin(), after.end(), [&movers](Track* t)
+                    { return std::find(movers.begin(), movers.end(), t) != movers.end(); }),
+                    after.end());
+        size_t insertPos = after.size();
+        auto it = std::find(after.begin(), after.end(), folder);
+        if (it != after.end())
+        {
+            size_t p = (size_t)(it - after.begin()) + 1;
+            while (p < after.size() && after[p]->getFolderParent() == folder) ++p;
+            insertPos = p;
+        }
+        after.insert(after.begin() + (long)insertPos, movers.begin(), movers.end());
     }
-    after.insert(after.begin() + (long)insertPos, child);
-
-    std::vector<EditActions::FolderAssignAction::ParentChange> changes;
-    changes.push_back({ child, child->getFolderParent(), folder });
 
     undoManager.beginNewTransaction();
     undoManager.perform(new EditActions::FolderAssignAction(
         trackManager, std::move(changes), std::move(before), std::move(after),
-        /*onChange*/ [this]
+        /*onChange*/ [this, moved = std::move(movers)]
         {
             trackHeaderPanel.refresh();
             timelineView.refresh();
             audioEngine.invalidatePlayback();
             if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
+            // 動かしたトラックを identity で選び直して選択状態を維持する
+            // (pushTrackFolderDropUndo と同じ作法。消えたトラックは indexOf<0 でスキップ)
+            std::vector<int> idx;
+            for (auto* t : moved)
+            {
+                const int i = trackManager.indexOf(t);
+                if (i >= 0) idx.push_back(i);
+            }
+            selectedTrackIndex = idx.empty() ? -1 : idx.front();
+            trackHeaderPanel.setSelectedTracks(idx);
             markProjectDirty();
         }));
 }

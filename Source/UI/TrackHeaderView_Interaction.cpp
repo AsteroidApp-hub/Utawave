@@ -150,6 +150,11 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
             const auto folders = getFolderTargets();
             if (!folders.empty() || track.getFolderParent() != nullptr)
             {
+                // 複数選択中はまとめて移動できることを示す (削除と同じ「選択スコープの本数」。
+                // getDeleteCount は選択集合の解決を共有しているのでそのまま使う)
+                const int scopeN = getDeleteCount ? getDeleteCount() : 1;
+                const juce::String suffix = scopeN > 1 ? " (" + juce::String(scopeN) + ")"
+                                                       : juce::String();
                 m.addSeparator();
                 if (!folders.empty())
                 {
@@ -161,10 +166,10 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
                                                       && folders[i].second >= 0
                                                       && getFolderParentIdx
                                                       && getFolderParentIdx() == folders[i].second);
-                    m.addSubMenu(tr(u8"フォルダへ移動"), folderMenu);
+                    m.addSubMenu(tr(u8"フォルダへ移動") + suffix, folderMenu);
                 }
                 if (track.getFolderParent() != nullptr)
-                    m.addItem(699, tr(u8"フォルダから出す"));
+                    m.addItem(699, tr(u8"フォルダから出す") + suffix);
             }
         }
         m.addSeparator();
