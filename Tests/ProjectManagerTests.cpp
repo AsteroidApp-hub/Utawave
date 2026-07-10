@@ -23,6 +23,8 @@
 #include "../Source/Tracks/AudioClip.h"
 #include "../Source/Tracks/MidiClip.h"
 #include "../Source/AppSettings.h"
+#include "../Source/VST/PluginChain.h"
+#include "../Source/Audio/builtin/BuiltInFactory.h"
 
 namespace
 {
@@ -64,6 +66,7 @@ public:
         testRelativePathAndMissingFile();
         testAtomicAndGuards();
         testLyrics();
+        testDeferredPluginRestore();
 
         dir.deleteRecursively();
     }
@@ -514,6 +517,114 @@ public:
         s.appSettings = &setStale;
         expect(ProjectManager::load(noLyricsFile, s), "load project without <Lyrics>");
         expect(setStale.lyrics.empty(), "absent <Lyrics> clears pre-existing lyrics (no carry-over)");
+    }
+
+    // ── 遅延プラグイン復元 (deferredPlugins) ──
+    // プロジェクトを開く体感短縮のため、State::deferredPlugins が非 null なら load は VST3 を
+    // 同期生成せず情報だけを積む契約。内蔵エフェクト (format="Utawave") は従来どおり即時復元。
+    // slotIndex 欠落 (旧ファイル) のフォールバックは同期経路の「その時点の getNumPlugins()」と
+    // 一致すること (明示 slot 付きの遅延分とも衝突しない) を固定する。
+    void testDeferredPluginRestore()
+    {
+        beginTest("load: deferredPlugins collects VST3 without instantiation; built-in restored inline");
+        auto projDir = dir.getChildFile("ProjDefer");
+        projDir.createDirectory();
+        auto projFile = projDir.getChildFile("ProjDefer.uta");
+
+        // 内蔵 EQ の保存 ID を実物から取得 (createIdentifierString はロケール非依存)
+        juce::String eqId;
+        {
+            auto eq = BuiltInFactory::create("utawave.eq");
+            expect(eq != nullptr, "factory creates built-in EQ");
+            if (eq) eqId = eq->getPluginDescription().createIdentifierString();
+        }
+
+        // 手書き XML: トラックに [slot0 = 内蔵EQ, slot2 = VST3 (bypassed + state),
+        // slotIndex 無し VST3]、マスターに [slot1 = VST3]
+        juce::MemoryBlock stateBlob("hello", 5);
+        {
+            juce::XmlElement root("UtawaveProject");
+            root.setAttribute("version", "1.0");
+            auto* tracksEl = root.createNewChildElement("Tracks");
+            auto* trackEl  = tracksEl->createNewChildElement("Track");
+            trackEl->setAttribute("name", "Vocal");
+            auto* pl = trackEl->createNewChildElement("Plugins");
+            {
+                auto* p = pl->createNewChildElement("Plugin");
+                p->setAttribute("slotIndex", 0);
+                p->setAttribute("id", eqId);
+                p->setAttribute("format", "Utawave");
+            }
+            {
+                auto* p = pl->createNewChildElement("Plugin");
+                p->setAttribute("slotIndex", 2);
+                p->setAttribute("id", "VST3-FakeComp-1a2b");
+                p->setAttribute("name", "FakeComp");
+                p->setAttribute("format", "VST3");
+                p->setAttribute("bypassed", 1);
+                p->setAttribute("state", stateBlob.toBase64Encoding());
+            }
+            {
+                auto* p = pl->createNewChildElement("Plugin");   // slotIndex 属性なし (旧ファイル)
+                p->setAttribute("id", "VST3-NoSlot-9z");
+                p->setAttribute("name", "NoSlot");
+                p->setAttribute("format", "VST3");
+            }
+            auto* masterEl = root.createNewChildElement("Master");
+            auto* mpl = masterEl->createNewChildElement("Plugins");
+            {
+                auto* p = mpl->createNewChildElement("Plugin");
+                p->setAttribute("slotIndex", 1);
+                p->setAttribute("id", "VST3-MasterVerb-77");
+                p->setAttribute("name", "MasterVerb");
+                p->setAttribute("format", "VST3");
+            }
+            expect(root.writeTo(projFile), "test project XML written");
+        }
+
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        TrackManager tm(fmt);
+        AppSettings as;
+        PluginChain master;
+        std::vector<ProjectManager::DeferredPlugin> deferred;
+
+        ProjectManager::State s;
+        s.trackManager    = &tm;
+        s.appSettings     = &as;
+        s.masterChain     = &master;
+        s.pluginManager   = nullptr;      // 遅延経路は PluginManager 無しでも収集できる
+        s.deferredPlugins = &deferred;
+        expect(ProjectManager::load(projFile, s), "load succeeds");
+
+        expectEquals(tm.getTrackCount(), 1, "one track loaded");
+        auto* tr = tm.getTrack(0);
+        expect(tr != nullptr, "track exists");
+        if (tr == nullptr) return;
+
+        // 内蔵 EQ は load 内で即時復元される (VST3 の遅延に巻き込まれない)
+        expect(tr->getPluginChain().getPlugin(0) != nullptr, "built-in restored inline at slot 0");
+        // VST3 はチェーンへ入らず遅延リストに XML 順で積まれる
+        expectEquals((int) deferred.size(), 3, "three deferred VST3 entries collected");
+        if (deferred.size() != 3) return;
+
+        expect(deferred[0].track == tr,                     "entry 0 targets the track");
+        expectEquals(deferred[0].id,   juce::String("VST3-FakeComp-1a2b"), "entry 0 id");
+        expectEquals(deferred[0].name, juce::String("FakeComp"),           "entry 0 name");
+        expectEquals(deferred[0].slotIndex, 2,              "entry 0 explicit slot preserved");
+        expect(deferred[0].bypassed,                        "entry 0 bypass preserved");
+        expectEquals(deferred[0].stateB64, stateBlob.toBase64Encoding(), "entry 0 state preserved");
+
+        // slotIndex 欠落: 同期経路なら「内蔵@0 + VST@2 挿入後の getNumPlugins() = 3」に置かれる。
+        // 遅延経路も simulatedSlots の追跡で同じ 3 になる (明示 slot2 と衝突しないことの回帰)
+        expect(deferred[1].track == tr,                     "entry 1 targets the track");
+        expectEquals(deferred[1].slotIndex, 3,              "entry 1 fallback slot matches sync path");
+        expect(! deferred[1].bypassed,                      "entry 1 not bypassed");
+
+        expect(deferred[2].track == nullptr,                "master entry has null track");
+        expectEquals(deferred[2].id, juce::String("VST3-MasterVerb-77"), "master entry id");
+        expectEquals(deferred[2].slotIndex, 1,              "master entry slot");
+        // マスターチェーンにも VST3 は入っていない (内蔵なしなので空のまま)
+        expectEquals(master.getNumPlugins(), 0, "master chain untouched by deferral");
     }
 };
 

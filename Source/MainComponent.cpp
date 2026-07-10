@@ -228,7 +228,11 @@ MainComponent::MainComponent()
 
     trackHeaderPanel.onTrackChanged = [this]
     {
-        markProjectDirty();
+        // プラグインの遅延復元中 (chainRestoreQuiet > 0) は dirty 化しない。復元の
+        // insertPluginAt がチップ再構築 (callAsync) 経由でここへ届くため、素通しにすると
+        // 開いた直後のプロジェクトが「未保存の変更あり」になってしまう
+        if (chainRestoreQuiet == 0)
+            markProjectDirty();
         // Input monitoring / Rec arm / モニターリバーブ量をエンジンへ反映
         // (Rev スライダー変更も onChanged 経由でここを通るのでモニターリバーブが即追従する)
         syncInputMonitorStateToEngine();

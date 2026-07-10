@@ -596,11 +596,17 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
             if (auto* pluginsEl = trackEl->getChildByName("Plugins"))
             {
                 const bool havePM = (s.pluginManager != nullptr);
+                const bool defer  = (s.deferredPlugins != nullptr);
                 // KnownPluginList::getTypes() は値で返るため、一度ローカルにコピーしてから検索する。
                 // 以前は一時 Array の要素アドレスを保持 → ループ終了で dangling pointer になり VST3 ロード時にクラッシュしていた。
                 const juce::Array<juce::PluginDescription> types =
-                    havePM ? s.pluginManager->getKnownPluginListRW().getTypes()
-                           : juce::Array<juce::PluginDescription>();
+                    (havePM && !defer) ? s.pluginManager->getKnownPluginListRW().getTypes()
+                                       : juce::Array<juce::PluginDescription>();
+                // slotIndex 属性が無い旧ファイル用フォールバック: 同期経路の「その時点の
+                // getNumPlugins()」(= 最大使用スロット+1) を遅延分も含めて追跡・再現する
+                // (insertPluginAt はスロット位置指定 = 空スロット埋めなので、遅延で挿入順が
+                // 入れ替わっても最終配置は保存時と一致する)
+                int simulatedSlots = tr->getPluginChain().getNumPlugins();
 
                 for (auto* pEl : pluginsEl->getChildIterator())
                 {
@@ -608,7 +614,25 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
 
                     // 内蔵エフェクトは PluginManager に依らず復元する
                     if (restoreBuiltInPlugin(pEl, tr->getPluginChain()))
+                    {
+                        simulatedSlots = juce::jmax(simulatedSlots,
+                                                    tr->getPluginChain().getNumPlugins());
                         continue;
+                    }
+
+                    if (defer)
+                    {
+                        DeferredPlugin d;
+                        d.track     = tr;
+                        d.id        = pEl->getStringAttribute("id");
+                        d.name      = pEl->getStringAttribute("name");
+                        d.stateB64  = pEl->getStringAttribute("state");
+                        d.slotIndex = pEl->getIntAttribute("slotIndex", simulatedSlots);
+                        d.bypassed  = pEl->getIntAttribute("bypassed", 0) != 0;
+                        simulatedSlots = juce::jmax(simulatedSlots, d.slotIndex + 1);
+                        s.deferredPlugins->push_back(std::move(d));
+                        continue;
+                    }
 
                     if (!havePM) continue;   // VST3 は PluginManager 必須
 
@@ -731,9 +755,12 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
             if (auto* pluginsEl = masterEl->getChildByName("Plugins"))
             {
                 const bool havePM = (s.pluginManager != nullptr);
+                const bool defer  = (s.deferredPlugins != nullptr);
                 const juce::Array<juce::PluginDescription> types =
-                    havePM ? s.pluginManager->getKnownPluginListRW().getTypes()
-                           : juce::Array<juce::PluginDescription>();
+                    (havePM && !defer) ? s.pluginManager->getKnownPluginListRW().getTypes()
+                                       : juce::Array<juce::PluginDescription>();
+                // slotIndex 欠落フォールバック (トラック側と同じ作法)
+                int simulatedSlots = s.masterChain->getNumPlugins();
 
                 for (auto* pEl : pluginsEl->getChildIterator())
                 {
@@ -741,7 +768,25 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
 
                     // 内蔵エフェクトは PluginManager に依らず復元する
                     if (restoreBuiltInPlugin(pEl, *s.masterChain))
+                    {
+                        simulatedSlots = juce::jmax(simulatedSlots,
+                                                    s.masterChain->getNumPlugins());
                         continue;
+                    }
+
+                    if (defer)
+                    {
+                        DeferredPlugin d;
+                        d.track     = nullptr;   // マスターチェーン
+                        d.id        = pEl->getStringAttribute("id");
+                        d.name      = pEl->getStringAttribute("name");
+                        d.stateB64  = pEl->getStringAttribute("state");
+                        d.slotIndex = pEl->getIntAttribute("slotIndex", simulatedSlots);
+                        d.bypassed  = pEl->getIntAttribute("bypassed", 0) != 0;
+                        simulatedSlots = juce::jmax(simulatedSlots, d.slotIndex + 1);
+                        s.deferredPlugins->push_back(std::move(d));
+                        continue;
+                    }
 
                     if (!havePM) continue;   // VST3 は PluginManager 必須
 

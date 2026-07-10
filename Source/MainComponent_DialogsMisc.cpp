@@ -510,6 +510,9 @@ void MainComponent::showAudioSettings()
 
 void MainComponent::showExportDialog()
 {
+    // プラグインの遅延復元が残っていたら先に確定する (チェーンの欠けたバウンスを防ぐ)
+    flushPendingPluginRestores();
+
     // 1. Context を集める
     ExportDialog::Context ctx;
 

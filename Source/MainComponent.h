@@ -440,6 +440,21 @@ private:
     juce::File currentProjectFile;
     juce::File untitledProjectDir;  // 未保存時の仮プロジェクトフォルダ
 
+    // ── プラグインの遅延復元 (プロジェクトを開く体感短縮) ──
+    // loadProjectFrom は VST3 の実生成を ProjectManager::load で行わずここへ積み、UI 表示後に
+    // メッセージスレッドで 1 件ずつ生成する。保存/書き出しの前には flush で残りを同期確定し、
+    // 「プラグインの欠けたチェーンを保存してしまう」データ損失を構造的に防ぐ。
+    std::vector<ProjectManager::DeferredPlugin> pendingPluginRestores;
+    int  pendingPluginRestoreTotal { 0 };   // 進捗表示用 (開始時の総数)
+    // 遅延復元の insertPluginAt が発火する onChainChanged → (callAsync) → onTrackChanged 経由の
+    // markProjectDirty を抑止するカウンタ。開いた直後のプロジェクトが「未保存の変更あり」に
+    // ならないようにする (対の decrement は callAsync で FIFO 順にチップ再構築より後に走る)
+    int  chainRestoreQuiet { 0 };
+    bool applyPendingPluginRestore(const ProjectManager::DeferredPlugin& d);
+    void startPendingPluginRestores();       // 読み込み完了後に非同期復元を開始
+    void processNextPendingPluginRestore();  // 1 件生成して次を予約
+    void flushPendingPluginRestores();       // 残り全件を同期で確定 (保存/書き出し前)
+
     // プロジェクトフォルダ取得（未保存なら untitled、保存済みなら current の親）
     juce::File getProjectFolder() const;
     juce::File getProjectAudioFolder() const;

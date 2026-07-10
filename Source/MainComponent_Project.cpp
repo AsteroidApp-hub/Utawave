@@ -48,6 +48,9 @@ void MainComponent::performAutoSave()
     if (isRecording)  return;   // 録音中の I/O は避ける
     if (appSettings.autoSaveIntervalMinutes <= 0) return;
 
+    // 遅延復元が残っていたら先に確定する (欠けたチェーンの保存 = プラグイン消失を防ぐ)
+    flushPendingPluginRestores();
+
     // 保存用 State を一度だけ構築し、バックアップ保存と本体保存で共用する
     ProjectManager::State s;
     s.trackManager   = &trackManager;
@@ -214,6 +217,8 @@ void MainComponent::migrateAudioToProjectFolder(const juce::File& newProjectFile
 // ── 保存 ────────────────────────────────────────────────────────────
 bool MainComponent::saveProjectTo(const juce::File& f, bool announce)
 {
+    // 遅延復元が残っていたら先に確定する (欠けたチェーンを保存するとプラグインが消えるため)
+    flushPendingPluginRestores();
     // 保存先が現在のプロジェクトと異なる場合は、Audio/Cache を新フォルダへ移行
     const bool migrated = (currentProjectFile != f);
     if (migrated)
@@ -266,6 +271,10 @@ bool MainComponent::saveProjectTo(const juce::File& f, bool announce)
 bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
 {
     if (isPlaying) stopTransport();
+    // 前プロジェクトの遅延復元が残っていたら破棄する (旧 Track* / 旧マスターチェーン向けの
+    // ジョブを新プロジェクトへ適用しないため。ここで破棄すればスケジュール済みの
+    // processNextPendingPluginRestore は空振りして安全に止まる)
+    pendingPluginRestores.clear();
     audioEngine.clearPlayback();
     // 別プロジェクトの読み込みは既存クリップ/トラックを全破棄するため、それらを指す Undo 履歴を
     // 破棄する (旧クリップへのダングリング = use-after-free を防ぐ。オーディオ/MIDI 両方に有効)。
@@ -293,6 +302,8 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
     s.pixelsPerBeat  = &loadedPpb;
     std::vector<juce::String> missingFiles;
     s.missingFiles   = &missingFiles;
+    // VST3 は load 内で生成せず遅延復元へ (UI 表示後に startPendingPluginRestores で生成)
+    s.deferredPlugins = &pendingPluginRestores;
     // クリップ生成前に波形ディスクキャッシュを読み込む。各クリップの setSource が
     // キャッシュヒットすれば WAV デコードを省略でき、波形表示が爆速になる。
     trackManager.loadThumbnailCache(
@@ -300,6 +311,7 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
         f.getParentDirectory().getChildFile("Audio"));
     if (!ProjectManager::load(f, s))
     {
+        pendingPluginRestores.clear();   // 途中まで積まれた遅延復元は破棄
         juce::AlertWindow::showAsync(juce::MessageBoxOptions()
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"読み込み失敗"))
@@ -366,6 +378,10 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
     // デコードが走った場合は updateWaveformLoadingStatus() の完了時にディスクキャッシュへ保存する。
     scheduleWaveformRefresh();
 
+    // VST3 プラグインの遅延復元を開始 (UI が出た後にメッセージスレッドで 1 件ずつ生成)。
+    // applyProjectSampleRateToDevice() の後なので、生成 SR は確定した実デバイス SR に一致する
+    startPendingPluginRestores();
+
     // 欠損ファイルがあれば警告ダイアログ (最大 10 件まで列挙)
     if (!missingFiles.empty())
     {
@@ -387,6 +403,114 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
     return true;
 }
 
+// ── プラグインの遅延復元 ─────────────────────────────────────────────
+// VST3 の実生成 (createPluginInstance) はプラグインごとに数百 ms〜数秒かかるため、
+// loadProjectFrom は生成せずに pendingPluginRestores へ積み、UI 表示後にメッセージスレッドで
+// 1 件ずつ生成する (プロジェクトを開く体感を最速にする)。生成中はステータスバーに進捗を出す。
+// 保存/書き出しの前には flushPendingPluginRestores() で残りを同期確定する (欠けたチェーンを
+// 保存/バウンスしてしまうデータ損失の防止)。内蔵エフェクトは load 内で即時復元済み。
+
+bool MainComponent::applyPendingPluginRestore(const ProjectManager::DeferredPlugin& d)
+{
+    // 挿入先チェーンを解決。トラックが復元前に削除されていたら安全にスキップする
+    // (d.track は生ポインタだが、参照せずポインタ一致だけを見るので dangling でも安全)
+    PluginChain* chain = nullptr;
+    if (d.track == nullptr)                 chain = &audioEngine.getMasterChain();
+    else if (trackStillExists(d.track))     chain = &d.track->getPluginChain();
+    if (chain == nullptr) return false;
+
+    // KnownPluginList から ID → 名前の順で照合 (ProjectManager::load の同期経路と同じ規則)
+    const juce::Array<juce::PluginDescription> types =
+        pluginManager.getKnownPluginListRW().getTypes();
+    juce::PluginDescription desc;
+    bool found = false;
+    for (const auto& t : types)
+        if (t.createIdentifierString() == d.id) { desc = t; found = true; break; }
+    if (!found)
+        for (const auto& t : types)
+            if (t.name == d.name) { desc = t; found = true; break; }
+    if (!found) { DBG("Deferred plugin not found: " << d.id); return false; }
+
+    const double sr = audioEngine.getSampleRate() > 0 ? audioEngine.getSampleRate() : 48000.0;
+    juce::String err;
+    std::unique_ptr<juce::AudioPluginInstance> instance(
+        pluginManager.getFormatManager().createPluginInstance(desc, sr, 512, err));
+    if (!instance) { DBG("Deferred plugin load failed: " << err); return false; }
+
+    const auto b64 = d.stateB64;
+    if (b64.isNotEmpty())
+    {
+        juce::MemoryBlock mb;
+        if (mb.fromBase64Encoding(b64) && mb.getSize() > 0)
+            instance->setStateInformation(mb.getData(), (int) mb.getSize());
+    }
+
+    // insertPluginAt の onChainChanged はヘッダのチップ再構築 (callAsync) 経由で
+    // onTrackChanged → markProjectDirty に届く。復元は「開いた直後の状態」なので dirty に
+    // してはならず、カウンタで抑止する。対の decrement を callAsync で積む (FIFO なので
+    // チップ再構築の markProjectDirty より必ず後に走る = 窓が閉じる)
+    ++chainRestoreQuiet;
+    chain->insertPluginAt(d.slotIndex, std::move(instance));
+    if (d.bypassed) chain->setBypassed(d.slotIndex, true);
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::MessageManager::callAsync([safe]
+    {
+        if (safe.getComponent() != nullptr) --safe->chainRestoreQuiet;
+    });
+    return true;
+}
+
+void MainComponent::startPendingPluginRestores()
+{
+    pendingPluginRestoreTotal = (int) pendingPluginRestores.size();
+    if (pendingPluginRestoreTotal == 0) return;
+    // 進捗メッセージは次の更新で上書きされる。重いプラグイン 1 つの生成中も
+    // 消えないよう余裕を持った表示時間にする (0 は即時消滅)
+    statusBar.setMessage(tr(u8"プラグインを読み込み中… ")
+                         + "0/" + juce::String(pendingPluginRestoreTotal), 10000);
+    // callAsync だと初回ペイント前に重い生成が始まりうるため、少し遅らせて
+    // 「タイムラインが即表示 → プラグインが後から入る」体感を確実にする
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Timer::callAfterDelay(100, [safe]
+    {
+        if (safe.getComponent() != nullptr) safe->processNextPendingPluginRestore();
+    });
+}
+
+void MainComponent::processNextPendingPluginRestore()
+{
+    if (pendingPluginRestores.empty()) return;   // flush 済み / プロジェクト遷移済み
+    auto d = std::move(pendingPluginRestores.front());
+    pendingPluginRestores.erase(pendingPluginRestores.begin());
+    applyPendingPluginRestore(d);
+
+    if (pendingPluginRestores.empty())
+    {
+        statusBar.setMessage(tr(u8"プラグインの読み込みが完了しました"), 3000);
+        audioEngine.invalidatePlayback();   // PDC (トラック遅延) を新チェーンで再構築
+        return;
+    }
+    const int done = pendingPluginRestoreTotal - (int) pendingPluginRestores.size();
+    statusBar.setMessage(tr(u8"プラグインを読み込み中… ")
+                         + juce::String(done) + "/" + juce::String(pendingPluginRestoreTotal), 10000);
+    // callAsync 連打でなく小さな遅延を挟み、描画/入力イベントに息継ぎさせる
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Timer::callAfterDelay(15, [safe]
+    {
+        if (safe.getComponent() != nullptr) safe->processNextPendingPluginRestore();
+    });
+}
+
+void MainComponent::flushPendingPluginRestores()
+{
+    if (pendingPluginRestores.empty()) return;
+    for (auto& d : pendingPluginRestores)
+        applyPendingPluginRestore(d);
+    pendingPluginRestores.clear();
+    statusBar.setMessage(tr(u8"プラグインの読み込みが完了しました"), 3000);
+    audioEngine.invalidatePlayback();
+}
+
 void MainComponent::saveProject()
 {
     if (currentProjectFile.existsAsFile()) saveProjectTo(currentProjectFile);
@@ -405,6 +529,7 @@ bool MainComponent::createNewProject(const juce::File& projectFile,
 
     // 既存セッションを停止・全トラック削除（新規スタート）
     if (isPlaying) stopTransport();
+    pendingPluginRestores.clear();   // 前プロジェクトの遅延復元を破棄 (旧 Track* 向けジョブの適用防止)
     audioEngine.clearPlayback();
     pluginEditorWindows.clear();   // 既存プラグインエディタを閉じる
     while (trackManager.getTrackCount() > 0)
