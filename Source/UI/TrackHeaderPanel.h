@@ -55,6 +55,9 @@ public:
     std::function<void()>     onAddFolderTrack;    // フォルダトラック (グループバス)
     // フォルダトラックの追加メニューを出すか (AppPreferences::enableFolderTracks)。未設定は出さない
     std::function<bool()>     folderTracksEnabled;
+    // フォルダトラックに Pan/Rev/INS スロットを表示するか (AppPreferences::showFolderPanRevIns)。
+    // 未設定は表示。通常トラックには影響しない
+    std::function<bool()>     folderExtrasEnabled;
     // 右クリック「フォルダへ移動 / フォルダから出す」: trackIdx 群を folderIdx (-1 = 出す) へ。
     // クリックしたトラックが複数選択に含まれていれば選択集合をまとめて渡す (削除と同じ作法)。
     // Undo (FolderAssignAction) は MainComponent 側で積む

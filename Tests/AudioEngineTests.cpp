@@ -368,6 +368,21 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         expectWithinAbsoluteError(pL, 0.5f, 0.03f, "sibling solo silences folder children");
         sibling->setSoloed(false);
 
+        // (5b) フォルダの Pan 左いっぱい → 子の R 成分が消える (L 1.0 / R 0.5 = 兄弟のみ)
+        folder->setPan(-1.0f);
+        runBlocks(s.engine, 4, &pL, &pR);
+        runBlocks(s.engine, 4, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.03f, "folder pan hard-left keeps L");
+        expectWithinAbsoluteError(pR, 0.5f, 0.03f, "folder pan hard-left removes child from R");
+        folder->setPan(0.0f);
+
+        // (5c) フォルダの Rev 送り → リバーブウェットが加算されて出力が dry 合計を上回る
+        folder->setReverbSend(1.0f);
+        runBlocks(s.engine, 8, &pL, &pR);
+        runBlocks(s.engine, 8, &pL, &pR);
+        expect(pL > 1.02f, "folder reverb send adds wet on top of dry sum");
+        folder->setReverbSend(0.0f);
+
         // (6) 書き出し (renderOfflineRange) も同じ規則: フォルダ Vol -6.02dB で 0.75
         s.engine.stop();
         folder->setVolume(-6.0206f);

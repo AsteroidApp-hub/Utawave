@@ -28,6 +28,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton tooltipsBtn;         // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton folderTracksBtn;     // フォルダトラック追加を有効化 (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton folderExtrasBtn;     // フォルダに Pan/Rev/INS を表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
         juce::ToggleButton recCompBtn;          // 録音レイテンシ自動補正 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton retakeKeepBtn;       // Q リテイクでテイクを残す (アプリ全体設定。初期状態は showPreferences 側)
@@ -65,6 +66,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onMidiPagingChanged;
         std::function<void(bool)>  onTooltipsChanged;
         std::function<void(bool)>  onFolderTracksChanged;
+        std::function<void(bool)>  onFolderExtrasChanged;
         std::function<void(bool)>  onShowAdsChanged;
         std::function<void(bool)>  onRecCompChanged;
         std::function<void(double)> onRecCompOffsetChanged;
@@ -232,6 +234,15 @@ void MainComponent::showPreferences()
                 if (onFolderTracksChanged) onFolderTracksChanged(folderTracksBtn.getToggleState());
             };
             addAndMakeVisible(folderTracksBtn);
+
+            // フォルダトラックの Pan/Rev/INS 表示 (表示のみの設定。値・効果は非表示でも生きる)
+            folderExtrasBtn.setButtonText(
+                tr(u8"Pan・Rev・INS スロットをフォルダトラックに表示する"));
+            folderExtrasBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            folderExtrasBtn.onClick = [this] {
+                if (onFolderExtrasChanged) onFolderExtrasChanged(folderExtrasBtn.getToggleState());
+            };
+            addAndMakeVisible(folderExtrasBtn);
 
             // 録音フロー
             // 「再生中バックグラウンド録音 (遡及録音)」のトグルは UI から撤去 (初心者が迷うため・
@@ -534,6 +545,7 @@ void MainComponent::showPreferences()
             y = check(midiPagingBtn, y);
             y = check(tooltipsBtn, y);
             y = check(folderTracksBtn, y);
+            y = check(folderExtrasBtn, y);
 
             // ── 録音フロー ──
             y += gSec; y = label(recLabel, y);
@@ -762,6 +774,15 @@ void MainComponent::showPreferences()
     dlg->onFolderTracksChanged = [this](bool v) {
         appPrefs.enableFolderTracks = v;
         appPrefs.save();
+    };
+    // フォルダの Pan/Rev/INS 表示 (アプリ全体設定)。即時保存 + ヘッダへ即反映
+    // (resized で全体レイアウト = ヘッダ幅も再計算し、各ビューの refresh で表示を確定)。
+    dlg->folderExtrasBtn.setToggleState(appPrefs.showFolderPanRevIns, juce::dontSendNotification);
+    dlg->onFolderExtrasChanged = [this](bool v) {
+        appPrefs.showFolderPanRevIns = v;
+        appPrefs.save();
+        trackHeaderPanel.refresh();
+        resized();
     };
     // 画面の表示倍率 (アプリ全体設定。ハードウェア依存のためプロジェクト設定ではない)。
     // 即時に適用 (setGlobalScaleFactor) + 保存。次回起動でも Main.cpp が同じ倍率で復元する。

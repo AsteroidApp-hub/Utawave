@@ -76,6 +76,10 @@ public:
     // D&D: プラグインを別トラックへ移動 (copy=false) / コピー (copy=true)
     // 引数: srcTrackIdx, srcSlotIdx, dstSlotIdx, copy
     std::function<void(int,int,int,bool)> onPluginDropFromOtherTrack;
+    // フォルダトラックに Pan/Rev/INS スロットを表示するか (AppPreferences::showFolderPanRevIns)。
+    // Panel が環境設定を注入する。未設定は表示。通常トラックには影響しない。
+    std::function<bool()> getFolderExtrasVisible;
+
     // ── フォルダ所属 (右クリックメニュー「フォルダへ移動 / フォルダから出す」) ──
     // 移動先候補のフォルダ一覧 (表示名, trackIdx)。Panel 側が trackManager から解決する。
     std::function<std::vector<std::pair<juce::String, int>>()> getFolderTargets;
@@ -114,6 +118,16 @@ private:
     // トラック高さ上限は INS 枠の高さと一致させる (8 スロット全部が出せる所まで)。
     static_assert(insFrameH == Track::maxHeight,
                   "Track::maxHeight は INS パネルの高さ (insFrameH) と一致させること");
+
+    // フォルダトラックの Pan/Rev/INS 表示可否 (通常トラックは常に true)。
+    // 表示の単一判定点: resized() / paint() / findInsertSlotAt が共有する。
+    bool folderExtrasOn() const
+    {
+        return !track.isFolderTrack()
+               || (getFolderExtrasVisible ? getFolderExtrasVisible() : true);
+    }
+    // INS スロットを実際に表示するか (per-track フラグ × フォルダ表示設定)
+    bool insSlotsShown() const { return track.isInsertSlotsVisible() && folderExtrasOn(); }
 
     // mutate を Undo 対応で実行する (onEditUndoable があればそこへ委譲)
     void editTrackUndoable(std::function<void()> mutate)

@@ -464,16 +464,14 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
         clickDoubleBtn.addMouseListener(this, false);
     }
 
-    // フォルダトラック (グループバス): 録音/モニター/入力/Pan/Rev は使わないので非表示。
-    // M/S/Vol/INS のみ (仕様)。TList ボタンはフォルダの Open/Close (子トラック行の開閉) に転用する。
+    // フォルダトラック (グループバス): 録音/モニター/入力は使わないので非表示
+    // (In:/Pan/Rev/INS の表示は resized() が毎回確定する。Pan/Rev/INS はアプリ設定
+    //  showFolderPanRevIns = folderExtrasOn() でユーザーが表示/非表示を選べる)。
+    // TList ボタンはフォルダの Open/Close (子トラック行の開閉) に転用する。
     if (track.isFolderTrack())
     {
         recBtn.setVisible(false);
         monBtn.setVisible(false);
-        inputLabel.setVisible(false);
-        inputChBox.setVisible(false);
-        panSlider.setVisible(false);
-        revSlider.setVisible(false);
         stereoBadge.setVisible(false);
 
         // ラベルは操作 (これから起きること) を示す: 開いている間は "Close"、閉じている間は "Open"。
@@ -756,7 +754,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
     //    ハイライトはコントロール領域 (0..controlsWidth) のみに限定する。
     if (selected)
     {
-        const int selW = (track.isInsertSlotsVisible() && w > controlsWidth) ? controlsWidth : w;
+        const int selW = (insSlotsShown() && w > controlsWidth) ? controlsWidth : w;
         g.setColour(AppColours::accent.withAlpha(0.12f));
         g.fillRect(0, 0, selW, mainH);
         g.setColour(AppColours::accent.withAlpha(0.6f));
@@ -766,20 +764,14 @@ void TrackHeaderView::paint(juce::Graphics& g)
     g.setColour(track.getColour());
     g.fillRect(0, 0, 4, totalH);
 
-    // フォルダトラック: グループバスであることが分かるよう、トラック色の薄い下地 +
-    // "FOLDER" バッジを描く (Pan/Rev を隠した行 = y44 付近が空くのでそこへ。
-    // トラックを最小高さまで縮めた時は下地のみでバッジは省く)
+    // フォルダトラック: グループバスであることが分かるよう、トラック色の薄い下地を敷く
+    // (旧 "FOLDER" バッジは Pan 行と重なって文字化けして見えたため撤去。識別は下地 +
+    //  Open/Close ボタンで足りる)
     if (track.isFolderTrack())
     {
-        const int selW = (track.isInsertSlotsVisible() && w > controlsWidth) ? controlsWidth : w;
+        const int selW = (insSlotsShown() && w > controlsWidth) ? controlsWidth : w;
         g.setColour(track.getColour().withAlpha(0.10f));
         g.fillRect(4, 0, selW - 4, mainH);
-        if (mainH >= 58)
-        {
-            g.setColour(track.getColour().withAlpha(0.85f));
-            g.setFont(juce::FontOptions(8.5f, juce::Font::bold));
-            g.drawText("FOLDER", 30, 45, 60, 10, juce::Justification::centredLeft);
-        }
     }
 
     if (track.isRecArmed())
@@ -789,7 +781,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
     }
 
     // ── INS スロット枠 (トラック右側に固定スロット) ──
-    if (track.isInsertSlotsVisible() && w > controlsWidth + 8)
+    if (insSlotsShown() && w > controlsWidth + 8)
     {
         const int frameX = controlsWidth + 4;
         const int frameY = 0;            // 上端から
@@ -853,7 +845,7 @@ void TrackHeaderView::paint(juce::Graphics& g)
     // (mainH 基準は resized() の showVolRow / showPanRevRow と一致させる)。
     if (mainH >= 44)
         g.drawText("Vol", 6, 30, 22, 12, juce::Justification::centredLeft);
-    if (mainH >= 58)
+    if (mainH >= 58 && folderExtrasOn())   // フォルダで Pan/Rev 非表示設定ならラベルも描かない
     {
         g.drawText("Pan", 6, 44, 22, 12, juce::Justification::centredLeft);
         // Rev ラベルは Pan スライダー右端の少し先 (Pan は左半分まで)
@@ -1026,7 +1018,7 @@ void TrackHeaderView::resized()
     // 既存コントロールは左寄せの controlsWidth（基本幅）に収める。
     // INS スロット列が global で開いていると header が広くなるが、
     // その追加幅は INS 列専用とし、コントロールは常に同じ位置に揃える。
-    const bool slotsVisible = track.isInsertSlotsVisible();
+    const bool slotsVisible = insSlotsShown();
     const int w = juce::jmin(getWidth(), controlsWidth);
     const int insAreaW = juce::jmax(0, getWidth() - controlsWidth);
     const int bW = 20, bH = 17, bY = 8, gap = 2;
@@ -1071,8 +1063,9 @@ void TrackHeaderView::resized()
         revSlider.setBounds(revX, 44, revW, 12);
     }
     volSlider.setVisible(showVolRow);
-    panSlider.setVisible(showPanRevRow);
-    revSlider.setVisible(showPanRevRow);
+    // フォルダトラックは表示設定 (showFolderPanRevIns) で Pan/Rev を隠せる
+    panSlider.setVisible(showPanRevRow && folderExtrasOn());
+    revSlider.setVisible(showPanRevRow && folderExtrasOn());
 
     // INS スロット枠 (paint() で描いた外枠の内側にチップを敷く)
     if (slotsVisible && insAreaW > 0)
@@ -1117,12 +1110,13 @@ void TrackHeaderView::resized()
     inputLabel.setBounds(inStart, botY, inLabelW, botH);
     inputChBox.setBounds(inStart + inLabelW, botY, w - inStart - inLabelW - 6, botH);
 
-    // 底部行は音声トラックのみ (MIDI/Click はコンストラクタで非表示。ここで再表示しない)
+    // 底部行は音声トラックのみ (MIDI/Click はコンストラクタで非表示。ここで再表示しない)。
+    // フォルダは録音入力を持たないので In: は出さない (lanesBtn = Open/Close は出す)
     if (!track.isMidiTrack() && !track.isClickTrack())
     {
         lanesBtn.setVisible(showBottomRow);
-        inputLabel.setVisible(showBottomRow);
-        inputChBox.setVisible(showBottomRow);
+        inputLabel.setVisible(showBottomRow && !track.isFolderTrack());
+        inputChBox.setVisible(showBottomRow && !track.isFolderTrack());
     }
 
     // クリックトラック専用レイアウト: 底部 [Sound][½][x2][ACC]

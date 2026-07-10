@@ -663,6 +663,11 @@ void TrackHeaderPanel::refresh()
             if (onPluginDropAcrossTracks)
                 onPluginDropAcrossTracks(srcTrack, srcSlot, idx, dstSlot, copy);
         };
+        // フォルダトラックの Pan/Rev/INS 表示設定 (AppPreferences) をビューへ注入
+        view->getFolderExtrasVisible = [this]
+        {
+            return folderExtrasEnabled ? folderExtrasEnabled() : true;
+        };
         // フォルダ所属メニュー: 候補一覧 / 現在の親 / 移動要求 (Undo は MainComponent 側)
         view->getFolderTargets = [this]() -> std::vector<std::pair<juce::String, int>>
         {

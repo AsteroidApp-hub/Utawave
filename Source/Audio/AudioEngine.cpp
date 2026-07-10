@@ -1900,9 +1900,28 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                     juce::MidiBuffer midi;
                     ob.track->getPluginChain().processBlock(ob.buf, midi, &exportHead);
                 }
-                const float fVol = juce::Decibels::decibelsToGain(ob.track->getVolume());
-                blockBuf.addFrom(0, 0, ob.buf, 0, 0, n, fVol);
-                blockBuf.addFrom(1, 0, ob.buf, 1, 0, n, fVol);
+                // フォルダの Vol / Pan / リバーブ送り (実時間ブランチと同じ式・同じ順序)
+                const float fVol  = juce::Decibels::decibelsToGain(ob.track->getVolume());
+                const float fPan  = ob.track->getPan();
+                const float fPanL = (fPan <= 0.0f) ? 1.0f : (1.0f - fPan);
+                const float fPanR = (fPan >= 0.0f) ? 1.0f : (1.0f + fPan);
+                const float fGL = fVol * fPanL;
+                const float fGR = fVol * fPanR;
+                blockBuf.addFrom(0, 0, ob.buf, 0, 0, n, fGL);
+                blockBuf.addFrom(1, 0, ob.buf, 1, 0, n, fGR);
+
+                const float frs = Track::reverbSendGain(ob.track->getReverbSend());
+                if (frs > 0.0001f)
+                {
+                    if (!sendActive)
+                    {
+                        sendBuf.setSize(2, n, false, false, true);
+                        sendBuf.clear();
+                        sendActive = true;
+                    }
+                    sendBuf.addFrom(0, 0, ob.buf, 0, 0, n, fGL * frs);
+                    sendBuf.addFrom(1, 0, ob.buf, 1, 0, n, fGR * frs);
+                }
             }
 
             // ── リバーブ送りバス: ウェットを生成してドライへ加算 (2026-07 追加) ──
@@ -2870,19 +2889,37 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 fb.track->getPluginChain().processBlock(fb.buf, chainMidiScratch, &playHead);
             }
 
-            const float fVol = juce::Decibels::decibelsToGain(fb.track->getVolume());
+            // フォルダの Vol / Pan (トラックと同じリニアバランス則。pan=0 は L/R 等倍 = 従来挙動)
+            const float fVol  = juce::Decibels::decibelsToGain(fb.track->getVolume());
+            const float fPan  = fb.track->getPan();
+            const float fPanL = (fPan <= 0.0f) ? 1.0f : (1.0f - fPan);
+            const float fPanR = (fPan >= 0.0f) ? 1.0f : (1.0f + fPan);
+            const float fGL = fVol * fPanL;
+            const float fGR = fVol * fPanR;
 
-            // フォルダ出力メータ (Vol 適用後 = ポストフェーダー)
+            // フォルダ出力メータ (Vol/Pan 適用後 = ポストフェーダー)
             if (fb.trackIdx >= 0 && fb.trackIdx < kMaxTracksMeters)
                 measureStereoBuf(fb.buf, numSamples,
                                  trackOutPeakL[fb.trackIdx], trackOutPeakR[fb.trackIdx],
                                  trackOutVUSmoothL[fb.trackIdx], trackOutVUSmoothR[fb.trackIdx],
                                  trackOutVUL[fb.trackIdx], trackOutVUR[fb.trackIdx],
-                                 vuCoef, fVol, fVol);
+                                 vuCoef, fGL, fGR);
 
-            workBuffer.addFrom(0, 0, fb.buf, 0, 0, numSamples, fVol);
+            workBuffer.addFrom(0, 0, fb.buf, 0, 0, numSamples, fGL);
             if (workBuffer.getNumChannels() >= 2 && fb.buf.getNumChannels() >= 2)
-                workBuffer.addFrom(1, 0, fb.buf, 1, 0, numSamples, fVol);
+                workBuffer.addFrom(1, 0, fb.buf, 1, 0, numSamples, fGR);
+
+            // フォルダの簡易リバーブ送り (post-fader / post-pan・トラックと同じ二乗テーパー)
+            const float frs = fb.track != nullptr
+                                  ? Track::reverbSendGain(fb.track->getReverbSend()) : 0.0f;
+            if (frs > 0.0001f)
+            {
+                if (!reverbBufCleared) { reverbSendBuf.clear(); reverbBufCleared = true; }
+                anyReverbSend = true;
+                reverbSendBuf.addFrom(0, 0, fb.buf, 0, 0, numSamples, fGL * frs);
+                if (fb.buf.getNumChannels() >= 2)
+                    reverbSendBuf.addFrom(1, 0, fb.buf, 1, 0, numSamples, fGR * frs);
+            }
         }
     }
 
