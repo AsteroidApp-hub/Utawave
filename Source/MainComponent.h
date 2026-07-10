@@ -338,6 +338,12 @@ private:
     // selected = 移動したトラック群。undo/redo 後に identity で選択を貼り直し選択状態を維持する。
     void pushTrackReorderUndo(std::vector<Track*> before, std::vector<Track*> after,
                               std::vector<Track*> selected);
+    // D&D でフォルダ所属が変わった並べ替えの Undo を積む (FolderAssignAction = 並び + 所属を
+    // 1 アクションで往復。適用自体は TrackHeaderPanel::performReorder が実施済み = 初回 perform は冪等)
+    void pushTrackFolderDropUndo(std::vector<Track*> before, std::vector<Track*> after,
+                                 std::vector<Track*> moved,
+                                 std::vector<std::pair<Track*, Track*>> parentBefore,
+                                 Track* afterParent);
     // トラック削除を Undo 履歴へ積んで実行する (TrackDeleteAction)。延命所有なので Cmd+Z で
     // 同一インスタンス (プラグイン / クリップ / テイク含む) が元の位置へ復帰する。
     // newTransaction=false は「フォルダ削除時の子の所属解除」など同一トランザクションに続けて積む用

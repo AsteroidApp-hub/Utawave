@@ -75,6 +75,12 @@ public:
     // (Track* 列)。並べ替えは performReorder が既に実施済みで、呼び出し側は履歴に積むだけ。
     // 移動トラック群は undo/redo 後に identity で選択を貼り直すのに使う (選択状態を維持)。
     std::function<void(std::vector<Track*>, std::vector<Track*>, std::vector<Track*>)> onTracksReordered;
+    // D&D でフォルダ所属が変わった並べ替えの完了通知 (Undo 用。並べ替えも所属変更も panel が
+    // 実施済み)。moved = 動かしたトラック群 / parentBefore = (子, 変更前の親) /
+    // afterParent = 新しい親 (nullptr = フォルダから出した)。呼び出し側 (MainComponent) は
+    // FolderAssignAction を履歴に積む (最初の perform は適用済み状態への再適用 = 冪等)。
+    std::function<void(std::vector<Track*>, std::vector<Track*>, std::vector<Track*>,
+                       std::vector<std::pair<Track*, Track*>>, Track*)> onTracksReorderedToFolder;
     // テイクレーン ↑ ボタン: 指定トラックの指定レーンを Lane 0 へ採用
     std::function<void(int, int)> onLanePromoteRequest;  // trackIdx, laneIdx
     // ↑ ボタンの活性判定 (trackIdx, laneIdx)
@@ -167,6 +173,9 @@ private:
     bool dragReorderStarted { false };
     juce::Point<int> dragReorderStart;
     int  dropTargetIndex { -1 };  // 描画用: 行間の位置 (0..count, count = 末尾)
+    // 「フォルダへ入れる」ドロップ先 (フォルダ行の中央帯にホバー中のフォルダ track index、-1 = なし)。
+    // 行の上下端 1/4 は従来の挿入線 (並べ替え) のままにして、行前後へのドロップも共存させる。
+    int  dropTargetFolderIdx { -1 };
     // 複数選択中のトラックを通常クリックした時: ドラッグなら集合移動、クリックのみ (ドラッグせず
     // 離す) なら単一選択へ collapse する。その候補 index を mouseDown で覚え mouseUp で確定する。
     int  pendingCollapseIdx { -1 };
@@ -175,7 +184,13 @@ private:
     int  headerViewAtY(int y) const;
     void applySelectionToViews();
     void selectTrackForUI(int index, juce::ModifierKeys mods);
-    void performReorder(int dropIndex);
+    // dropOnFolder != nullptr は「フォルダ行への直接ドロップ」(所属先を強制。dropIndex は
+    // そのフォルダのラン末尾ギャップを渡す)。nullptr ならギャップ位置から所属先を導出する
+    // (開いているフォルダのラン内ギャップ = そのフォルダへ / ラン外 = トップレベルへ)。
+    void performReorder(int dropIndex, Track* dropOnFolder = nullptr);
+    // ギャップ dropIndex の前後 (movers を除く) から所属先フォルダを導出 (nullptr = トップレベル)。
+    // 閉じたフォルダのランには吸い込まない (入れたい時はフォルダ行へ直接ドロップ)。
+    Track* folderForDropGap(int dropIndex, const std::vector<Track*>& movers);
     // idx の削除要求を解決する: idx が複数選択に含まれていれば選択集合を、そうでなければ
     // idx 単体を削除対象として onTracksDeleteRequest へ渡す。
     void requestDeleteSelectedOrTrack(int idx);

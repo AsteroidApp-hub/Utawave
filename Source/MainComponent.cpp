@@ -189,6 +189,14 @@ MainComponent::MainComponent()
     {
         pushTrackReorderUndo(std::move(before), std::move(after), std::move(moved));
     };
+    // D&D でフォルダ所属が変わった並べ替えの Undo (適用自体は performReorder が実施済み)
+    trackHeaderPanel.onTracksReorderedToFolder =
+        [this](std::vector<Track*> before, std::vector<Track*> after, std::vector<Track*> moved,
+               std::vector<std::pair<Track*, Track*>> parentBefore, Track* afterParent)
+    {
+        pushTrackFolderDropUndo(std::move(before), std::move(after), std::move(moved),
+                                std::move(parentBefore), afterParent);
+    };
     // テイクレーン ↑ ボタン: 範囲選択 or クリップ選択中のテイクを Lane 0 へ採用
     trackHeaderPanel.onLanePromoteRequest = [this](int trackIdx, int laneIdx)
     {
@@ -1435,6 +1443,43 @@ void MainComponent::moveTrackToFolder(int trackIdx, int folderIdx)
             timelineView.refresh();
             audioEngine.invalidatePlayback();
             if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
+            markProjectDirty();
+        }));
+}
+
+void MainComponent::pushTrackFolderDropUndo(std::vector<Track*> before, std::vector<Track*> after,
+                                            std::vector<Track*> moved,
+                                            std::vector<std::pair<Track*, Track*>> parentBefore,
+                                            Track* afterParent)
+{
+    if (parentBefore.empty()) return;
+
+    // performReorder が並べ替えも所属変更も適用済みなので、最初の perform() は
+    // 「適用済み状態への再適用」= 冪等 (FolderAssignAction は after 順 + after 親を張り直すだけ)。
+    std::vector<EditActions::FolderAssignAction::ParentChange> changes;
+    changes.reserve(parentBefore.size());
+    for (auto& [child, oldParent] : parentBefore)
+        changes.push_back({ child, oldParent, afterParent });
+
+    undoManager.beginNewTransaction();
+    undoManager.perform(new EditActions::FolderAssignAction(
+        trackManager, std::move(changes), std::move(before), std::move(after),
+        /*onChange*/ [this, moved = std::move(moved)]
+        {
+            trackHeaderPanel.refresh();
+            timelineView.refresh();
+            audioEngine.invalidatePlayback();
+            if (trackHeaderPanel.onTrackChanged) trackHeaderPanel.onTrackChanged();
+            // 動かしたトラックを identity で選び直して選択状態を維持する
+            // (pushTrackReorderUndo と同じ作法。消えたトラックは indexOf<0 でスキップ)
+            std::vector<int> idx;
+            for (auto* t : moved)
+            {
+                const int i = trackManager.indexOf(t);
+                if (i >= 0) idx.push_back(i);
+            }
+            selectedTrackIndex = idx.empty() ? -1 : idx.front();
+            trackHeaderPanel.setSelectedTracks(idx);
             markProjectDirty();
         }));
 }

@@ -127,6 +127,25 @@ public:
 
         expect(act.perform(), "redo re-applies");
         expect(b->getFolderParent() == f && tm.indexOf(b) == 1, "redo restored membership + order");
+
+        // D&D 経路の契約: 呼び出し側 (performReorder) が並べ替えও所属を適用済みの状態で
+        // perform しても冪等 (状態不変) で、undo は適用前へ正しく戻る
+        {
+            // 「a も f へ入れた」状態を手で適用してから、同じ内容のアクションを perform する
+            std::vector<Track*> before2 { f, b, a };   // 適用前 (a はトップレベル)
+            std::vector<Track*> after2  { f, b, a };   // 位置は同じ (ラン末尾) で所属だけ変わる
+            a->setFolderParent(f);
+            tm.normalizeFolderContiguity();
+            std::vector<EditActions::FolderAssignAction::ParentChange> ch2;
+            ch2.push_back({ a, nullptr, f });
+            EditActions::FolderAssignAction act2(tm, std::move(ch2), before2, after2, nullptr);
+
+            expect(act2.perform(), "idempotent re-apply succeeds");
+            expect(a->getFolderParent() == f && tm.indexOf(a) == 2,
+                   "re-apply keeps the already-applied state");
+            expect(act2.undo(), "undo after idempotent perform");
+            expect(a->getFolderParent() == nullptr, "a left folder on undo");
+        }
     }
 
     // ── 色サイクル: track i は paletteColour(i)、9 本目 (idx 8) は 1 本目と同色 ──

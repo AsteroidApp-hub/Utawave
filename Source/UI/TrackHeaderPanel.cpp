@@ -51,6 +51,18 @@ void TrackHeaderPanel::RulerHeader::paint(juce::Graphics& g)
 
 void TrackHeaderPanel::paintOverChildren(juce::Graphics& g)
 {
+    // 「フォルダへ入れる」ドロップ中はフォルダ行全体をハイライトする (挿入線より優先)。
+    if (dragReorderStarted && dropTargetFolderIdx >= 0
+        && dropTargetFolderIdx < (int) headerViews.size())
+    {
+        auto b = headerViews[(size_t) dropTargetFolderIdx]->getBounds().toFloat().reduced(1.5f);
+        g.setColour(AppColours::accentHover.withAlpha(0.18f));
+        g.fillRoundedRectangle(b, 4.0f);
+        g.setColour(AppColours::accentHover);
+        g.drawRoundedRectangle(b, 4.0f, 2.0f);
+        return;
+    }
+
     // 並び替えドラッグ中だけ、ドロップ先 (差し込まれる箇所) に挿入ラインを描く。
     if (!dragReorderStarted || dropTargetIndex < 0 || headerViews.empty())
         return;
@@ -220,16 +232,44 @@ void TrackHeaderPanel::mouseDrag(const juce::MouseEvent& e)
         const auto b = headerViews[(size_t) i]->getBounds();
         if (local.y < b.getY() + b.getHeight() / 2) { targetSlot = i; break; }
     }
-    if (targetSlot != dropTargetIndex)
+
+    // フォルダ行の中央帯にホバー中なら「フォルダへ入れる」モード。
+    // 上下端 1/4 は挿入線 (行前後への並べ替え) のまま残して両操作を共存させる。
+    int folderHover = -1;
+    for (int i = 0; i < (int) headerViews.size() && i < trackManager.getTrackCount(); ++i)
     {
-        dropTargetIndex = targetSlot;
+        auto* t = trackManager.getTrack(i);
+        if (t == nullptr || !t->isFolderTrack()) continue;
+        if (selectedIndices.count(i)) continue;   // ドラッグ中のフォルダ自身には入れない
+        const auto b = headerViews[(size_t) i]->getBounds();
+        if (b.getHeight() <= 0) continue;         // 非表示行
+        const int margin = juce::jmax(4, b.getHeight() / 4);
+        if (local.y >= b.getY() + margin && local.y < b.getBottom() - margin)
+        {
+            folderHover = i;
+            break;
+        }
+    }
+
+    if (targetSlot != dropTargetIndex || folderHover != dropTargetFolderIdx)
+    {
+        dropTargetIndex     = targetSlot;
+        dropTargetFolderIdx = folderHover;
         repaint();
     }
 }
 
 void TrackHeaderPanel::mouseUp(const juce::MouseEvent&)
 {
-    if (dragReorderStarted && dropTargetIndex >= 0)
+    if (dragReorderStarted && dropTargetFolderIdx >= 0
+        && dropTargetFolderIdx < trackManager.getTrackCount())
+    {
+        // フォルダ行への直接ドロップ: 選択トラックをそのフォルダのラン末尾へ入れる
+        auto* folder = trackManager.getTrack(dropTargetFolderIdx);
+        if (folder != nullptr && folder->isFolderTrack())
+            performReorder(trackManager.folderRunEnd(dropTargetFolderIdx), folder);
+    }
+    else if (dragReorderStarted && dropTargetIndex >= 0)
         performReorder(dropTargetIndex);
     else if (!dragReorderStarted && pendingCollapseIdx >= 0)
     {
@@ -237,14 +277,42 @@ void TrackHeaderPanel::mouseUp(const juce::MouseEvent&)
         setSelectedTrack(pendingCollapseIdx);
         if (onTrackSelected) onTrackSelected(pendingCollapseIdx);
     }
-    pendingCollapseIdx = -1;
-    dragSourceIndex    = -1;
-    dragReorderStarted = false;
-    dropTargetIndex    = -1;
+    pendingCollapseIdx  = -1;
+    dragSourceIndex     = -1;
+    dragReorderStarted  = false;
+    dropTargetIndex     = -1;
+    dropTargetFolderIdx = -1;
     repaint();
 }
 
-void TrackHeaderPanel::performReorder(int dropIndex)
+Track* TrackHeaderPanel::folderForDropGap(int dropIndex, const std::vector<Track*>& movers)
+{
+    auto isMover = [&movers](Track* t)
+    { return std::find(movers.begin(), movers.end(), t) != movers.end(); };
+
+    // ギャップの直前 / 直後の「動かさない」トラックを解決する
+    Track* prev = nullptr;
+    for (int i = juce::jmin(dropIndex, trackManager.getTrackCount()) - 1; i >= 0; --i)
+        if (auto* t = trackManager.getTrack(i); t && !isMover(t))
+        { prev = t; break; }
+    Track* next = nullptr;
+    for (int i = juce::jmax(0, dropIndex); i < trackManager.getTrackCount(); ++i)
+        if (auto* t = trackManager.getTrack(i); t && !isMover(t))
+        { next = t; break; }
+
+    // 直後が「開いているフォルダ」の子 → そのラン内へのドロップ
+    if (next != nullptr)
+        if (auto* f = next->getFolderParent(); f != nullptr && f->isFolderOpen() && !isMover(f))
+            return f;
+    // 直前が開いているフォルダ自身 → ラン先頭へのドロップ
+    if (prev != nullptr && prev->isFolderTrack() && prev->isFolderOpen() && !isMover(prev))
+        return prev;
+    // それ以外 (ラン末尾直後のギャップ含む) はトップレベル。閉じたフォルダのランにも
+    // 吸い込まない (入れたい時はフォルダ行へ直接ドロップする)
+    return nullptr;
+}
+
+void TrackHeaderPanel::performReorder(int dropIndex, Track* dropOnFolder)
 {
     std::vector<int> sel(selectedIndices.begin(), selectedIndices.end());
     std::sort(sel.begin(), sel.end());
@@ -269,6 +337,17 @@ void TrackHeaderPanel::performReorder(int dropIndex)
         }
         movers = std::move(withChildren);
     }
+
+    // ドロップ先の所属フォルダを確定する (移動前の並びで判定)。
+    //  - フォルダ行への直接ドロップ: そのフォルダ (dropOnFolder)
+    //  - ギャップドロップ: 開いているフォルダのラン内ならそのフォルダ / ラン外なら nullptr
+    //    (= 子をラン外へドラッグするとフォルダから出る)
+    Track* targetFolder = dropOnFolder != nullptr ? dropOnFolder
+                                                  : folderForDropGap(dropIndex, movers);
+    if (targetFolder != nullptr
+        && (std::find(movers.begin(), movers.end(), targetFolder) != movers.end()
+            || !targetFolder->isFolderTrack()))
+        targetFolder = nullptr;
 
     // Undo 用に並べ替え前のトラック順を控える
     std::vector<Track*> beforeOrder;
@@ -311,8 +390,23 @@ void TrackHeaderPanel::performReorder(int dropIndex)
         if (from != to) trackManager.moveTrack(from, to);
     }
 
-    // フォルダ整合: ドラッグでは所属を変えない方針のため、子がフォルダのランから離れた
-    // 並びになったらフォルダ直後へ戻す (所属変更は右クリックメニューで行う)
+    // ドロップ先に応じてフォルダ所属を付け替える (D&D でフォルダへ入れる / 出す)。
+    //  - フォルダ/Click は所属対象外
+    //  - フォルダごとドラッグした子は、そのフォルダ所属のまま (親も movers に居る)
+    std::vector<std::pair<Track*, Track*>> parentBefore;   // (子, 変更前の親)
+    for (auto* m : movers)
+    {
+        if (m->isFolderTrack() || m->isClickTrack()) continue;
+        if (m->getFolderParent() != nullptr
+            && std::find(movers.begin(), movers.end(), m->getFolderParent()) != movers.end())
+            continue;
+        if (m->getFolderParent() == targetFolder) continue;
+        parentBefore.emplace_back(m, m->getFolderParent());
+        m->setFolderParent(targetFolder);
+    }
+
+    // フォルダ整合: 所属を変えないドロップでは、子がフォルダのランから離れた並びに
+    // なったらフォルダ直後へ戻す。所属を変えたドロップでは「子=フォルダ直後」を確定させる
     trackManager.normalizeFolderContiguity();
 
     // 並べ替え後のトラック順を控える (Undo 用)
@@ -336,9 +430,13 @@ void TrackHeaderPanel::performReorder(int dropIndex)
     // ここで貼り直して、移動したトラックの選択が正しい新位置に出るようにする。
     applySelectionToViews();
 
-    // 実際に順序が変わったら Undo 履歴へ積む (呼び出し側 = MainComponent が perform)。
+    // Undo 履歴へ積む (呼び出し側 = MainComponent)。所属が変わったドロップは並び + 所属を
+    // 1 つの FolderAssignAction で往復させ、純粋な並べ替えは従来の TrackReorderAction。
     // movers (= 移動した選択トラック) を渡し、undo/redo 後の選択復元に使う。
-    if (beforeOrder != afterOrder && onTracksReordered)
+    if (!parentBefore.empty() && onTracksReorderedToFolder)
+        onTracksReorderedToFolder(std::move(beforeOrder), std::move(afterOrder),
+                                  std::move(movers), std::move(parentBefore), targetFolder);
+    else if (parentBefore.empty() && beforeOrder != afterOrder && onTracksReordered)
         onTracksReordered(std::move(beforeOrder), std::move(afterOrder), std::move(movers));
 
     if (onTrackChanged) onTrackChanged();
