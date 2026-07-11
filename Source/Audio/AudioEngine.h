@@ -9,6 +9,7 @@
 #include "../Tracks/AudioClip.h"
 #include "EnginePlayHead.h"
 #include "AudioWorkerPool.h"
+#include "StreamMirrorRing.h"
 
 class TrackManager;  // 前方宣言
 class Track;
@@ -277,6 +278,15 @@ public:
     // volumeDb = 返しに反映するフェーダー音量 (dB、内部で linear へ変換)。
     // chain が nullptr (ドライ返し) でも渡す。
     void setMonitorChain(class PluginChain* chain, int inputCh, bool stereo, float pan, float volumeDb);
+
+    // ── 配信ミラー出力 (最終ミックスの複製タップ) ──
+    // 非 null を渡すと、コールバック末尾の最終出力 (いま耳に聞こえている音 = 再生 +
+    // マスター + モニタ返し) を毎ブロック ring へ複製する (StreamMirrorOutput が別デバイスで
+    // 読み出す)。登録時に ring の SR を現在のデバイス SR で reset する (以降のデバイス再起動は
+    // audioDeviceAboutToStart が追従)。nullptr で解除。リングは shared_ptr 所有なので解除後に
+    // 呼び出し側が参照を手放しても UAF にならない (旧リングは退役リストが message thread での
+    // 回収まで保持し、audio thread が最後の所有者になって解放することはない)。
+    void setMirrorRing(std::shared_ptr<StreamMirrorRing> ring);
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -629,6 +639,15 @@ private:
     std::vector<std::shared_ptr<const MonitorConfig>> retiredMonConfigs;
     void publishMonConfig(std::shared_ptr<const MonitorConfig> next, bool drain);
     void sweepRetiredMonConfigs();
+    // ── 配信ミラー出力 (setMirrorRing 参照・monConfig と同じ公開作法) ──
+    // audio thread はブロック先頭で shared_ptr を 1 回 grab し、末尾で最終出力を push する。
+    // リング自体が SPSC (writer = audio / reader = ミラーデバイススレッド) なのでロック不要。
+    std::shared_ptr<StreamMirrorRing>              activeMirrorRing;
+    juce::SpinLock                                 mirrorRingLock;
+    std::vector<std::shared_ptr<StreamMirrorRing>> retiredMirrorRings;
+    void publishMirrorRing(std::shared_ptr<StreamMirrorRing> next);
+    void sweepRetiredMirrorRings();
+
     // モニター FX 経由用スクラッチ (audioDeviceAboutToStart で確保・audio thread 専用)。
     juce::AudioBuffer<float> monitorChainBuf;
     juce::MidiBuffer         monitorMidiScratch;

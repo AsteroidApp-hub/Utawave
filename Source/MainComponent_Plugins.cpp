@@ -34,6 +34,8 @@ MainComponent::~MainComponent()
     if (autoSaveTimer) autoSaveTimer->stopTimer();
     removeKeyListener(this);
     if (isRecording) stopRecording();
+    // 配信ミラーを先に止める (ミラーデバイス停止 + エンジンからリング登録解除の drain)
+    streamMirror.stop(audioEngine);
     audioEngine.shutdown();
 }
 

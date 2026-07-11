@@ -69,6 +69,7 @@ target_sources(Utawave PRIVATE
     Source/Audio/AudioDeviceSettings.cpp
     Source/Audio/FileStreamVoice.cpp
     Source/Audio/AudioWorkerPool.cpp
+    Source/Audio/StreamMirrorOutput.cpp
     Source/Audio/PitchEngine.cpp
     Source/Audio/pitchcore/PitchShiftEngine.cpp
     Source/Audio/builtin/BuiltInEQ.cpp
@@ -366,6 +367,7 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/BuiltInEffectsTests.cpp
         Tests/FileStreamVoiceTests.cpp
         Tests/AudioWorkerPoolTests.cpp
+        Tests/StreamMirrorTests.cpp
         Source/Audio/AudioFileImporter.cpp
         Source/Audio/FileStreamVoice.cpp
         Source/Audio/AudioWorkerPool.cpp

@@ -4,6 +4,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "Audio/AudioEngine.h"
+#include "Audio/StreamMirrorOutput.h"
 #include "Audio/AudioFileImporter.h"
 #include "Audio/AudioDeviceSettings.h"
 #include "VST/PluginManager.h"
@@ -263,6 +264,9 @@ private:
     void applyMidiPagingToOpenEditors();
     // appPrefs.showTooltips に応じて TooltipWindow を生成 / 破棄する (OFF で説明を出さない)
     void applyTooltipVisibility();
+    // appPrefs.streamMirror* に応じて配信ミラー出力を開始 / 停止する (起動時と環境設定変更時)。
+    // showErrors = 開始失敗時にダイアログで知らせるか (環境設定からの操作では true)
+    void applyStreamMirrorFromPrefs(bool showErrors);
     void commitRetrospective();
     // ── オーディオインポート ──
     // 変換本体 (ファイル I/O のみ・UI/trackManager に触れない)。バックグラウンドスレッドから
@@ -466,6 +470,9 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     AudioEngine       audioEngine;
+    // 配信ミラー出力 (最終ミックスを別デバイスへ複製)。audioEngine より後に宣言 = 先に破棄。
+    // dtor 本体が streamMirror.stop(audioEngine) → audioEngine.shutdown() の順で明示的に止める。
+    StreamMirrorOutput streamMirror;
     TrackManager      trackManager  { audioEngine.getFormatManager() };
     RecordingManager  recordingMgr  { audioEngine, trackManager,
                                       audioEngine.getFormatManager() };

@@ -185,6 +185,43 @@ void AudioEngine::sweepRetiredMonConfigs()
         retiredMonConfigs.end());
 }
 
+// ── 配信ミラー出力リングの公開 ──
+// monConfig 等と違い drain (audio が手放すまで待つ) はしない: リングは呼び出し側
+// (StreamMirrorOutput) も shared_ptr で所有するため use_count で「audio だけが残り」を
+// 判定できず、また shared_ptr 所有そのものが UAF を防ぐ。退役リストが解放まで保持する
+// ことで「audio thread が最後の所有者になって解放する」ことだけを防ぐ (回収は次の公開
+// またはエンジン破棄時の message thread)。
+void AudioEngine::publishMirrorRing(std::shared_ptr<StreamMirrorRing> next)
+{
+    std::shared_ptr<StreamMirrorRing> old;
+    {
+        const juce::SpinLock::ScopedLockType l(mirrorRingLock);
+        old = std::move(activeMirrorRing);
+        activeMirrorRing = std::move(next);
+    }
+    {
+        const juce::ScopedLock r(reclaimLock);
+        if (old) retiredMirrorRings.push_back(std::move(old));
+    }
+    sweepRetiredMirrorRings();
+}
+
+void AudioEngine::sweepRetiredMirrorRings()
+{
+    const juce::ScopedLock r(reclaimLock);
+    retiredMirrorRings.erase(
+        std::remove_if(retiredMirrorRings.begin(), retiredMirrorRings.end(),
+                       [](const std::shared_ptr<StreamMirrorRing>& c) { return c.use_count() == 1; }),
+        retiredMirrorRings.end());
+}
+
+void AudioEngine::setMirrorRing(std::shared_ptr<StreamMirrorRing> ring)
+{
+    if (ring != nullptr)
+        ring->reset(currentSampleRate);   // 公開前にソース SR を確定 (以降のデバイス再起動は aboutToStart が追従)
+    publishMirrorRing(std::move(ring));
+}
+
 void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo, float pan, float volumeDb)
 {
     // 停止中モニタでも audio thread が processBlock できるよう、現 SR/blockSize で prepare しておく
@@ -1307,6 +1344,14 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     // メトロノーム合成 → CLICK トラック INS チェーン用スクラッチ (audio thread でのヒープ確保回避)。
     clickSynthBuf.setSize(2, currentBufferSize, false, true, true);
 
+    // 配信ミラー出力: デバイス再起動 (SR 変更含む) でソース SR を更新し、reader に溜め直しを
+    // 指示する。aboutToStart はコールバック再開前なので writer (audio thread) とは競合しない。
+    {
+        const juce::SpinLock::ScopedLockType l(mirrorRingLock);
+        if (activeMirrorRing != nullptr)
+            activeMirrorRing->reset(currentSampleRate);
+    }
+
     // audio callback のアクティブトラック収集スクラッチを事前確保 (毎ブロックの再確保回避)。
     // clear() で長さ 0 に戻しても容量は保たれるため、以後 push_back で再確保が起きない。
     activeTrackIdxScratch.reserve(64);
@@ -2342,6 +2387,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // チェーン (= Track) が破棄されない (clearPlayback の drain がこの shared_ptr 解放を待つ)。
     std::shared_ptr<const MonitorConfig> monCfg;
     { const juce::SpinLock::ScopedLockType l(monConfigLock); monCfg = activeMonConfig; }
+
+    // 配信ミラー出力リング (非 null なら停止/再生ブランチの末尾で最終出力を複製する)。
+    // shared_ptr を grab している間はリングが破棄されない (解除後も退役リストが回収まで保持)。
+    std::shared_ptr<StreamMirrorRing> mirror;
+    { const juce::SpinLock::ScopedLockType l(mirrorRingLock); mirror = activeMirrorRing; }
     PluginChain* const monChain    = (monCfg ? monCfg->chain : nullptr);
     const int          monInputCh  = (monCfg ? monCfg->inputCh : 0);
     const bool         monStereo   = (monCfg ? monCfg->stereo  : false);
@@ -2558,6 +2608,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         mixInputMonitoring(inputChannelData, numInputChannels,
                            outputChannelData, numOutputChannels, numSamples, monChain,
                            monInputCh, monStereo, monPan, monGain);
+
+        // 配信ミラー出力: 停止中の最終出力 (モニタ返し込み = 配信で喋っている声) も複製する
+        if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)
+            mirror->push(outputChannelData[0],
+                         (numOutputChannels > 1) ? outputChannelData[1] : nullptr,
+                         numSamples);
 
         // 停止中は再生デクリックの直前出力値を 0 に戻す。次の再生開始で再構築 (preparePlayback)
         // が走って playbackGen が増える場合は 0 起点のクロスフェード (= 短いフェードイン) になり、
@@ -3204,6 +3260,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     mixInputMonitoring(inputChannelData, numInputChannels,
                        outputChannelData, numOutputChannels, numSamples, monChain,
                        monInputCh, monStereo, monPan, monGain);
+
+    // 配信ミラー出力: 最終出力が確定した時点 (モニタ返し合算後・以降は録音/計測のみ) で複製する
+    if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)
+        mirror->push(outputChannelData[0],
+                     (numOutputChannels > 1) ? outputChannelData[1] : nullptr,
+                     numSamples);
 
     // recording from input (録音設定はブロック先頭で取得した recCfg を使う)
     {
