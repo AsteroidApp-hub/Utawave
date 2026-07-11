@@ -568,6 +568,10 @@ private:
     std::atomic<float> trackOutVUR  [kMaxTracksMeters] {};
     float trackOutVUSmoothL[kMaxTracksMeters] {};
     float trackOutVUSmoothR[kMaxTracksMeters] {};
+    // このブロックで出力メータが測定されたか (再生ブランチ専用の audio thread スクラッチ)。
+    // 測定されなかったトラック (ミュート/ソロ外/未 fed フォルダバス) はブロック末尾で
+    // decayTrackMeter により減衰させ、メータが最後の値のまま凍結するのを防ぐ。
+    juce::uint8 trackMeterFed[kMaxTracksMeters] {};
     // 実トラック数。停止中の減衰ループをこの数まで（かつ無音は早期スキップ）に
     // 制限し、アイドル時の不要な log10 を避ける。preparePlayback で更新。
     std::atomic<int> meterTrackCount { 0 };

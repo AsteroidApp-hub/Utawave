@@ -65,6 +65,35 @@ static inline void measureStereoBuf(juce::AudioBuffer<float>& buf, int numSample
     vuR.store(juce::Decibels::gainToDecibels(vuSmR, -96.0f));
 }
 
+// トラック出力メータの 1 ブロック分の減衰 (ピークは 0.80 乗算 ≈ 0.4〜0.5 秒で -96 へ、
+// VU は vuCoef 追従で 0 へ)。停止時ブランチと、再生中に「このブロックで測定されなかった」
+// トラック (ミュート/ソロ外/フォルダごとミュート/子が鳴らず fed されなかったフォルダバス) が
+// 共用する。測定されないトラックを減衰させないとメータが最後の値のまま凍結する。
+// 完全無音 (-96 到達) は早期 return して log10 を省く (アイドル負荷対策)。
+static inline void decayTrackMeter(std::atomic<float>& peakL, std::atomic<float>& peakR,
+                                   float& vuSmL, float& vuSmR,
+                                   std::atomic<float>& vuL, std::atomic<float>& vuR,
+                                   float vuCoef)
+{
+    const bool peakSilent = peakL.load() <= -96.0f && peakR.load() <= -96.0f;
+    const bool vuSilent   = vuSmL < 1.0e-7f && vuSmR < 1.0e-7f;
+    if (peakSilent && vuSilent) return;
+
+    auto decayPeak = [](std::atomic<float>& vDb)
+    {
+        const float db = vDb.load();
+        if (db <= -96.0f) return;
+        const float g = juce::Decibels::decibelsToGain(db, -96.0f) * 0.80f;
+        vDb.store(juce::Decibels::gainToDecibels(g, -96.0f));
+    };
+    decayPeak(peakL);
+    decayPeak(peakR);
+    vuSmL *= vuCoef;
+    vuSmR *= vuCoef;
+    vuL.store(juce::Decibels::gainToDecibels(vuSmL, -96.0f));
+    vuR.store(juce::Decibels::gainToDecibels(vuSmR, -96.0f));
+}
+
 void AudioEngine::previewMidiNote(int trackIdx, int note, float velocity, bool isOn)
 {
     const juce::ScopedLock sl(previewMidiLock);
@@ -2517,24 +2546,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         vuL.store(juce::Decibels::gainToDecibels(vuSmoothL, -96.0f));
         vuR.store(juce::Decibels::gainToDecibels(vuSmoothR, -96.0f));
 
-        // 実トラック数までに制限し、かつ完全無音 (peak/VU とも底) のトラックは log10 をスキップ。
-        // これによりアイドル時の不要な log10 呼び出しを実トラック数相当まで減らす。
+        // 実トラック数までに制限。完全無音 (peak/VU とも底) のスキップと減衰の実体は
+        // decayTrackMeter (再生中の「未測定トラックの減衰」と共通ヘルパ) が行う。
         const int meterN = juce::jmin(meterTrackCount.load(), kMaxTracksMeters);
         for (int t = 0; t < meterN; ++t)
-        {
-            const bool peakSilent = (trackOutPeakL[t].load() <= -96.0f)
-                                 && (trackOutPeakR[t].load() <= -96.0f);
-            const bool vuSilent   = (trackOutVUSmoothL[t] < 1.0e-7f)
-                                 && (trackOutVUSmoothR[t] < 1.0e-7f);
-            if (peakSilent && vuSilent) continue;   // 完全無音は減衰処理不要
-
-            decayPeakDb(trackOutPeakL[t]);
-            decayPeakDb(trackOutPeakR[t]);
-            trackOutVUSmoothL[t] *= vuCoef;
-            trackOutVUSmoothR[t] *= vuCoef;
-            trackOutVUL[t].store(juce::Decibels::gainToDecibels(trackOutVUSmoothL[t], -96.0f));
-            trackOutVUR[t].store(juce::Decibels::gainToDecibels(trackOutVUSmoothR[t], -96.0f));
-        }
+            decayTrackMeter(trackOutPeakL[t], trackOutPeakR[t],
+                            trackOutVUSmoothL[t], trackOutVUSmoothR[t],
+                            trackOutVUL[t], trackOutVUR[t], vuCoef);
 
         // 停止中も入力モニタリングは通す (ドライ返し + モニターリバーブ、INS があれば FX も)
         mixInputMonitoring(inputChannelData, numInputChannels,
@@ -2552,6 +2570,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // ワークバッファに全クリップをミックス
     workBuffer.setSize(juce::jmax(2, numOutputChannels), numSamples, false, false, true);
     workBuffer.clear();
+
+    // このブロックでメータを測定したトラックの記録をリセット (未測定分はブロック末尾で減衰)
+    juce::zeromem(trackMeterFed, sizeof(trackMeterFed));
 
     double posStart = currentPosition.load();
 
@@ -2661,11 +2682,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
 
                 // トラック出力メータ（Vol/Pan 適用後 = ポストフェーダー。フェーダーに追従する）
                 if (tidx >= 0 && tidx < kMaxTracksMeters)
+                {
+                    trackMeterFed[tidx] = 1;
                     measureStereoBuf(trackBuf, numSamples,
                                      trackOutPeakL[tidx], trackOutPeakR[tidx],
                                      trackOutVUSmoothL[tidx], trackOutVUSmoothR[tidx],
                                      trackOutVUL[tidx], trackOutVUR[tidx],
                                      vuCoef, gL, gR);
+                }
 
                 // master (フォルダ配下ならフォルダバス) に加算
                 juce::AudioBuffer<float>* dest = &workBuffer;
@@ -2835,11 +2859,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
 
             // トラック出力メータ（Vol/Pan 適用後 = ポストフェーダー）
             if (mp.trackIdx >= 0 && mp.trackIdx < kMaxTracksMeters)
+            {
+                trackMeterFed[mp.trackIdx] = 1;
                 measureStereoBuf(trackBuf, numSamples,
                                  trackOutPeakL[mp.trackIdx], trackOutPeakR[mp.trackIdx],
                                  trackOutVUSmoothL[mp.trackIdx], trackOutVUSmoothR[mp.trackIdx],
                                  trackOutVUL[mp.trackIdx], trackOutVUR[mp.trackIdx],
                                  vuCoef, gL, gR);
+            }
 
             // master (フォルダ配下ならフォルダバス) に加算
             {
@@ -2899,11 +2926,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
 
             // フォルダ出力メータ (Vol/Pan 適用後 = ポストフェーダー)
             if (fb.trackIdx >= 0 && fb.trackIdx < kMaxTracksMeters)
+            {
+                trackMeterFed[fb.trackIdx] = 1;
                 measureStereoBuf(fb.buf, numSamples,
                                  trackOutPeakL[fb.trackIdx], trackOutPeakR[fb.trackIdx],
                                  trackOutVUSmoothL[fb.trackIdx], trackOutVUSmoothR[fb.trackIdx],
                                  trackOutVUL[fb.trackIdx], trackOutVUR[fb.trackIdx],
                                  vuCoef, fGL, fGR);
+            }
 
             workBuffer.addFrom(0, 0, fb.buf, 0, 0, numSamples, fGL);
             if (workBuffer.getNumChannels() >= 2 && fb.buf.getNumChannels() >= 2)
@@ -2919,6 +2949,21 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 reverbSendBuf.addFrom(0, 0, fb.buf, 0, 0, numSamples, fGL * frs);
                 if (fb.buf.getNumChannels() >= 2)
                     reverbSendBuf.addFrom(1, 0, fb.buf, 1, 0, numSamples, fGR * frs);
+            }
+        }
+
+        // ── このブロックで測定されなかったトラックの出力メータを減衰させる ──
+        // ミュート / ソロ外 / フォルダごとミュートで非アクティブになったトラックと、
+        // 子が鳴らず fed されなかったフォルダバスは measureStereoBuf を通らないため、
+        // 減衰させないとメータが最後の値のまま凍結する (停止時ブランチと同じバリスティクス)。
+        {
+            const int meterN = juce::jmin(meterTrackCount.load(), kMaxTracksMeters);
+            for (int t = 0; t < meterN; ++t)
+            {
+                if (trackMeterFed[t]) continue;
+                decayTrackMeter(trackOutPeakL[t], trackOutPeakR[t],
+                                trackOutVUSmoothL[t], trackOutVUSmoothR[t],
+                                trackOutVUL[t], trackOutVUR[t], vuCoef);
             }
         }
     }

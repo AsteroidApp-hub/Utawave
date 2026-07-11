@@ -339,6 +339,9 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         runBlocks(s.engine, 12, &pL, &pR);
         expectWithinAbsoluteError(pL, 1.0f, 0.03f, "child routes through folder at unity");
         expectWithinAbsoluteError(pR, 1.0f, 0.03f, "R matches L");
+        const int folderIdx = s.tm->indexOf(folder);
+        expect(s.engine.getTrackOutputPeakL(folderIdx) > -20.0f,
+               "folder meter shows bus level while playing");
 
         // (2) フォルダ Vol -6.02dB (gain 0.5): 子だけ半分 → 0.25 + 0.5 = 0.75
         folder->setVolume(-6.0206f);
@@ -352,6 +355,15 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         runBlocks(s.engine, 4, &pL, &pR);
         runBlocks(s.engine, 4, &pL, &pR);
         expectWithinAbsoluteError(pL, 0.5f, 0.03f, "folder mute silences its children");
+        // メータの凍結防止 (回帰テスト): ミュートで fed されなくなったバスのメータは
+        // 最後の値で止まらず減衰する。Peak (0.80 乗算 ≈ 0.5 秒で底) は 80 ブロックで -90 以下、
+        // VU は時定数 300ms の追従なので同じ時間では途中 (-30dB 前後) — 凍結 (-6dB 付近) との
+        // 区別には -20dB 閾値で十分
+        runBlocks(s.engine, 80);
+        expect(s.engine.getTrackOutputPeakL(folderIdx) <= -90.0f,
+               "muted folder Peak decays instead of freezing");
+        expect(s.engine.getTrackOutputVUL(folderIdx) <= -20.0f,
+               "muted folder VU decays instead of freezing");
         folder->setMuted(false);
 
         // (4) フォルダ Solo → 配下の子だけが鳴る (0.5)
