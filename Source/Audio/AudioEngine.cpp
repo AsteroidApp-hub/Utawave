@@ -417,6 +417,12 @@ void AudioEngine::shutdown()
         const juce::ScopedLock sl(reclaimLock);
         retiredSnapshots.clear();
     }
+    // 遅延破棄待ちのクリップもここで解放する。~AudioEngine のメンバ破棄まで残すと、
+    // MainComponent では trackManager (AudioClip の thumbnail が参照する thumbnailCache の
+    // TimeSliceThread を所有) が audioEngine より後に宣言 = 先に破棄されるため、
+    // ~AudioThumbnail → removeTimeSliceClient が破棄済みスレッドを触って落ちる (crash id37)。
+    // ~MainComponent 本体は trackManager 生存中に shutdown() を呼ぶのでここが安全な解放点。
+    pendingGraveyard.clear();
     voicePool.clear();
     streamThread.stopThread(2000);
 

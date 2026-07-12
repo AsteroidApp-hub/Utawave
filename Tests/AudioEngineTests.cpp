@@ -273,6 +273,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testMultiTrackClipIndexRouting();
         testClearPlaybackBarrier();
         testDeferredDestructionRebuild();
+        testShutdownReleasesPendingGraveyard();
         testRecordingLatencyComp();
         testRecordingWriteGate();
         testRecordingFirstWriteMarker();
@@ -737,6 +738,36 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         runBlocks(s.engine, 10);
         auto peaks = runBlocks(s.engine, 3);
         expectEquals(peaks.getEnd(), 0.0f, "silent after the clip was removed (post declick)");
+    }
+
+    // ── shutdown が遅延破棄待ちクリップを解放する (crash id37 の回帰テスト) ──
+    // pendingGraveyard のクリップが ~AudioEngine のメンバ破棄まで残ると、MainComponent では
+    // trackManager (thumbnail が参照する thumbnailCache スレッドの所有者) が先に破棄されるため
+    // ~AudioThumbnail → removeTimeSliceClient が破棄済みスレッドを触る UAF になる。
+    // ~MainComponent 本体が trackManager 生存中に呼ぶ shutdown() で解放されることを固定する。
+    void testShutdownReleasesPendingGraveyard()
+    {
+        beginTest("shutdown releases deferred clips (dtor-order UAF guard)");
+        auto wav = tempDir.getChildFile("c05g.wav");
+        expect(writeMonoConstWav(wav, (int)kSR, 0.5f), "source write");
+
+        Scene s;
+        auto* t = s.addConstTrack(wav, 1.0);
+        s.start();
+
+        // クリップを lane から外して遅延破棄へ渡すが、preparePlayback は挟まない
+        // (= スナップショットの graveyard へ移らず pendingGraveyard に残ったまま終了、を再現)
+        auto* lane = t->getLane(0);
+        expect(lane != nullptr && !lane->clips.empty(), "lane has the clip");
+        std::vector<std::unique_ptr<AudioClip>> removed;
+        removed.push_back(std::move(lane->clips[0]));
+        lane->clips.erase(lane->clips.begin());
+        s.engine.deferClipDestruction(std::move(removed));
+        expectEquals((int) s.engine.getPendingGraveyardSizeForTests(), 1, "clip is pending");
+
+        s.engine.shutdown();
+        expectEquals((int) s.engine.getPendingGraveyardSizeForTests(), 0,
+                     "shutdown must release deferred clips while the thumbnail cache is alive");
     }
 
     // ── 録音レイテンシ補正: デバイス報告値 + 手動オフセットの合成 ──

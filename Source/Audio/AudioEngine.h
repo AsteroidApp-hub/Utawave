@@ -262,6 +262,8 @@ public:
     // テスト用: 書き出し中フラグを直接切り替える (書き出し中はモニタ返し/停止時プレビューが
     // 休止することの検証用。本番は renderOfflineRange が RAII で set/reset する)。
     void setOfflineRenderActiveForTests(bool v) { offlineRenderActive.store(v); }
+    // テスト用: 遅延破棄待ちクリップ数 (shutdown が pendingGraveyard を解放する契約の検証用)。
+    size_t getPendingGraveyardSizeForTests() const { return pendingGraveyard.size(); }
 
     // Input monitoring
     void setInputMonitoringActive(bool b) { inputMonitoringActive.store(b); }
