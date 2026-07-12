@@ -49,6 +49,7 @@ void MainComponent::showPreferences()
         TypeInSlider       recCompOffsetSlider;
         juce::Label        exportLabel, startupLabel, streamLabel;
         const bool         adsUi { AppPreferences::adsCompiledIn() };  // 広告がコンパイル時有効な時だけ UI を出す
+        const bool         mirrorUi;   // 配信ミラー出力の UI を出すか (隠しフラグ streamMirrorUnlocked・未公開機能ゲート)
         juce::TextButton closeBtn, resetBtn;
         // 設定項目は縦に長いので Viewport でスクロールさせる (ウィンドウは従来の約半分の高さ)。
         // resetBtn / closeBtn だけはダイアログ下部に固定し、スクロールしなくても押せるようにする
@@ -86,7 +87,8 @@ void MainComponent::showPreferences()
         PrefsDlg(int curBits, bool curFollowSel, bool curRtz,
                  int curAutoSaveMin, int curMaxBackups, float curVuRefDb, float curLoudnessTargetLufs,
                  bool curAutoNorm, bool curZoomMouse, bool curPeakGuard, bool curZeroCross,
-                 bool curStripMeta)
+                 bool curStripMeta, bool showMirrorUi)
+            : mirrorUi(showMirrorUi)
         {
             auto setupLabel = [this](juce::Label& l, juce::String txt, float fontSize, juce::Colour col) {
                 l.setText(txt, juce::dontSendNotification);
@@ -152,7 +154,8 @@ void MainComponent::showPreferences()
             setupLabel(vuRefLabel,    tr(u8"VU メータ基準レベル (0 VU)"), 13.0f, juce::Colours::white);
             setupLabel(loudnessLabel, tr(u8"ラウドネス自動調整ターゲット"), 13.0f, juce::Colours::white);
             setupLabel(exportLabel,   tr(u8"書き出し"), 13.0f, juce::Colours::white);
-            setupLabel(streamLabel,   tr(u8"配信"), 13.0f, juce::Colours::white);
+            if (mirrorUi)
+                setupLabel(streamLabel, tr(u8"配信"), 13.0f, juce::Colours::white);
             if (adsUi)
                 setupLabel(startupLabel,  tr(u8"起動画面"), 13.0f, juce::Colours::white);
 
@@ -327,35 +330,39 @@ void MainComponent::showPreferences()
             // 配信ミラー出力 (アプリ全体設定。初期状態は showPreferences 側)。
             // 最終ミックスを別の出力デバイスへ同時に流し、配信ソフトのアプリ音声キャプチャで
             // 拾えるようにする (メイン出力が ASIO 等でキャプチャできない環境向け)。
-            mirrorBtn.setButtonText(
-                tr(u8"配信ミラー出力を使う (いま聞こえている音を別の出力デバイスへも同時に流す)"));
-            mirrorBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
-            mirrorBtn.setTooltip(
-                tr(u8"配信ソフトが音を拾えない環境 (ASIO 等) 向け。ミラー側の音は配信ソフトのアプリ音声キャプチャや仮想デバイス経由で拾えます。録音や書き出しには影響しません。"));
-            mirrorBtn.onClick = [this] {
-                if (onMirrorChanged) onMirrorChanged(mirrorBtn.getToggleState());
-            };
-            addAndMakeVisible(mirrorBtn);
+            // 未公開機能: 隠しフラグ (streamMirrorUnlocked) が ON のときだけ UI を出す。
+            if (mirrorUi)
+            {
+                mirrorBtn.setButtonText(
+                    tr(u8"配信ミラー出力を使う (いま聞こえている音を別の出力デバイスへも同時に流す)"));
+                mirrorBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+                mirrorBtn.setTooltip(
+                    tr(u8"配信ソフトが音を拾えない環境 (ASIO 等) 向け。ミラー側の音は配信ソフトのアプリ音声キャプチャや仮想デバイス経由で拾えます。録音や書き出しには影響しません。"));
+                mirrorBtn.onClick = [this] {
+                    if (onMirrorChanged) onMirrorChanged(mirrorBtn.getToggleState());
+                };
+                addAndMakeVisible(mirrorBtn);
 
-            setupLabel(mirrorDevLabel,
-                       tr(u8"ミラーの出力先デバイス (メインと同じデバイスを選ぶと二重に聞こえます)"),
-                       13.0f, juce::Colours::white);
-            mirrorDevCombo.addItem(tr(u8"既定の出力デバイス"), 1);
-            mirrorDevNames = StreamMirrorOutput::getOutputDeviceNames();
-            for (int i = 0; i < mirrorDevNames.size(); ++i)
-                mirrorDevCombo.addItem(mirrorDevNames[i], 100 + i);
-            mirrorDevCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
-            mirrorDevCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
-            mirrorDevCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
-            mirrorDevCombo.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff555555));
-            mirrorDevCombo.onChange = [this] {
-                if (onMirrorDeviceChanged)
-                {
-                    const int id = mirrorDevCombo.getSelectedId();
-                    onMirrorDeviceChanged(id >= 100 ? mirrorDevNames[id - 100] : juce::String());
-                }
-            };
-            addAndMakeVisible(mirrorDevCombo);
+                setupLabel(mirrorDevLabel,
+                           tr(u8"ミラーの出力先デバイス (メインと同じデバイスを選ぶと二重に聞こえます)"),
+                           13.0f, juce::Colours::white);
+                mirrorDevCombo.addItem(tr(u8"既定の出力デバイス"), 1);
+                mirrorDevNames = StreamMirrorOutput::getOutputDeviceNames();
+                for (int i = 0; i < mirrorDevNames.size(); ++i)
+                    mirrorDevCombo.addItem(mirrorDevNames[i], 100 + i);
+                mirrorDevCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
+                mirrorDevCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+                mirrorDevCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
+                mirrorDevCombo.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff555555));
+                mirrorDevCombo.onChange = [this] {
+                    if (onMirrorDeviceChanged)
+                    {
+                        const int id = mirrorDevCombo.getSelectedId();
+                        onMirrorDeviceChanged(id >= 100 ? mirrorDevNames[id - 100] : juce::String());
+                    }
+                };
+                addAndMakeVisible(mirrorDevCombo);
+            }
 
             // 自動保存: 無効 + 5 分刻み (5/10/15/20/25/30)
             // ID = minutes + 1 (無効=1, 5分=6, ...)
@@ -599,11 +606,14 @@ void MainComponent::showPreferences()
             y = check(diskStreamBtn, y);
             y = check(multicoreBtn, y);
 
-            // ── 配信 ──
-            y += gSec; y = label(streamLabel, y);
-            y = check(mirrorBtn, y);
-            y = label(mirrorDevLabel, y);
-            y = combo(mirrorDevCombo, y);
+            // ── 配信 (未公開: 隠しフラグ ON のときだけ) ──
+            if (mirrorUi)
+            {
+                y += gSec; y = label(streamLabel, y);
+                y = check(mirrorBtn, y);
+                y = label(mirrorDevLabel, y);
+                y = combo(mirrorDevCombo, y);
+            }
 
             // ── 保存 / メータ / 音量 ──
             y += gSec; y = label(autoSaveLabel, y);    y = combo(autoSaveCombo, y);
@@ -711,7 +721,8 @@ void MainComponent::showPreferences()
                               appSettings.zoomToMousePosition,
                               appSettings.exportPeakGuard,
                               appSettings.zeroCrossingFade,
-                              appSettings.stripImportedMetadata);
+                              appSettings.stripImportedMetadata,
+                              appPrefs.streamMirrorUnlocked);
     dlg->onLanguageChanged = [](int id) {
         Localisation::Language lang = Localisation::Language::Japanese;
         switch (id)
@@ -909,6 +920,8 @@ void MainComponent::showPreferences()
         audioEngine.setMulticoreAudioEnabled(v);
     };
     // 配信ミラー出力 (アプリ全体設定)。即時保存 + ミラーデバイスの開始/停止を即反映。
+    // 未公開機能: 隠しフラグが OFF なら UI が無いので配線もしない。
+    if (appPrefs.streamMirrorUnlocked)
     {
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
         dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
@@ -994,9 +1007,12 @@ void MainComponent::showPreferences()
         dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
         dlg->diskStreamBtn.setToggleState(appPrefs.diskStreaming, juce::dontSendNotification);
         dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);
-        dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
-        dlg->mirrorDevCombo.setSelectedId(1, juce::dontSendNotification);
-        dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
+        if (dlg->mirrorUi)
+        {
+            dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
+            dlg->mirrorDevCombo.setSelectedId(1, juce::dontSendNotification);
+            dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
+        }
         dlg->uiScaleCombo.setSelectedId(uiScaleToId(appPrefs.resolvedUiScale()), juce::dontSendNotification);
 
         // ダイアログの UI を新しい値に同期
@@ -1029,7 +1045,9 @@ void MainComponent::showPreferences()
 // 開始に失敗した場合は設定を OFF に戻さない (デバイスを繋ぎ直して再起動すれば復帰する)
 void MainComponent::applyStreamMirrorFromPrefs(bool showErrors)
 {
-    if (!appPrefs.streamMirrorEnabled)
+    // 未公開機能ゲート: 隠しフラグ (streamMirrorUnlocked) が OFF なら、設定値が残っていても
+    // 起動しない (UI も出ないので一般ユーザーからは機能ごと不可視)
+    if (!appPrefs.streamMirrorUnlocked || !appPrefs.streamMirrorEnabled)
     {
         streamMirror.stop(audioEngine);
         return;
