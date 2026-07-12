@@ -828,10 +828,17 @@ void AudioEngine::preparePlayback(TrackManager& tm)
 
     // 各トラックのプラグインチェーンを準備（オーディオデバイスの SR/blockSize に合わせる）。
     // PluginChain 自身の chainLock が processBlock と相互排他するため、playbackLock 無しでも安全。
+    // 既に同じ SR/blockSize で prepare 済みなら呼ばない (setMonitorChain と同じ「停止中 prepare」の
+    // 作法)。無条件に呼ぶと、再生中編集の再構築のたびに全プラグインが releaseResources → prepareToPlay
+    // のフル再初期化になり、(1) chainLock 保持下の重い prepare を audio thread の processBlock が
+    // 待って全トラックの音が止まる、(2) 編集と無関係なプラグインの内部状態 (テール等) もリセットされる。
+    // プラグイン追加 (addPlugin / insertPluginAt) は prepare 済みチェーンへは挿入時に個別 prepare する
+    // ため、「チェーンが prepare 済み = 中の全プラグインも prepare 済み」は保たれる。
     if (currentSampleRate > 0.0 && currentBufferSize > 0)
     {
         // マスターチェーンは常に準備（トラック 0 個でも使う可能性がある）
-        masterChain->prepareToPlay(currentSampleRate, currentBufferSize);
+        if (!masterChain->isPreparedFor(currentSampleRate, currentBufferSize))
+            masterChain->prepareToPlay(currentSampleRate, currentBufferSize);
 
         // ── MIDI 再生キャッシュ構築 ──
         for (int ti = 0; ti < tm.getTrackCount(); ++ti)
@@ -901,7 +908,9 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             {
                 auto* tr = tm.getTrack(ti);
                 if (!tr) continue;
-                tr->getPluginChain().prepareToPlay(currentSampleRate, currentBufferSize);
+                auto& chain = tr->getPluginChain();
+                if (!chain.isPreparedFor(currentSampleRate, currentBufferSize))
+                    chain.prepareToPlay(currentSampleRate, currentBufferSize);
                 maxIdx = juce::jmax(maxIdx, ti);
             }
 

@@ -94,6 +94,36 @@ public:
     void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
 };
 
+// prepareToPlay の呼び出し回数を数えるスタブ。「preparePlayback の再構築が prepare 済みチェーンを
+// 再 prepare しない」(再生中編集で全プラグインがフル再初期化され音が止まる問題の修正) の検証用。
+class PrepareCountFakePlugin : public juce::AudioPluginInstance
+{
+public:
+    PrepareCountFakePlugin()
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())) {}
+    int prepareCount { 0 };
+    const juce::String getName() const override            { return "PrepCount"; }
+    void prepareToPlay(double, int) override               { ++prepareCount; }
+    void releaseResources() override                       {}
+    void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override           { return 0.0; }
+    bool acceptsMidi() const override                      { return false; }
+    bool producesMidi() const override                     { return false; }
+    juce::AudioProcessorEditor* createEditor() override    { return nullptr; }
+    bool hasEditor() const override                        { return false; }
+    int getNumPrograms() override                          { return 1; }
+    int getCurrentProgram() override                       { return 0; }
+    void setCurrentProgram(int) override                   {}
+    const juce::String getProgramName(int) override        { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override  {}
+    void setStateInformation(const void*, int) override    {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
+
 // 入力に関係なく buffer を定数で埋める最小スタブ (Melodyne が「停止中に自前でプレビュー音を
 // 生成する」挙動を模す)。停止中プラグインプレビューの検証用。
 class GeneratorFakePlugin : public juce::AudioPluginInstance
@@ -274,6 +304,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testClearPlaybackBarrier();
         testDeferredDestructionRebuild();
         testShutdownReleasesPendingGraveyard();
+        testRebuildSkipsPreparedChains();
         testRecordingLatencyComp();
         testRecordingWriteGate();
         testRecordingFirstWriteMarker();
@@ -768,6 +799,44 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         s.engine.shutdown();
         expectEquals((int) s.engine.getPendingGraveyardSizeForTests(), 0,
                      "shutdown must release deferred clips while the thumbnail cache is alive");
+    }
+
+    // ── preparePlayback の再構築は prepare 済みチェーンを再 prepare しない ──
+    // 旧実装は再生中編集の再構築のたびに全チェーンへ無条件 prepareToPlay を呼び、
+    // chainLock 保持下の重いフル再初期化 (releaseResources → prepareToPlay) を audio thread の
+    // processBlock が待って全トラックの音が止まっていた (プラグイン挿入時のみ発生する回帰テスト)。
+    // SR/blockSize が変わった時は従来どおり再 prepare されることも固定する。
+    void testRebuildSkipsPreparedChains()
+    {
+        beginTest("preparePlayback rebuild skips already-prepared chains");
+        auto wav = tempDir.getChildFile("c05p.wav");
+        expect(writeMonoConstWav(wav, (int)kSR, 0.5f), "source write");
+
+        Scene s;
+        auto* t = s.addConstTrack(wav, 1.0);
+        auto trackPlug  = std::make_unique<PrepareCountFakePlugin>();
+        auto masterPlug = std::make_unique<PrepareCountFakePlugin>();
+        auto* tp = trackPlug.get();
+        auto* mp = masterPlug.get();
+        t->getPluginChain().addPlugin(std::move(trackPlug));
+        s.engine.getMasterChain().addPlugin(std::move(masterPlug));
+        s.start();
+
+        expect(tp->prepareCount >= 1, "track plugin prepared at start");
+        expect(mp->prepareCount >= 1, "master plugin prepared at start");
+        const int tc = tp->prepareCount, mc = mp->prepareCount;
+
+        // 再生中編集の再構築を模す: 同じ SR/blockSize での preparePlayback は prepare を呼ばない
+        s.engine.play();
+        s.engine.preparePlayback(*s.tm);
+        s.engine.preparePlayback(*s.tm);
+        expectEquals(tp->prepareCount, tc, "rebuild does not re-prepare track chain");
+        expectEquals(mp->prepareCount, mc, "rebuild does not re-prepare master chain");
+
+        // releaseResources 後 (prepared フラグが落ちる) は再 prepare される (従来動作の維持)
+        t->getPluginChain().releaseResources();
+        s.engine.preparePlayback(*s.tm);
+        expectEquals(tp->prepareCount, tc + 1, "released chain is re-prepared on rebuild");
     }
 
     // ── 録音レイテンシ補正: デバイス報告値 + 手動オフセットの合成 ──
