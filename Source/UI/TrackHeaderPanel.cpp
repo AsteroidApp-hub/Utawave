@@ -914,6 +914,12 @@ void TrackHeaderPanel::resized()
             headerViews[(size_t)i]->setBounds(indent, y, getWidth() - 1 - indent, h);
             y += h;
         }
+
+        // 「+ Add Track」はトラック一覧の下の空き領域用のボタン。行がボタン位置まで達したら
+        // 隠す。以前は「不透明な行が背後のボタンを覆う」前提で出しっぱなしだったが、フォルダ
+        // 配下の子行は 14px 字下げされるため左端の隙間からボタンの左端が覗いてしまう
+        // (Windows 実機報告 2026-07)。スクロールも setScrollY → resized() 経由でここを通る
+        addTrackBtn.setVisible(y <= addTrackBtn.getY());
     }
 
     updateInsToggleState();
