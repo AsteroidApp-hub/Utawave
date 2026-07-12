@@ -1079,29 +1079,45 @@ void AudioEngine::applyDelayLine(TrackDelay& d, juce::AudioBuffer<float>& buf, i
     const int bufLen = d.buf.getNumSamples();
     if (bufLen <= 0) return;
 
-    // Step 1: buf → 循環バッファへ書き込み（ラップ分割）
-    int wp = d.writePos;
-    int firstChunk  = juce::jmin(numSamples, bufLen - wp);
-    int secondChunk = numSamples - firstChunk;
-    for (int ch = 0; ch < juce::jmin(2, buf.getNumChannels()); ++ch)
-    {
-        d.buf.copyFrom(ch, wp, buf, ch, 0, firstChunk);
-        if (secondChunk > 0)
-            d.buf.copyFrom(ch, 0,  buf, ch, firstChunk, secondChunk);
-    }
+    // 一度に扱える最大チャンク = bufLen - delaySamples。通常は preparePlayback が
+    // 「最大遅延 + blockSize」で確保するので numSamples がそのまま収まるが、**再生中の
+    // デバイス再起動 (バッファサイズ変更) 直後**は旧 blockSize で確保したままの遅延ラインに
+    // 大きい numSamples が来ることがあり、旧実装 (一括コピー) はバッファ範囲外へ書いて
+    // ヒープを破壊していた (Release は境界チェック無し・実クラッシュ id46 の原因)。
+    // チャンク分割なら任意の numSamples を境界内で処理でき、遅延の意味も保たれる
+    // (numSamples <= maxChunk の通常時は 1 周で旧実装と完全に同じ動作)。
+    const int maxChunk = bufLen - d.delaySamples;
+    if (maxChunk <= 0) return;                  // 遅延がバッファ長以上 (再構築待ちの不整合) = 素通り
 
-    // Step 2: 循環バッファから delaySamples 遅れた位置を読み出して buf 上書き
-    int rp = (wp - d.delaySamples + bufLen) % bufLen;
-    firstChunk  = juce::jmin(numSamples, bufLen - rp);
-    secondChunk = numSamples - firstChunk;
-    for (int ch = 0; ch < juce::jmin(2, buf.getNumChannels()); ++ch)
+    for (int done = 0; done < numSamples; )
     {
-        buf.copyFrom(ch, 0,          d.buf, ch, rp, firstChunk);
-        if (secondChunk > 0)
-            buf.copyFrom(ch, firstChunk, d.buf, ch, 0, secondChunk);
-    }
+        const int n = juce::jmin(maxChunk, numSamples - done);
 
-    d.writePos = (wp + numSamples) % bufLen;
+        // Step 1: buf → 循環バッファへ書き込み（ラップ分割）
+        const int wp = d.writePos;
+        int firstChunk  = juce::jmin(n, bufLen - wp);
+        int secondChunk = n - firstChunk;
+        for (int ch = 0; ch < juce::jmin(2, buf.getNumChannels()); ++ch)
+        {
+            d.buf.copyFrom(ch, wp, buf, ch, done, firstChunk);
+            if (secondChunk > 0)
+                d.buf.copyFrom(ch, 0,  buf, ch, done + firstChunk, secondChunk);
+        }
+
+        // Step 2: 循環バッファから delaySamples 遅れた位置を読み出して buf 上書き
+        int rp = (wp - d.delaySamples + bufLen) % bufLen;
+        firstChunk  = juce::jmin(n, bufLen - rp);
+        secondChunk = n - firstChunk;
+        for (int ch = 0; ch < juce::jmin(2, buf.getNumChannels()); ++ch)
+        {
+            buf.copyFrom(ch, done,              d.buf, ch, rp, firstChunk);
+            if (secondChunk > 0)
+                buf.copyFrom(ch, done + firstChunk, d.buf, ch, 0, secondChunk);
+        }
+
+        d.writePos = (wp + n) % bufLen;
+        done += n;
+    }
 }
 
 void AudioEngine::clearPlayback()
@@ -1393,6 +1409,20 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
                     tr->getPluginChain().prepareToPlay(currentSampleRate, currentBufferSize);
         // 再生バッファ (reader / 内蔵シンセ / PDC) の再構築は次の play() で行わせる。
         playbackDirty.store(true);
+
+        // **再生中**のデバイス再起動 (Audio Settings のバッファサイズ/SR 変更等) は次の play() を
+        // 待たず今すぐ再構築する。スナップショットの trackBuffers/clipScratch/trackDelays は
+        // preparePlayback 時の blockSize で確保されており、旧サイズのまま大きい numSamples を
+        // 受けると PDC の遅延ライン (applyDelayLine) が範囲外書き込み = ヒープ破壊になっていた
+        // (実クラッシュ id46。applyDelayLine 側にもチャンクガードあり)。aboutToStart は
+        // コールバック再開前なので audio thread と競合しない。preparePlayback は message thread
+        // 専用 (readerPool) のため、外部要因のデバイス再起動が背景スレッドで来た場合 (Mac の
+        // デバイス構成変更等) は呼ばず dirty のまま残す (その間はチャンクガードが破壊を防ぎ、
+        // 次の play() / 編集で再構築される)。
+        if (playing.load() && lastTrackManager != nullptr
+            && juce::MessageManager::getInstanceWithoutCreating() != nullptr
+            && juce::MessageManager::getInstanceWithoutCreating()->isThisTheMessageThread())
+            preparePlayback(*lastTrackManager);
     }
 }
 

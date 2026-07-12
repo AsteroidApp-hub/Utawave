@@ -159,6 +159,61 @@ public:
     void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
 };
 
+// L サンプルの純遅延 + getLatencySamples()==L を報告するスタブ (PDC 遅延ラインの行使用)。
+// これを挿したトラックが「最遅」になり、プラグイン無しの他トラックに遅延ラインが付く。
+class LatencyFakePlugin : public juce::AudioPluginInstance
+{
+public:
+    explicit LatencyFakePlugin(int latencySamples)
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())),
+          lat(latencySamples)
+    { setLatencySamples(lat); }
+    const juce::String getName() const override            { return "Latency"; }
+    void prepareToPlay(double, int) override
+    {
+        dl.setSize(2, juce::jmax(1, lat), false, true, true);
+        dl.clear();
+        pos = 0;
+        setLatencySamples(lat);
+    }
+    void releaseResources() override                       {}
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer&) override
+    {
+        if (lat <= 0) return;
+        const int nCh = juce::jmin(2, b.getNumChannels());
+        for (int i = 0; i < b.getNumSamples(); ++i)
+        {
+            for (int ch = 0; ch < nCh; ++ch)
+            {
+                const float delayed = dl.getSample(ch, pos);
+                dl.setSample(ch, pos, b.getSample(ch, i));
+                b.setSample(ch, i, delayed);
+            }
+            pos = (pos + 1) % lat;
+        }
+    }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override           { return 0.0; }
+    bool acceptsMidi() const override                      { return false; }
+    bool producesMidi() const override                     { return false; }
+    juce::AudioProcessorEditor* createEditor() override    { return nullptr; }
+    bool hasEditor() const override                        { return false; }
+    int getNumPrograms() override                          { return 1; }
+    int getCurrentProgram() override                       { return 0; }
+    void setCurrentProgram(int) override                   {}
+    const juce::String getProgramName(int) override        { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override  {}
+    void setStateInformation(const void*, int) override    {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+private:
+    int lat { 0 };
+    juce::AudioBuffer<float> dl;
+    int pos { 0 };
+};
+
 // audioDeviceAboutToStart に渡す最小スタブ。SR / buffer size / チャンネル構成だけを返す。
 struct FakeAudioIODevice : public juce::AudioIODevice
 {
@@ -177,7 +232,7 @@ struct FakeAudioIODevice : public juce::AudioIODevice
     void stop() override                                      {}
     bool isPlaying() override                                 { return false; }
     juce::String getLastError() override                      { return {}; }
-    int getCurrentBufferSizeSamples() override                { return kBlock; }
+    int getCurrentBufferSizeSamples() override                { return blockSize; }
     double getCurrentSampleRate() override                    { return kSR; }
     int getCurrentBitDepth() override                         { return 32; }
     juce::BigInteger getActiveOutputChannels() const override { juce::BigInteger b; b.setRange(0, 2, true); return b; }
@@ -188,6 +243,8 @@ struct FakeAudioIODevice : public juce::AudioIODevice
     // 録音レイテンシ補正テスト用 (既定 0 = 他テストへの影響なし)
     int inLatency  { 0 };
     int outLatency { 0 };
+    // デバイス再起動 (バッファサイズ変更) テスト用 (既定 kBlock = 他テストへ影響なし)
+    int blockSize  { kBlock };
 };
 
 bool writeMonoConstWav(const juce::File& f, int numSamples, float value)
@@ -317,6 +374,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testMulticoreDeterminism();
         testEmptyRangeOfflineRender();
         testFolderBus();
+        testBufferSizeChangeWhilePlaying();
 
         tempDir.deleteRecursively();
     }
@@ -348,6 +406,61 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             engine.setPosition(0.0);
         }
     };
+
+    // 再生中のデバイス再起動 (Audio Settings のバッファサイズ変更) の回帰テスト (実クラッシュ id46)。
+    // 旧実装は aboutToStart が dirty を立てるだけで、再生中は次の play() までスナップショットを
+    // 再構築しなかった。旧 blockSize (512) で確保した PDC 遅延ラインへ大きい numSamples (2048) を
+    // 一括コピーすると範囲外書き込み = ヒープ破壊になり、後続の malloc で落ちていた
+    // (「再生しながらバッファ変更 → 音が壊れる → 戻すと落ちる」の実機再現手順と一致)。
+    // 修正 = (1) aboutToStart が再生中は即 preparePlayback (message thread のとき)、
+    //        (2) applyDelayLine のチャンク分割ガード (不整合期間も境界内で処理)。
+    void testBufferSizeChangeWhilePlaying()
+    {
+        beginTest("device restart while playing: PDC delay lines survive a buffer size change");
+
+        auto wav = tempDir.getChildFile("bufchg.wav");
+        expect(writeMonoConstWav(wav, (int)(kSR * 6.0), 0.5f), "write const wav");
+
+        Scene s;
+        auto* heavy = s.addConstTrack(wav, 6.0);   // レイテンシ持ち = 最遅トラック (自身の遅延ラインは 0)
+        s.addConstTrack(wav, 6.0);                 // プラグイン無し = こちらに 600 サンプルの遅延ラインが付く
+        heavy->getPluginChain().addPlugin(std::make_unique<LatencyFakePlugin>(600));
+        s.start();
+        s.engine.play();
+
+        // 512 ブロックで定常状態へ (PDC 整列後 0.5 + 0.5 = ~1.0)
+        float pL = 0, pR = 0;
+        runBlocks(s.engine, 10, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.03f, "steady mix before device restart");
+
+        // ── 再生したままデバイス再起動 (バッファサイズ 512 → 2048) ──
+        FakeAudioIODevice bigDevice;
+        bigDevice.blockSize = 2048;
+        s.engine.audioDeviceAboutToStart(&bigDevice);
+
+        // 新ブロックサイズで駆動しても壊れず、数ブロックで定常ミックスへ戻る
+        juce::AudioBuffer<float> out(2, 2048);
+        float peak = 0.0f;
+        bool finite = true;
+        for (int b = 0; b < 20; ++b)
+        {
+            out.clear();
+            float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+            s.engine.audioDeviceIOCallbackWithContext(nullptr, 0, chans, 2, 2048, {});
+            peak = out.getMagnitude(0, 0, 2048);
+            for (int i = 0; i < 2048 && finite; ++i)
+                if (!std::isfinite(out.getSample(0, i)) || std::abs(out.getSample(0, i)) > 4.0f)
+                    finite = false;
+        }
+        expect(finite, "output stays finite/bounded after the block-size change");
+        expectWithinAbsoluteError(peak, 1.0f, 0.05f, "steady mix restored at the new block size");
+
+        // ── バッファを元へ戻す (実機の再現手順ではここで落ちていた) ──
+        FakeAudioIODevice smallDevice;   // 既定 512
+        s.engine.audioDeviceAboutToStart(&smallDevice);
+        runBlocks(s.engine, 10, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.05f, "steady mix restored after changing back");
+    }
 
     void testFolderBus()
     {
