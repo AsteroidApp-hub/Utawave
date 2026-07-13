@@ -40,6 +40,9 @@ void MainComponent::showPreferences()
         juce::Label        mirrorDevLabel;
         juce::ComboBox     mirrorDevCombo;      // ミラーの出力先デバイス (1 = OS 既定、100+ = 実デバイス名)
         juce::StringArray  mirrorDevNames;      // combo の 100+i に対応するデバイス名
+        // 「配信」見出しの隣に出す、同梱ヘルプの配信セクション (#streaming) へのリンク。
+        // URL は showPreferences 側が findBundledHelpFile() で解決して設定する (無ければ非表示)
+        juce::HyperlinkButton streamGuideLink;
         juce::Label        recCompOffsetLabel;
         // ダブルクリックで数値を直接入力できるスライダー (追加の手動オフセット ms 用)
         struct TypeInSlider : juce::Slider
@@ -153,6 +156,12 @@ void MainComponent::showPreferences()
             setupLabel(loudnessLabel, tr(u8"ラウドネス自動調整ターゲット"), 13.0f, juce::Colours::white);
             setupLabel(exportLabel,   tr(u8"書き出し"), 13.0f, juce::Colours::white);
             setupLabel(streamLabel,   tr(u8"配信"), 13.0f, juce::Colours::white);
+            // 配信ソフト連携の手順書リンク (同梱ヘルプの #streaming)。URL は showPreferences 側で設定
+            streamGuideLink.setButtonText(tr(u8"(配信ソフト連携の手順を見る)"));
+            streamGuideLink.setFont(juce::FontOptions(13.0f), false, juce::Justification::centredLeft);
+            streamGuideLink.setColour(juce::HyperlinkButton::textColourId, juce::Colour(0xff7ab8e8));
+            addAndMakeVisible(streamGuideLink);
+            streamGuideLink.setVisible(false);   // URL が解決できた時だけ表示 (showPreferences 側)
             if (adsUi)
                 setupLabel(startupLabel,  tr(u8"起動画面"), 13.0f, juce::Colours::white);
 
@@ -600,7 +609,18 @@ void MainComponent::showPreferences()
             y = check(multicoreBtn, y);
 
             // ── 配信 ──
-            y += gSec; y = label(streamLabel, y);
+            // 見出しの隣 (括弧付き) に手順書リンクを置く。ラベルは実テキスト幅に縮めて
+            // リンクをすぐ右へ (HyperlinkButton はバウンズ全体がヒット領域のため幅を文字に合わせる)
+            y += gSec;
+            {
+                const int lw = juce::GlyphArrangement::getStringWidthInt(
+                                   streamLabel.getFont(), streamLabel.getText());
+                streamLabel.setBounds(mx, y, lw + 6, 22);
+                streamGuideLink.changeWidthToFitText();
+                streamGuideLink.setTopLeftPosition(mx + lw + 12, y);
+                streamGuideLink.setSize(streamGuideLink.getWidth(), 22);
+                y += 22 + gLbl;
+            }
             y = check(mirrorBtn, y);
             y = label(mirrorDevLabel, y);
             y = combo(mirrorDevCombo, y);
@@ -910,6 +930,13 @@ void MainComponent::showPreferences()
     };
     // 配信ミラー出力 (アプリ全体設定)。即時保存 + ミラーデバイスの開始/停止を即反映。
     {
+        // 「配信」見出し隣のリンク: 同梱ヘルプの配信セクション (#streaming) を既定ブラウザで開く。
+        // 現在言語のヘルプへ言語別に飛ぶ (findBundledHelpFile が解決)。無い環境では非表示のまま
+        if (auto helpFile = findBundledHelpFile(); helpFile.existsAsFile())
+        {
+            dlg->streamGuideLink.setURL(juce::URL(juce::URL(helpFile).toString(false) + "#streaming"));
+            dlg->streamGuideLink.setVisible(true);
+        }
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
         dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
         int selId = 1;   // 既定の出力デバイス

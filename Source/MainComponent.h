@@ -154,6 +154,9 @@ private:
     void showAboutDialog();
     void showShortcutsDialog();
     void showDocumentation();      // 同梱の使い方ドキュメント (HTML) を既定ブラウザで開く
+    // 現在言語の同梱ヘルプ HTML を探す (無ければ ja へ、それも無ければ存在しない File)。
+    // showDocumentation と環境設定の「配信ソフト連携の手順」リンクが共用する
+    juce::File findBundledHelpFile() const;
     void addPluginToTrack(int trackIdx, int slotIdx = -1);
     void openPluginEditor(int trackIdx, int slotIdx);
     void closePluginEditorFor(juce::AudioPluginInstance* plugin);

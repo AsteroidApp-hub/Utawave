@@ -154,9 +154,8 @@ void MainComponent::showAboutDialog()
 // ─────────────────────────────────────────────────────────────────────────
 //  使い方ドキュメント (同梱 HTML を既定ブラウザで開く)
 // ─────────────────────────────────────────────────────────────────────────
-void MainComponent::showDocumentation()
+juce::File MainComponent::findBundledHelpFile() const
 {
-
     // 同梱した help.html を探す。macOS は .app/Contents/Resources、Windows は実行ファイル隣。
     // (CMake で MACOSX_PACKAGE_LOCATION / POST_BUILD コピーにより配置される)
     const auto appFile = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
@@ -194,12 +193,19 @@ void MainComponent::showDocumentation()
         {
             auto c = d.getChildFile(nm);
             if (c.existsAsFile())
-            {
-                // 既定の HTML ハンドラ (ブラウザ) で開く
-                c.startAsProcess();
-                return;
-            }
+                return c;
         }
+    return {};
+}
+
+void MainComponent::showDocumentation()
+{
+    if (auto f = findBundledHelpFile(); f.existsAsFile())
+    {
+        // 既定の HTML ハンドラ (ブラウザ) で開く
+        f.startAsProcess();
+        return;
+    }
 
     juce::AlertWindow::showAsync(juce::MessageBoxOptions()
         .withIconType(juce::MessageBoxIconType::WarningIcon)
