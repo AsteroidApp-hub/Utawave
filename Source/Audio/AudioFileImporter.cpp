@@ -46,6 +46,7 @@ AudioFileImporter::importFile(const juce::File& src, double projectSampleRate, i
     // (SR一致時は呼び出し側が Audio/ へ移してから削除する = リサンプルキャッシュと同じ扱い)。
     juce::File working = src;
     bool didTranscode = false;
+    std::function<bool(double)> resampleProgress = onProgress;
     if (needsHighBitTranscode(src))
     {
         auto cache = getCacheFolder();
@@ -57,6 +58,49 @@ AudioFileImporter::importFile(const juce::File& src, double projectSampleRate, i
         {
             working.deleteFile();
             r.errorMessage = terr.isNotEmpty() ? terr : juce::String("Unsupported 64-bit WAV");
+            return r;
+        }
+        didTranscode = true;
+    }
+    // 圧縮フォーマット (MP3/M4A 等) は SR 一致でも 32bit float WAV へデコード変換する。
+    // OS デコーダのシークが sample-accurate でないため、圧縮のまま置くと再生開始位置ごとに
+    // 数十 ms 単位でズレて聞こえる (詳細はヘッダのコメント)。64bit 変換と同じく変換物を
+    // working とし、SR 一致でも wasResampled=true (Audio/ へ移して一時ファイルを消す扱い)。
+    else if (needsDecodeTranscode(src))
+    {
+        // 進捗の割り当てを先に決めるため SR だけ覗く (デコーダ生成はヘッダ解析のみで軽い)。
+        // リサンプルが続くならデコード 0..0.5 / リサンプル 0.5..1、続かないならデコードが 0..1。
+        bool willResample = false;
+        {
+            std::unique_ptr<juce::AudioFormatReader> probe(formatManager.createReaderFor(src));
+            if (probe == nullptr) { r.errorMessage = "Unsupported format"; return r; }
+            willResample = std::abs(probe->sampleRate - projectSampleRate) >= 0.01;
+        }
+        std::function<bool(double)> decodeProgress;
+        if (onProgress)
+        {
+            if (willResample)
+            {
+                decodeProgress   = [&onProgress](double p) { return onProgress(p * 0.5); };
+                resampleProgress = [&onProgress](double p) { return onProgress(0.5 + p * 0.5); };
+            }
+            else
+                decodeProgress = onProgress;
+        }
+        auto cache = getCacheFolder();
+        // 変換後は WAV なので拡張子だけ .wav に差し替え、元の名前 (stem) は保つ
+        // (Audio/ へは <元名>.wav でコピーされ、クリップ名も元名由来になる)。
+        working = cache.getChildFile(juce::File::createLegalFileName(
+                            src.getFileNameWithoutExtension() + ".wav"))
+                       .getNonexistentSibling();
+        juce::String terr;
+        bool tcancelled = false;
+        if (!transcodeToWavFloat(src, working, terr, tcancelled, decodeProgress))
+        {
+            working.deleteFile();
+            r.cancelled = tcancelled;
+            if (!tcancelled)
+                r.errorMessage = terr.isNotEmpty() ? terr : juce::String("Unsupported format");
             return r;
         }
         didTranscode = true;
@@ -96,7 +140,7 @@ AudioFileImporter::importFile(const juce::File& src, double projectSampleRate, i
 
     juce::String err;
     if (!resampleToFile(working, dst, reader->sampleRate, projectSampleRate,
-                        (int)reader->numChannels, *reader, outputBits, err, onProgress))
+                        (int)reader->numChannels, *reader, outputBits, err, resampleProgress))
     {
         r.errorMessage = err;
         r.cancelled    = (err == "cancelled");
@@ -407,6 +451,79 @@ bool AudioFileImporter::needsHighBitTranscode(const juce::File& src)
 {
     const auto info = peekWavFormat(src);
     return info.ok && info.bits > 32;
+}
+
+//==============================================================================
+// 圧縮フォーマットのデコード変換: WAV/AIFF 以外を逐次デコードして 32bit float WAV へ
+//==============================================================================
+bool AudioFileImporter::needsDecodeTranscode(const juce::File& src)
+{
+    // WAV / AIFF は非圧縮でシークが sample-accurate なのでそのまま扱える。
+    // それ以外 (MP3 / M4A / AAC / WMA / Ogg / FLAC / CAF 等) はすべて対象にする除外方式
+    // (許可リストだと OS デコーダが読める形式が増えた時に取りこぼす)。
+    return ! src.hasFileExtension("wav;aif;aiff");
+}
+
+bool AudioFileImporter::transcodeToWavFloat(const juce::File& src, const juce::File& dst,
+                                            juce::String& errorOut, bool& cancelledOut,
+                                            const std::function<bool(double)>& onProgress)
+{
+    cancelledOut = false;
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(src));
+    if (reader == nullptr)             { errorOut = "Unsupported format";  return false; }
+    const int ch = (int) reader->numChannels;
+    if (ch < 1 || reader->lengthInSamples <= 0) { errorOut = "Empty audio file"; return false; }
+
+    juce::WavAudioFormat wav;
+    auto outStreamUP = std::make_unique<juce::FileOutputStream>(dst);
+    if (!outStreamUP->openedOk()) { errorOut = "Cannot open cache file"; return false; }
+    outStreamUP->setPosition(0);
+    outStreamUP->truncate();
+
+    using SF = juce::AudioFormatWriterOptions::SampleFormat;
+    auto opts = juce::AudioFormatWriterOptions{}
+                    .withSampleRate(reader->sampleRate)
+                    .withNumChannels(ch)
+                    .withBitsPerSample(32)
+                    .withSampleFormat(SF::floatingPoint);
+
+    std::unique_ptr<juce::OutputStream> outStream = std::move(outStreamUP);
+    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(outStream, opts));
+    if (!writer) { errorOut = "Cannot create WAV writer"; return false; }
+
+    // 先頭から単調増加の位置でのみ read する (後方シーク無し)。圧縮デコーダは逐次読みなら
+    // 決定論なので、シーク精度に依存しない正確なサンプル列が得られる。
+    const int blockFrames = 4096;
+    juce::AudioBuffer<float> buf(ch, blockFrames);
+    const juce::int64 total = reader->lengthInSamples;
+    juce::int64 pos = 0;
+    while (pos < total)
+    {
+        if (onProgress && ! onProgress((double) pos / (double) total))
+        {
+            cancelledOut = true;
+            writer.reset();     // ストリームを閉じてから
+            dst.deleteFile();   // 部分ファイルを残さない
+            return false;
+        }
+
+        const int n = (int) juce::jmin((juce::int64) blockFrames, total - pos);
+        buf.clear();
+        if (! reader->read(&buf, 0, n, pos, true, true))
+            break;   // 尺の報告が過大なデコーダ対策: 読めた分だけ書いて終了
+
+        if (! writer->writeFromAudioSampleBuffer(buf, 0, n))
+        {
+            errorOut = "Failed to write samples (disk full?)";
+            writer.reset();
+            dst.deleteFile();
+            return false;
+        }
+        pos += n;
+    }
+
+    writer->flush();
+    return true;
 }
 
 bool AudioFileImporter::transcodeHighBitWavToFloat(const juce::File& src, const juce::File& dst,

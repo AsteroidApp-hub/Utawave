@@ -23,10 +23,12 @@ public:
     };
 
     // 入力ファイルをプロジェクトSRと比較し、必要なら r8brain でリサンプルしたキャッシュを生成
-    // 元ファイルは変更しない。SR一致時は元ファイルへの参照のみ返す。
+    // 元ファイルは変更しない。SR一致時は元ファイルへの参照のみ返す (WAV/AIFF のみ。
+    // 圧縮フォーマットは SR 一致でもデコード変換した WAV キャッシュを返す)。
     // outputBits: 32 = 32bit float（既定・ディザ不要）、24 = 24bit PCM + TPDFディザ
-    // onProgress: リサンプル進捗 (0..1) を報告する任意コールバック。false を返すと中断する
-    //             (success=false, cancelled=true で返る)。SR一致 (リサンプル無し) では呼ばれない。
+    // onProgress: デコード変換 / リサンプルの進捗 (0..1) を報告する任意コールバック。
+    //             false を返すと中断する (success=false, cancelled=true で返る)。
+    //             WAV/AIFF の SR一致 (変換なし) では呼ばれない。
     Result importFile(const juce::File& src, double projectSampleRate, int outputBits = 32,
                       std::function<bool(double)> onProgress = {});
 
@@ -71,6 +73,25 @@ public:
     // SR / チャンネル数は保持し、サンプル値はそのまま (クランプしない)。
     static bool transcodeHighBitWavToFloat(const juce::File& src, const juce::File& dst,
                                            juce::String& errorOut);
+
+    // ── 圧縮フォーマット (MP3 / M4A 等) のデコード変換 ──
+    // 圧縮ファイルを元のままプロジェクトに置くと、再生時に OS デコーダ (macOS: CoreAudio /
+    // Windows: Media Foundation) がその場デコードするが、これらのシークは sample-accurate で
+    // なく、再生開始位置ごとに数十 ms 単位でズレて聞こえる (「オケが再生のたびに滑る」報告の
+    // 原因)。さらにディスクストリーミングは先読み (逐次読み) とフォールバック (シーク読み) の
+    // 2 reader 構成で、圧縮フォーマットでは両者のデコード結果が食い違いうる。
+    // そこで取り込み時に WAV/AIFF 以外を先頭から逐次デコードして 32bit float WAV へ固める。
+
+    // この拡張子はデコード変換が必要か (WAV / AIFF 以外はすべて true の除外方式。
+    // 将来 OS が読める形式が増えても自動で対象になる)。
+    static bool needsDecodeTranscode(const juce::File& src);
+
+    // src を先頭から逐次デコードして 32bit float WAV (dst) へ変換する (後方シークしない =
+    // デコーダのシーク精度に依存せず決定論)。SR / チャンネル数は保持。
+    // onProgress は 0..1 を報告し false で中断 (cancelledOut=true・dst は削除)。
+    bool transcodeToWavFloat(const juce::File& src, const juce::File& dst,
+                             juce::String& errorOut, bool& cancelledOut,
+                             const std::function<bool(double)>& onProgress = {});
 
 private:
     bool resampleToFile(const juce::File& src, const juce::File& dst,

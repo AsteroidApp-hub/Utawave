@@ -12,6 +12,11 @@
 //   importFile:
 //     ・SR 一致は元ファイルへ短絡 (コピーなし) / 44.1k→48k は wasResampled=true・尺/SR/ch を保つ
 //     ・欠損ファイルは success=false
+//   圧縮フォーマットのデコード変換 (needsDecodeTranscode / transcodeToWavFloat):
+//     ・MP3/FLAC 等は SR 一致でも 32bit float WAV へ変換して返す (wasResampled=true)。
+//       OS デコーダのシークが sample-accurate でなく再生ズレになるため (「オケが滑る」報告)
+//     ・FLAC はロスレスなのでサンプル一致 / MP3 は周波数・振幅・尺で検証 (lossy)
+//     ・デコード中のキャンセル / デコード→リサンプル連結の進捗単調性
 //
 // 注意: iXML/ASWG のメタデータキーは JUCE では "aswg" プレフィックスではなく実タグ名
 // ("tempo" 等) で入る (juce_WavAudioFormat.cpp の IXMLChunk)。本テストはその実キーが
@@ -22,6 +27,7 @@
 #include <cmath>
 #include <cstring>
 #include "../Source/Audio/AudioFileImporter.h"
+#include "../Source/Export/Mp3EncoderWriter.h"
 
 namespace
 {
@@ -99,6 +105,51 @@ public:
         return f;
     }
 
+    // 440Hz 正弦波の MP3 を内蔵 LAME で書く (モノ・振幅 0.5)。OS 非依存でテストソースを作れる。
+    juce::File writeMp3(const juce::String& name, double sr, double secs)
+    {
+        auto f = dir.getChildFile(name);
+        f.deleteFile();
+        const int n = (int) (sr * secs);
+        juce::AudioBuffer<float> buf(1, n);
+        for (int i = 0; i < n; ++i)
+            buf.setSample(0, i,
+                (float) (0.5 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / sr)));
+        juce::String err;
+        if (! Mp3EncoderWriter::encodeBuffer(buf, sr, 192, f, &err)) return {};
+        return f;
+    }
+
+    // 440Hz 正弦波の FLAC を書く (JUCE 内蔵 writer・24bit・ロスレスなのでサンプル検証に使う)。
+    juce::File writeFlac(const juce::String& name, double sr, int ch, double secs)
+    {
+        auto f = dir.getChildFile(name);
+        f.deleteFile();
+        auto* os = f.createOutputStream().release();
+        if (os == nullptr) return {};
+        juce::FlacAudioFormat flac;
+        std::unique_ptr<juce::AudioFormatWriter> w(
+            flac.createWriterFor(os, sr, (unsigned int) ch, 24, {}, 0));
+        if (w == nullptr) { delete os; return {}; }
+        const int n = (int) (sr * secs);
+        juce::AudioBuffer<float> buf(ch, n);
+        for (int c = 0; c < ch; ++c)
+            for (int i = 0; i < n; ++i)
+                buf.setSample(c, i,
+                    (float) (0.3 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / sr)));
+        w->writeFromAudioSampleBuffer(buf, 0, n);
+        return f;
+    }
+
+    // 正方向ゼロ交差から支配的周波数を推定 (窓の開始位相に依らない)
+    static double estimateFreq(const juce::AudioBuffer<float>& s, int start, int count, double sr)
+    {
+        int crossings = 0;
+        for (int i = start + 1; i < start + count; ++i)
+            if (s.getSample(0, i - 1) <= 0.0f && s.getSample(0, i) > 0.0f) ++crossings;
+        return (double) crossings / ((double) count / sr);
+    }
+
     struct Loaded
     {
         bool ok { false };
@@ -141,6 +192,8 @@ public:
         testImportProgressAndCancel(fmt);
         testImportMissingFile(fmt);
         testImport64BitWav(fmt);
+        testDecodeTranscodeMp3(fmt);
+        testDecodeTranscodeFlacAndResampleChain(fmt);
 
         dir.deleteRecursively();
     }
@@ -411,6 +464,121 @@ public:
         auto ir2 = readBack(fmt, r2.file);
         expect(ir2.ok && std::abs(ir2.sampleRate - 44100.0) < 0.01,
                "64-bit resampled output is 44100 Hz");
+    }
+
+    // ── 圧縮フォーマット (MP3): SR 一致でも 32f WAV へデコード変換して取り込む ──
+    // 圧縮ファイルを元のまま置くと OS デコーダのシークが sample-accurate でなく再生ズレになる
+    // (「オケが再生のたびに滑る」報告の回帰テスト)。MP3 は lossy なので内容は周波数/振幅/尺で検証。
+    void testDecodeTranscodeMp3(juce::AudioFormatManager& fmt)
+    {
+        beginTest("compressed import: MP3 at matching SR is decoded to a 32f WAV cache file");
+
+        // needsDecodeTranscode の判定 (拡張子ベースの除外方式)
+        expect(AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.mp3")),  "mp3 needs decode");
+        expect(AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.m4a")),  "m4a needs decode");
+        expect(AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.flac")), "flac needs decode");
+        expect(!AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.wav")),  "wav does not");
+        expect(!AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.aiff")), "aiff does not");
+        expect(!AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.aif")),  "aif does not");
+
+        auto mp3 = writeMp3("sine44.mp3", 44100.0, 1.0);
+        expect(mp3.existsAsFile(), "mp3 source written (built-in encoder)");
+
+        auto cache = dir.getChildFile("cache_mp3");
+        cache.deleteRecursively(); cache.createDirectory();
+        AudioFileImporter importer(fmt);
+        importer.getCacheFolderCb = [cache] { return cache; };
+
+        // SR 一致でも元ファイルへ短絡せず、デコード変換した WAV を wasResampled=true で返す
+        auto r = importer.importFile(mp3, 44100.0);
+        expect(r.success, "mp3 import succeeds at matching SR");
+        expect(r.wasResampled, "decoded mp3 is treated like a cache file (wasResampled=true)");
+        expect(r.file != mp3, "returns the decoded file, not the mp3 source");
+        expect(r.file.hasFileExtension("wav"), "decoded file is a .wav");
+        expect(r.file.getParentDirectory() == cache, "decoded file lives in the cache folder");
+
+        auto out = readBack(fmt, r.file);
+        expect(out.ok, "decoded file readable");
+        expect(out.bits == 32 && out.isFloat, "decoded file is 32-bit float");
+        expect(out.channels == 1, "channel count preserved");
+        expect(std::abs(out.sampleRate - 44100.0) < 0.01, "sample rate preserved (44100)");
+        // MP3 はエンコーダ遅延/パディングで数百〜千サンプル前後する。尺はゆるく検証
+        expect(std::abs((double) out.length - 44100.0) < 3000.0,
+               "decoded length is ~1.0s (allowing codec delay/padding)");
+
+        // 内容: 中央 0.5 秒の支配的周波数が ~440Hz・振幅が ~0.5 (lossy 許容)
+        if (out.ok && out.length > 30000)
+        {
+            const int start = (int) (out.length / 4);
+            const int count = juce::jmin((int) out.length / 2, 22050);
+            const double freq = estimateFreq(out.samples, start, count, out.sampleRate);
+            expect(std::abs(freq - 440.0) < 6.0, "decoded content is a ~440Hz tone");
+            const float mag = out.samples.getMagnitude(0, start, count);
+            expect(mag > 0.35f && mag < 0.65f, "decoded amplitude is ~0.5 (lossy tolerance)");
+        }
+
+        // デコード中のキャンセル: success=false / cancelled=true / 新規キャッシュファイル無し
+        const auto before = cache.getNumberOfChildFiles(juce::File::findFiles);
+        auto r2 = importer.importFile(mp3, 44100.0, 32, [](double) { return false; });
+        expect(!r2.success && r2.cancelled, "cancelling during decode reports cancelled=true");
+        expect(cache.getNumberOfChildFiles(juce::File::findFiles) == before,
+               "cancelled decode leaves no new cache file");
+    }
+
+    // ── 圧縮フォーマット (FLAC = ロスレス) のサンプル一致 + MP3 のデコード→リサンプル連結 ──
+    void testDecodeTranscodeFlacAndResampleChain(juce::AudioFormatManager& fmt)
+    {
+        beginTest("compressed import: FLAC decodes sample-accurately; decode chains into resample");
+
+        auto cache = dir.getChildFile("cache_flac");
+        cache.deleteRecursively(); cache.createDirectory();
+        AudioFileImporter importer(fmt);
+        importer.getCacheFolderCb = [cache] { return cache; };
+
+        // FLAC はロスレスなので、デコード変換後のサンプルが元の正弦波と一致することを厳密に検証
+        auto flac = writeFlac("sine44.flac", 44100.0, 1, 0.5);
+        expect(flac.existsAsFile(), "flac source written");
+        auto r = importer.importFile(flac, 44100.0);
+        expect(r.success && r.wasResampled, "flac import decodes at matching SR");
+        expect(r.file.hasFileExtension("wav"), "flac decoded to .wav");
+
+        auto out = readBack(fmt, r.file);
+        expect(out.ok && out.bits == 32 && out.isFloat, "flac decoded file is 32f");
+        const int expN = (int) (44100.0 * 0.5);
+        expect((int) out.length == expN, "flac decoded length is exact (lossless)");
+        bool samplesMatch = ((int) out.length == expN);
+        for (int i = 0; i < expN && samplesMatch; ++i)
+        {
+            const double ref = 0.3 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / 44100.0);
+            if (std::abs(out.samples.getSample(0, i) - (float) ref) > 1.0e-4) samplesMatch = false;
+        }
+        expect(samplesMatch, "flac decoded samples match the source sine (24-bit tolerance)");
+
+        // MP3 44.1k -> 48k プロジェクト: デコード変換とリサンプルが連結して動き、進捗も単調
+        auto mp3 = writeMp3("sine44b.mp3", 44100.0, 1.0);
+        std::vector<double> seen;
+        auto r2 = importer.importFile(mp3, 48000.0, 32,
+                                      [&seen](double p) { seen.push_back(p); return true; });
+        expect(r2.success && r2.wasResampled, "mp3 decode + resample succeeds");
+        auto out2 = readBack(fmt, r2.file);
+        expect(out2.ok && std::abs(out2.sampleRate - 48000.0) < 0.01,
+               "mp3 resampled output is 48000 Hz");
+        expect(std::abs((double) out2.length - 48000.0) < 3300.0,
+               "mp3 resampled output is ~1.0s");
+        if (out2.ok && out2.length > 30000)
+        {
+            const double freq = estimateFreq(out2.samples, (int) (out2.length / 4),
+                                             juce::jmin((int) out2.length / 2, 24000), out2.sampleRate);
+            expect(std::abs(freq - 440.0) < 6.0, "mp3 resampled content is still a ~440Hz tone");
+        }
+        expect(!seen.empty(), "progress reported across decode + resample");
+        bool inRange = true, monotonic = true;
+        for (size_t i = 0; i < seen.size(); ++i)
+        {
+            if (seen[i] < 0.0 || seen[i] > 1.0) inRange = false;
+            if (i > 0 && seen[i] < seen[i - 1] - 1.0e-9) monotonic = false;
+        }
+        expect(inRange && monotonic, "combined progress stays in [0,1] and is non-decreasing");
     }
 
     // ── importFile: 欠損ファイルは success=false ──
