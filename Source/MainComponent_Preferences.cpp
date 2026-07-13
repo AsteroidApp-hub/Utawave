@@ -41,7 +41,8 @@ void MainComponent::showPreferences()
         juce::ComboBox     mirrorDevCombo;      // ミラーの出力先デバイス (1 = OS 既定、100+ = 実デバイス名)
         juce::StringArray  mirrorDevNames;      // combo の 100+i に対応するデバイス名
         // 「配信」見出しの隣に出す、同梱ヘルプの配信セクション (#streaming) へのリンク。
-        // URL は showPreferences 側が findBundledHelpFile() で解決して設定する (無ければ非表示)
+        // URL は設定しない (HyperlinkButton の URL 起動は file:// のフラグメントを保持できない
+        // ため見た目だけ使い、遷移は onClick → MainComponent::openBundledHelp("streaming"))
         juce::HyperlinkButton streamGuideLink;
         juce::Label        recCompOffsetLabel;
         // ダブルクリックで数値を直接入力できるスライダー (追加の手動オフセット ms 用)
@@ -931,10 +932,11 @@ void MainComponent::showPreferences()
     // 配信ミラー出力 (アプリ全体設定)。即時保存 + ミラーデバイスの開始/停止を即反映。
     {
         // 「配信」見出し隣のリンク: 同梱ヘルプの配信セクション (#streaming) を既定ブラウザで開く。
-        // 現在言語のヘルプへ言語別に飛ぶ (findBundledHelpFile が解決)。無い環境では非表示のまま
-        if (auto helpFile = findBundledHelpFile(); helpFile.existsAsFile())
+        // 現在言語のヘルプへ言語別に飛ぶ。ヘルプが無い環境では非表示のまま。
+        // setURL は使わない (URL 起動経路はフラグメントが落ちる・openBundledHelp のコメント参照)
+        if (findBundledHelpFile().existsAsFile())
         {
-            dlg->streamGuideLink.setURL(juce::URL(juce::URL(helpFile).toString(false) + "#streaming"));
+            dlg->streamGuideLink.onClick = [this] { openBundledHelp("streaming"); };
             dlg->streamGuideLink.setVisible(true);
         }
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);

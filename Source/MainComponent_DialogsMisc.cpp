@@ -200,18 +200,46 @@ juce::File MainComponent::findBundledHelpFile() const
 
 void MainComponent::showDocumentation()
 {
-    if (auto f = findBundledHelpFile(); f.existsAsFile())
+    openBundledHelp({});
+}
+
+void MainComponent::openBundledHelp(const juce::String& anchor)
+{
+    const auto f = findBundledHelpFile();
+    if (! f.existsAsFile())
     {
-        // 既定の HTML ハンドラ (ブラウザ) で開く
-        f.startAsProcess();
+        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::WarningIcon)
+            .withTitle(tr(u8"使い方ドキュメント"))
+            .withMessage(tr(u8"ドキュメントファイル (help.html) が見つかりませんでした。"))
+            .withButton("OK"), nullptr);
         return;
     }
 
-    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::WarningIcon)
-        .withTitle(tr(u8"使い方ドキュメント"))
-        .withMessage(tr(u8"ドキュメントファイル (help.html) が見つかりませんでした。"))
-        .withButton("OK"), nullptr);
+    if (anchor.isEmpty())
+    {
+        f.startAsProcess();   // 既定の HTML ハンドラ (ブラウザ) で開く
+        return;
+    }
+
+    // #anchor 付きで開く。file:// URL を OS のオープン機構へ直接渡すとフラグメントが
+    // 落ちる環境がある (macOS の LaunchServices / Windows の ShellExecute とも、URL でなく
+    // ファイルとしてブラウザへ渡され # 以降が失われる)。そこで meta refresh の踏み台 HTML を
+    // temp に書いてそれを開き、**ブラウザ自身に** #anchor 付きの遷移をさせる (ブラウザ内の
+    // ナビゲーションならフラグメントは確実に効く)。万一 refresh がブロックされる環境向けに
+    // 手動リンクも本文に置く
+    const juce::String target = juce::URL(f).toString(false) + "#" + anchor;
+    auto hop = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                   .getChildFile("utawave-help-goto.html");
+    const bool ok = hop.replaceWithText(
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta http-equiv=\"refresh\" content=\"0;url=" + target + "\">"
+        "<title>Utawave Help</title></head>"
+        "<body style=\"font-family:sans-serif;background:#222;color:#ddd\">"
+        "<p><a style=\"color:#7ab8e8\" href=\"" + target + "\">Open the guide</a></p>"
+        "</body></html>");
+    if (ok) hop.startAsProcess();
+    else    f.startAsProcess();   // temp に書けない環境はアンカー無しで開く (最悪でも本文には届く)
 }
 
 // ─────────────────────────────────────────────────────────────────────────

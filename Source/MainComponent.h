@@ -157,6 +157,10 @@ private:
     // 現在言語の同梱ヘルプ HTML を探す (無ければ ja へ、それも無ければ存在しない File)。
     // showDocumentation と環境設定の「配信ソフト連携の手順」リンクが共用する
     juce::File findBundledHelpFile() const;
+    // 同梱ヘルプを anchor (#セクション) 付きで既定ブラウザで開く。anchor 空はヘルプ先頭。
+    // OS のオープン機構 (LaunchServices/ShellExecute) は file:// URL のフラグメントを保持しない
+    // ことがあるため、meta refresh の踏み台 HTML を temp に書いてブラウザ自身に遷移させる
+    void openBundledHelp(const juce::String& anchor);
     void addPluginToTrack(int trackIdx, int slotIdx = -1);
     void openPluginEditor(int trackIdx, int slotIdx);
     void closePluginEditorFor(juce::AudioPluginInstance* plugin);
