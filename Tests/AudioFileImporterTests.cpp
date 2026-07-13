@@ -31,6 +31,40 @@
 
 namespace
 {
+// 常に read 失敗を返す AudioFormatReader (破損 / 途中でエラーを返す OS デコーダの模擬)。
+// createReaderFor は成功し lengthInSamples>0 を報告するが read が false = 1 サンプルも
+// デコードできない状況を決定論的に作る (transcodeToWavFloat の pos<=0 ガードの回帰テスト。
+// 実ファイルの破損はコーデック依存で挙動が不安定なため、専用フォーマットで再現する)。
+struct FailingAudioReader : public juce::AudioFormatReader
+{
+    FailingAudioReader (juce::InputStream* in) : juce::AudioFormatReader (in, "Failing")
+    {
+        sampleRate            = 48000.0;
+        bitsPerSample         = 16;
+        lengthInSamples       = 48000;   // 1 秒あると偽って報告する (>0 でガードを通す)
+        numChannels           = 1;
+        usesFloatingPointData = false;
+    }
+    bool readSamples (int* const*, int, int, juce::int64, int) override { return false; }
+};
+
+struct FailingAudioFormat : public juce::AudioFormat
+{
+    FailingAudioFormat() : juce::AudioFormat ("Failing", ".fail") {}
+    juce::Array<int> getPossibleSampleRates() override { return {}; }
+    juce::Array<int> getPossibleBitDepths()  override { return {}; }
+    bool canDoStereo() override { return false; }
+    bool canDoMono()   override { return true; }
+    juce::AudioFormatReader* createReaderFor (juce::InputStream* sourceStream,
+                                              bool /*deleteStreamIfOpeningFails*/) override
+    {
+        return new FailingAudioReader (sourceStream);   // reader が stream を所有
+    }
+    std::unique_ptr<juce::AudioFormatWriter> createWriterFor (
+        std::unique_ptr<juce::OutputStream>&, const juce::AudioFormatWriterOptions&) override
+    { return {}; }
+};
+
 class AudioFileImporterTests : public juce::UnitTest
 {
 public:
@@ -194,6 +228,7 @@ public:
         testImport64BitWav(fmt);
         testDecodeTranscodeMp3(fmt);
         testDecodeTranscodeFlacAndResampleChain(fmt);
+        testDecodeTranscodeErrorPaths(fmt);
 
         dir.deleteRecursively();
     }
@@ -579,6 +614,73 @@ public:
             if (i > 0 && seen[i] < seen[i - 1] - 1.0e-9) monotonic = false;
         }
         expect(inRange && monotonic, "combined progress stays in [0,1] and is non-decreasing");
+    }
+
+    // ── 圧縮音源の異常系: 読めない / 空 / デコード 0 サンプルは失敗して後始末する ──
+    // 破損音源が無音の空クリップとして無警告で取り込まれないことの回帰テスト
+    // (今回の pos<=0 ガードを含む)。エラー時は dst / Cache にゴミを残さない。
+    void testDecodeTranscodeErrorPaths(juce::AudioFormatManager& fmt)
+    {
+        beginTest("compressed import: unreadable / empty / undecodable sources fail cleanly with no leftover files");
+
+        auto cache = dir.getChildFile("cache_err");
+        cache.deleteRecursively(); cache.createDirectory();
+        AudioFileImporter importer(fmt);
+        importer.getCacheFolderCb = [cache] { return cache; };
+
+        // (1) importFile: 中身が不正な .mp3 (デコーダが開けない) → success=false / cancelled=false /
+        //     エラー文言あり / Cache にゴミを残さない (compressed 分岐の probe reader が null の経路)
+        auto bogus = dir.getChildFile("bogus.mp3");
+        bogus.replaceWithText("this is definitely not a valid mp3 stream");
+        const auto before = cache.getNumberOfChildFiles(juce::File::findFiles);
+        auto r = importer.importFile(bogus, 48000.0);
+        expect(!r.success,               "unreadable mp3 import fails");
+        expect(!r.cancelled,             "unreadable mp3 is a failure, not a cancel");
+        expect(r.errorMessage.isNotEmpty(), "error message set for unreadable mp3");
+        expect(cache.getNumberOfChildFiles(juce::File::findFiles) == before,
+               "unreadable mp3 leaves no cache file");
+
+        // (2) transcodeToWavFloat 直呼び: 読めないソース → false / cancelled は false へ上書き / dst 未生成
+        auto dst1 = dir.getChildFile("err_unreadable.wav");
+        juce::String terr; bool tcancel = true;   // 事前に true にして false 上書きを確認
+        expect(!importer.transcodeToWavFloat(bogus, dst1, terr, tcancel, {}),
+               "transcodeToWavFloat fails on an unreadable source");
+        expect(!tcancel,             "unreadable source is not a cancel (cancelledOut=false)");
+        expect(terr.isNotEmpty(),    "error set for unreadable source");
+        expect(!dst1.existsAsFile(), "no dst written for unreadable source");
+
+        // (3) transcodeToWavFloat 直呼び: 0 サンプルのソース → false ("Empty audio file" ガード) / dst 未生成
+        auto empty = writeWavInt("empty0.wav", 48000.0, 1, 24, 0.0, {});
+        expect(empty.existsAsFile(), "zero-length source written");
+        auto dst2 = dir.getChildFile("err_empty.wav");
+        juce::String terr2; bool tcancel2 = false;
+        expect(!importer.transcodeToWavFloat(empty, dst2, terr2, tcancel2, {}),
+               "transcodeToWavFloat fails on a zero-length source");
+        expect(terr2.isNotEmpty(),    "error set for zero-length source");
+        expect(!dst2.existsAsFile(),  "no dst written for zero-length source");
+
+        // (4) pos<=0 ガード (今回の修正の回帰テスト): reader は開けて length>0 を報告するが read が
+        //     常に失敗する (破損 / 途中エラーの OS デコーダ模擬) → 空 WAV を成功として返さず false /
+        //     dst 未生成。決定論的に叩くため専用の failing フォーマットを登録した manager を使う。
+        juce::AudioFormatManager failFmt;
+        failFmt.registerBasicFormats();
+        failFmt.registerFormat(new FailingAudioFormat(), false);
+        AudioFileImporter failImporter(failFmt);
+        auto failSrc = dir.getChildFile("undecodable.fail");
+        failSrc.replaceWithText("header-ok-but-frames-unreadable");
+        // 前提: reader が開けて length>0 を報告する (でないと別ガードで弾かれ pos<=0 を通らない)
+        {
+            std::unique_ptr<juce::AudioFormatReader> chk(failFmt.createReaderFor(failSrc));
+            expect(chk != nullptr && chk->lengthInSamples > 0,
+                   "failing reader opens and reports a positive length (precondition)");
+        }
+        auto dst3 = dir.getChildFile("err_undecodable.wav");
+        juce::String terr3; bool tcancel3 = false;
+        expect(!failImporter.transcodeToWavFloat(failSrc, dst3, terr3, tcancel3, {}),
+               "transcodeToWavFloat fails when the decoder yields zero samples");
+        expect(!tcancel3,             "zero-sample decode is a failure, not a cancel");
+        expect(terr3.isNotEmpty(),    "error set when zero samples decoded");
+        expect(!dst3.existsAsFile(),  "no empty WAV left when zero samples decoded (pos<=0 guard)");
     }
 
     // ── importFile: 欠損ファイルは success=false ──
