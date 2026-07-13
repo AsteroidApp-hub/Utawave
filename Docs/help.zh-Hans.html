@@ -195,6 +195,7 @@
       <li><a href="#fx">效果器（FX）</a></li>
       <li><a href="#midi">导入·手动输入 MIDI</a></li>
       <li><a href="#export">导出（WAV / MP3）</a></li>
+      <li><a href="#streaming">直播（连接直播软件）</a></li>
       <li><a href="#gestures">右键·实用操作</a></li>
       <li><a href="#shortcuts">快捷键速查表</a></li>
       <li><a href="#trouble">遇到问题时</a></li>
@@ -370,8 +371,24 @@
     <div class="tip"><b>防止破音：</b>导出时若声音过大，会自动稍微降低以防破音（可在设置中关闭）。</div>
   </section>
 
+  <section id="streaming">
+    <h2><span class="num">13</span>直播（连接直播软件）</h2>
+    <p>可以将 Utawave 的声音（正在播放的伴奏 + 麦克风返送）送入 OBS 等直播软件，进行唱歌直播。</p>
+    <h3>Windows 使用标准驱动（WASAPI）时</h3>
+    <p>在直播软件的“应用程序音频采集”中选择 Utawave 即可拾取声音，无需额外设置。</p>
+    <h3>使用 ASIO 时（直播镜像输出）</h3>
+    <p>ASIO 的声音不经过操作系统，直播软件无法直接采集。开启<b>直播镜像输出</b>后，当前听到的声音会同时送往另一个输出设备，直播软件即可拾取。</p>
+    <ol class="step">
+      <li>点击工具栏右上的 <kbd>SETTING</kbd>（偏好设置）→“直播”→ 打开<b>“使用直播镜像输出”</b>。</li>
+      <li>镜像输出设备请选择<b>平时不在听的设备</b>（电脑自带的扬声器接口、HDMI 显示器等）。不要选与主输出相同的设备，否则会听到重复的声音。镜像的声音只是给直播软件拾取用的，不需要真的被听到。</li>
+      <li>在直播软件中添加“应用程序音频采集”源，选择 Utawave。</li>
+    </ol>
+    <div class="tip"><b>画面与声音不同步时：</b>请在直播软件的音频高级属性中调整 Utawave 的同步偏移。镜像的延迟是恒定的，调整一次即可。</div>
+    <p>镜像只是输出的副本，不影响录音和导出。macOS 可直接使用系统的应用音频采集（需 macOS 13 及以上、直播软件支持），通常不需要镜像输出。</p>
+  </section>
+
   <section id="gestures">
-    <h2><span class="num">13</span>右键·实用操作</h2>
+    <h2><span class="num">14</span>右键·实用操作</h2>
     <p class="lead">Utawave 中有许多按钮上没有显示、需要通过<b>右键菜单</b>或<b>双击</b>才能完成的操作。这里整理了一些知道后能让工作轻松许多的内容。</p>
 
     <h3>右键能做的事</h3>
@@ -409,7 +426,7 @@
   </section>
 
   <section id="shortcuts">
-    <h2><span class="num">14</span>快捷键速查表</h2>
+    <h2><span class="num">15</span>快捷键速查表</h2>
     <p>这里只摘录了主要项目。完整列表可从「帮助」→「快捷键列表...」（<kbd>Ctrl+/</kbd> / Mac 为 <kbd>⌘/</kbd>）查看。</p>
     <table class="keys">
       <tr><th style="width:46%">作用</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
@@ -434,7 +451,7 @@
   </section>
 
   <section id="trouble">
-    <h2><span class="num">15</span>遇到问题时</h2>
+    <h2><span class="num">16</span>遇到问题时</h2>
     <h3>提示「找不到音频文件」</h3>
     <p>项目所引用的音源可能已被移动／删除。把原文件放回项目内的 <code>Audio</code> 文件夹后会自动恢复。</p>
     <h3>上次的工作丢失了／程序退出了</h3>

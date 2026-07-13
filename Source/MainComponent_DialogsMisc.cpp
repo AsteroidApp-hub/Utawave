@@ -173,13 +173,16 @@ void MainComponent::showDocumentation()
         default:                                         langFile = "help.html";         break;
     }
 
-    // 検索ディレクトリ (mac=Resources / Win=exe隣 / 同階層フォールバック)。
+    // 検索ディレクトリ (mac=Resources / Win=exe隣の Docs/ → exe隣 / 同階層フォールバック)。
+    // 配布 zip / インストーラはドキュメント類を Docs/ サブフォルダへ格納する (多言語 help で
+    // ファイル数が増え、zip 直下が散らかるため)。旧配置 (exe 隣) も後方互換で探す。
     juce::Array<juce::File> dirs;
    #if JUCE_MAC
     dirs.add(appFile.getChildFile("Contents/Resources"));
    #endif
-    dirs.add(appFile.getParentDirectory()); // Windows: exe 隣
-    dirs.add(appFile);                       // 同階層フォールバック
+    dirs.add(appFile.getParentDirectory().getChildFile("Docs")); // Windows: exe 隣の Docs/
+    dirs.add(appFile.getParentDirectory());                      // 旧配置: exe 隣 (後方互換)
+    dirs.add(appFile);                                           // 同階層フォールバック
 
     // 各ディレクトリで「現在言語ファイル → ja の help.html」の順に探す。
     juce::StringArray names;

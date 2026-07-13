@@ -81,12 +81,13 @@ jobs:
       # ---- zip 化 (署名の有無に関わらず) ----
       - name: Package zip
         run: |
-          mkdir -p Utawave-macOS
+          mkdir -p Utawave-macOS/Docs
           cp -R "${{ steps.app.outputs.path }}" Utawave-macOS/
           # 利用者がそのまま読めるよう、同梱ドキュメントはテキスト/HTML で入れる
-          # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
-          cp THIRD_PARTY_LICENSES.txt Docs/MANUAL.html Docs/README.txt Utawave-macOS/
-          cp LICENSE Utawave-macOS/LICENSE.txt
+          # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)。
+          # zip 直下が散らからないよう Docs/ サブフォルダへまとめる (直下は .app のみ)
+          cp THIRD_PARTY_LICENSES.txt Docs/MANUAL.html Docs/README.txt Utawave-macOS/Docs/
+          cp LICENSE Utawave-macOS/Docs/LICENSE.txt
           ditto -c -k --sequesterRsrc --keepParent Utawave-macOS "Utawave-${{ inputs.version }}-macOS-universal.zip"
 
       - name: Upload macOS zip
@@ -191,15 +192,17 @@ jobs:
         run: |
           # 署名済み (signed/) があればそれを、無ければ未署名 exe を使う
           $src = if (Test-Path signed/Utawave.exe) { 'signed/Utawave.exe' } else { 'artifact/Utawave.exe' }
-          New-Item -ItemType Directory -Force -Path Utawave-Windows | Out-Null
+          New-Item -ItemType Directory -Force -Path Utawave-Windows/Docs | Out-Null
           Copy-Item $src Utawave-Windows/Utawave.exe
           # 利用者がそのまま読めるよう、同梱ドキュメントはテキスト/HTML で入れる
-          # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)
-          Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
-          Copy-Item LICENSE Utawave-Windows/LICENSE.txt
-          # アプリ内「使い方ドキュメント」が exe 隣の help*.html を開くため、言語別ヘルプを全て同梱する
+          # (.md は配布しない。LICENSE は拡張子なしだと開けないので LICENSE.txt にする)。
+          # 多言語 help でファイル数が多く直下が散らかるため Docs/ サブフォルダへまとめる
+          # (直下は Utawave.exe のみ)。アプリの「使い方ドキュメント」は exe 隣の Docs/ を先に探す
+          Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/Docs/
+          Copy-Item LICENSE Utawave-Windows/Docs/LICENSE.txt
+          # 言語別ヘルプを全て同梱する
           # (help.html=ja / help.en.html / help.zh-Hans.html / help.zh-Hant.html / help.ko.html)
-          Copy-Item Docs/help*.html Utawave-Windows/
+          Copy-Item Docs/help*.html Utawave-Windows/Docs/
           Compress-Archive -Path Utawave-Windows -DestinationPath "Utawave-${{ inputs.version }}-Windows-x64.zip" -Force
 
       - name: Upload Windows zip

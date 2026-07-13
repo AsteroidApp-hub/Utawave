@@ -195,6 +195,7 @@
       <li><a href="#fx">Effects (FX)</a></li>
       <li><a href="#midi">Importing &amp; Entering MIDI</a></li>
       <li><a href="#export">Exporting (WAV / MP3)</a></li>
+      <li><a href="#streaming">Streaming (Karaoke Streams)</a></li>
       <li><a href="#gestures">Right-Click &amp; Handy Actions</a></li>
       <li><a href="#shortcuts">Shortcut Quick Reference</a></li>
       <li><a href="#trouble">Troubleshooting</a></li>
@@ -370,8 +371,24 @@
     <div class="tip"><b>Clipping protection:</b> On export, if the audio is too loud, it's automatically turned down a little to prevent clipping (you can turn this off in the settings).</div>
   </section>
 
+  <section id="streaming">
+    <h2><span class="num">13</span>Streaming (Karaoke Streams)</h2>
+    <p>You can send Utawave's audio (the playing track plus your mic monitor) to streaming software such as OBS for karaoke streams.</p>
+    <h3>On Windows with the standard driver (WASAPI)</h3>
+    <p>Just pick Utawave in your streaming software's "Application Audio Capture" source. No extra setup needed.</p>
+    <h3>When using ASIO (Stream Mirror Output)</h3>
+    <p>ASIO bypasses the OS audio system, so streaming software cannot capture it directly. <b>Stream mirror output</b> also sends what you hear to a second output device so streaming software can pick it up.</p>
+    <ol class="step">
+      <li>Open <kbd>SETTING</kbd> (Preferences) → "Streaming" → turn on <b>"Use stream mirror output"</b>.</li>
+      <li>Choose an output device <b>you are not listening to</b> (the PC's built-in speaker jack, an HDMI monitor, etc.). Avoid the same device as your main output — you would hear the sound doubled. The mirrored audio only needs to exist for the streaming software; nobody has to hear it.</li>
+      <li>In your streaming software, add an "Application Audio Capture" source and pick Utawave.</li>
+    </ol>
+    <div class="tip"><b>If video and audio drift apart:</b> adjust Utawave's sync offset in the streaming software's advanced audio properties. The mirror's delay is constant, so you only need to set it once.</div>
+    <p>The mirror is a copy of the output, so recording and export are unaffected. On macOS, the system's app audio capture (macOS 13 or later, with support in your streaming software) works directly, so the mirror output is usually unnecessary.</p>
+  </section>
+
   <section id="gestures">
-    <h2><span class="num">13</span>Right-Click &amp; Handy Actions</h2>
+    <h2><span class="num">14</span>Right-Click &amp; Handy Actions</h2>
     <p class="lead">Utawave has plenty of actions that aren't shown as buttons, available through <b>right-click menus</b> and <b>double-clicks</b>. Here are the ones worth knowing that make work much easier.</p>
 
     <h3>What You Can Do with a Right-Click</h3>
@@ -409,7 +426,7 @@
   </section>
 
   <section id="shortcuts">
-    <h2><span class="num">14</span>Shortcut Quick Reference</h2>
+    <h2><span class="num">15</span>Shortcut Quick Reference</h2>
     <p>Only the main ones are listed here. You can see the full list from "Help" → "Shortcut List..." (<kbd>Ctrl+/</kbd> / <kbd>⌘/</kbd> on Mac).</p>
     <table class="keys">
       <tr><th style="width:46%">What it does</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
@@ -434,7 +451,7 @@
   </section>
 
   <section id="trouble">
-    <h2><span class="num">15</span>Troubleshooting</h2>
+    <h2><span class="num">16</span>Troubleshooting</h2>
     <h3>"Audio file not found" appears</h3>
     <p>The audio the project references may have been moved or deleted. Put the original file back into the project's <code>Audio</code> folder and it will be restored automatically.</p>
     <h3>My last session is gone / the app quit</h3>

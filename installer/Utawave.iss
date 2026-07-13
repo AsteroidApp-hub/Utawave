@@ -69,12 +69,24 @@ Name: "utaassoc"; Description: ".uta ファイルを Utawave で開く (関連�
 
 [Files]
 Source: "{#SrcDir}\{#AppExe}";              DestDir: "{app}"; Flags: ignoreversion
-; アプリ内「使い方ドキュメント」が exe 隣の help*.html を開く (言語別ヘルプを全て同梱)
-Source: "{#DocDir}\help*.html";             DestDir: "{app}"; Flags: ignoreversion
-Source: "{#DocDir}\MANUAL.html";            DestDir: "{app}"; Flags: ignoreversion
-Source: "{#DocDir}\README.txt";             DestDir: "{app}"; Flags: ignoreversion
-Source: "{#RepoRoot}\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#RepoRoot}\LICENSE";              DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+; ドキュメント類は Docs\ サブフォルダへまとめる (多言語 help でファイル数が多く、直下が
+; 散らかるため)。アプリ内「使い方ドキュメント」は exe 隣の Docs\help*.html を開く
+; (旧配置 = exe 隣 も後方互換で探すが、新規配置は Docs\ に統一)
+Source: "{#DocDir}\help*.html";             DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "{#DocDir}\MANUAL.html";            DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "{#DocDir}\README.txt";             DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "{#RepoRoot}\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "{#RepoRoot}\LICENSE";              DestDir: "{app}\Docs"; DestName: "LICENSE.txt"; Flags: ignoreversion
+
+[InstallDelete]
+; 旧配置 ({app} 直下・Docs\ 移行前のバージョン) のドキュメントをアップグレード時に掃除する。
+; 残すとアプリの後方互換探索が新しい Docs\ より先に古い直下を拾うことはない (Docs\ 優先) が、
+; 古い版のドキュメントがゴミとして残り続けるため削除する
+Type: files; Name: "{app}\help*.html"
+Type: files; Name: "{app}\MANUAL.html"
+Type: files; Name: "{app}\README.txt"
+Type: files; Name: "{app}\THIRD_PARTY_LICENSES.txt"
+Type: files; Name: "{app}\LICENSE.txt"
 
 [Icons]
 Name: "{group}\{#AppName}";                         Filename: "{app}\{#AppExe}"

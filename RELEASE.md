@@ -96,7 +96,8 @@ exe (`Utawave-<version>-Setup.exe`)** なので、**インストーラの署名�
 具体的なコマンドとチェックリストは `Docs/WINDOWS_SIGNING_SETUP.md` を参照。
 証明書取得前の段階では未署名のまま配布してよい（初回 SmartScreen で「詳細情報 → 実行」が必要）。
 
-> 両 zip とも利用者向けドキュメント（LICENSE.txt / THIRD_PARTY_LICENSES.txt / MANUAL.html / README.txt）を同梱済み。
+> 両 zip とも利用者向けドキュメント（LICENSE.txt / THIRD_PARTY_LICENSES.txt / MANUAL.html / README.txt、
+> Windows は言語別 help*.html も）を **zip 内の `Docs/` サブフォルダ**に同梱済み（直下は .app / .exe のみ）。
 > **同梱物は利用者がそのまま開けるよう .txt / .html のみ**（`.md` は配布しない。`README.txt` は `Docs/README.txt`、`LICENSE.txt` は `LICENSE` をリネームしたもの）。
 > ローカルでの再パッケージは不要。
 
@@ -193,11 +194,13 @@ cmake -S . -B build-win -DCMAKE_BUILD_TYPE=Release `
 cmake --build build-win --config Release
 
 $exe = Get-ChildItem -Path build-win -Recurse -Filter Utawave.exe | Select-Object -First 1
-New-Item -ItemType Directory -Force -Path Utawave-Windows | Out-Null
+New-Item -ItemType Directory -Force -Path Utawave-Windows/Docs | Out-Null
 Copy-Item $exe.FullName Utawave-Windows/
-# 同梱物は利用者がそのまま開ける .txt / .html のみ (LICENSE は LICENSE.txt にリネーム)
-Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/
-Copy-Item LICENSE Utawave-Windows/LICENSE.txt
+# 同梱物は利用者がそのまま開ける .txt / .html のみ (LICENSE は LICENSE.txt にリネーム)。
+# ドキュメント類は Docs/ サブフォルダへ (CI の Package zip と同じ構成)
+Copy-Item THIRD_PARTY_LICENSES.txt,Docs/MANUAL.html,Docs/README.txt Utawave-Windows/Docs/
+Copy-Item LICENSE Utawave-Windows/Docs/LICENSE.txt
+Copy-Item Docs/help*.html Utawave-Windows/Docs/
 Compress-Archive -Path Utawave-Windows -DestinationPath Utawave-0.1.0-win64-asio.zip -Force
 
 # クラッシュレポート解決用に exe + PDB のペアを保管する (zip には入れない)

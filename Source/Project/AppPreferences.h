@@ -89,12 +89,6 @@ public:
     bool streamMirrorEnabled { false };
     // ミラーの出力先デバイス名 (空 = OS 既定の出力デバイス)。
     juce::String streamMirrorDevice;
-    // 【隠しフラグ・UI 無し】配信ミラー出力を解放するか (既定: OFF = 未公開)。
-    // 機能は実装済みだが一般公開前のクローズドテスト段階のため、これが ON のときだけ
-    // 環境設定に「配信」セクションを出し、ミラーの起動も許可する (OFF なら streamMirrorEnabled が
-    // 残っていても起動しない)。テスト協力者は app_prefs.xml に streamMirrorUnlocked="1" を
-    // 手で足して再起動する。一般公開時はこのゲートを撤去 (または既定 ON) する。
-    bool streamMirrorUnlocked { false };
 
     // 歌詞表示窓の文字サイズ (px)。歌唱中の見やすさは人それぞれなのでアプリ全体で記憶する
     // (歌詞テキスト自体はプロジェクトごとに .uta へ保存)。load 時に妥当範囲へクランプ。

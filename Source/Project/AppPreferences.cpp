@@ -73,7 +73,6 @@ AppPreferences AppPreferences::load()
         p.multicoreAudio     = xml->getBoolAttribute("multicoreAudio", p.multicoreAudio);
         p.streamMirrorEnabled  = xml->getBoolAttribute("streamMirrorEnabled", p.streamMirrorEnabled);
         p.streamMirrorDevice   = xml->getStringAttribute("streamMirrorDevice", p.streamMirrorDevice);
-        p.streamMirrorUnlocked = xml->getBoolAttribute("streamMirrorUnlocked", p.streamMirrorUnlocked);
         // 範囲は LyricsView::kMinFont/kMaxFont と一致させる (UI へ依存させないため数値で持つ)
         p.lyricsFontSize     = juce::jlimit(12, 96,
             xml->getIntAttribute("lyricsFontSize", p.lyricsFontSize));
@@ -105,7 +104,6 @@ bool AppPreferences::save() const
     xml.setAttribute("multicoreAudio", multicoreAudio);
     xml.setAttribute("streamMirrorEnabled", streamMirrorEnabled);
     xml.setAttribute("streamMirrorDevice", streamMirrorDevice);
-    xml.setAttribute("streamMirrorUnlocked", streamMirrorUnlocked);
     xml.setAttribute("lyricsFontSize", lyricsFontSize);
     xml.setAttribute("uiScale", uiScale);
     xml.setAttribute("uiScaleUserSet", uiScaleUserSet);

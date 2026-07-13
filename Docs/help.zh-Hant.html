@@ -195,6 +195,7 @@
       <li><a href="#fx">效果（FX）</a></li>
       <li><a href="#midi">匯入·手動編寫 MIDI</a></li>
       <li><a href="#export">匯出（WAV / MP3）</a></li>
+      <li><a href="#streaming">直播（連接直播軟體）</a></li>
       <li><a href="#gestures">右鍵·便利操作</a></li>
       <li><a href="#shortcuts">快速鍵速查表</a></li>
       <li><a href="#trouble">遇到問題時</a></li>
@@ -370,8 +371,24 @@
     <div class="tip"><b>防止破音：</b>匯出時，若音量過大會自動稍微降低以防止破音（可在設定中關閉）。</div>
   </section>
 
+  <section id="streaming">
+    <h2><span class="num">13</span>直播（連接直播軟體）</h2>
+    <p>可以將 Utawave 的聲音（正在播放的伴奏 + 麥克風返送）送入 OBS 等直播軟體，進行唱歌直播。</p>
+    <h3>Windows 使用標準驅動（WASAPI）時</h3>
+    <p>在直播軟體的「應用程式音訊擷取」中選擇 Utawave 即可拾取聲音，無需額外設定。</p>
+    <h3>使用 ASIO 時（直播鏡像輸出）</h3>
+    <p>ASIO 的聲音不經過作業系統，直播軟體無法直接擷取。開啟<b>直播鏡像輸出</b>後，目前聽到的聲音會同時送往另一個輸出裝置，直播軟體即可拾取。</p>
+    <ol class="step">
+      <li>點擊工具列右上的 <kbd>SETTING</kbd>（偏好設定）→「直播」→ 開啟<b>「使用直播鏡像輸出」</b>。</li>
+      <li>鏡像輸出裝置請選擇<b>平時沒在聽的裝置</b>（電腦內建的喇叭孔、HDMI 螢幕等）。不要選與主輸出相同的裝置，否則會聽到重複的聲音。鏡像的聲音只是給直播軟體拾取用的，不需要真的被聽到。</li>
+      <li>在直播軟體中新增「應用程式音訊擷取」來源，選擇 Utawave。</li>
+    </ol>
+    <div class="tip"><b>畫面與聲音不同步時：</b>請在直播軟體的音訊進階屬性中調整 Utawave 的同步偏移。鏡像的延遲是恆定的，調整一次即可。</div>
+    <p>鏡像只是輸出的副本，不影響錄音與匯出。macOS 可直接使用系統的應用程式音訊擷取（需 macOS 13 以上、直播軟體支援），通常不需要鏡像輸出。</p>
+  </section>
+
   <section id="gestures">
-    <h2><span class="num">13</span>右鍵·便利操作</h2>
+    <h2><span class="num">14</span>右鍵·便利操作</h2>
     <p class="lead">Utawave 中有許多沒有顯示在按鈕上、透過<b>右鍵選單</b>或<b>雙擊</b>就能完成的操作。以下整理了知道後能讓作業更輕鬆的項目。</p>
 
     <h3>右鍵能做的事</h3>
@@ -409,7 +426,7 @@
   </section>
 
   <section id="shortcuts">
-    <h2><span class="num">14</span>快速鍵速查表</h2>
+    <h2><span class="num">15</span>快速鍵速查表</h2>
     <p>此處僅摘錄主要項目。完整清單可從「說明」→「快速鍵一覽...」（<kbd>Ctrl+/</kbd> / Mac 為 <kbd>⌘/</kbd>）查看。</p>
     <table class="keys">
       <tr><th style="width:46%">作用</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
@@ -434,7 +451,7 @@
   </section>
 
   <section id="trouble">
-    <h2><span class="num">15</span>遇到問題時</h2>
+    <h2><span class="num">16</span>遇到問題時</h2>
     <h3>顯示「找不到音訊檔案」</h3>
     <p>專案參照的音源可能被移動／刪除了。將原始檔案放回專案內的 <code>Audio</code> 資料夾，即可自動復原。</p>
     <h3>上次的作業不見了／應用程式結束了</h3>
