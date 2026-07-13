@@ -10,6 +10,7 @@
 #include "Export/ExportEngine.h"
 #include "Export/ExportDialog.h"
 #include "VST/PluginChain.h"
+#include "Audio/builtin/BuiltInFactory.h"   // 内蔵エフェクトの複製 (formatManager では作れない)
 #include "UI/PluginManagerDialog.h"
 #include "UI/PianoRollEditor.h"
 #include "MIDI/MidiImporter.h"
@@ -2115,8 +2116,13 @@ void MainComponent::duplicateTrack(int sourceTrackIdx, bool includeTakeLanes)
 
         const auto desc = srcPlugin->getPluginDescription();
         juce::String err;
-        std::unique_ptr<juce::AudioPluginInstance> newInstance(
-            fmgr.createPluginInstance(desc, pluginSr, pluginBs, err));
+        std::unique_ptr<juce::AudioPluginInstance> newInstance;
+        if (BuiltInFactory::isBuiltInFormat(desc.pluginFormatName))
+            // 内蔵エフェクトは formatManager に登録が無いので (fileOrIdentifier は安定 ID)
+            // ファクトリで複製する。state は下の setStateInformation でコピーされる。
+            newInstance = BuiltInFactory::create(desc.fileOrIdentifier);
+        else
+            newInstance = fmgr.createPluginInstance(desc, pluginSr, pluginBs, err);
         if (!newInstance) continue;  // 生成失敗 (まれ) はそのスロットを空にして続行
 
         // 状態 (パラメータ・プリセット位置) を転送
