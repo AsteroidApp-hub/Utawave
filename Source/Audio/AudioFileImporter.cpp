@@ -522,6 +522,17 @@ bool AudioFileImporter::transcodeToWavFloat(const juce::File& src, const juce::F
         pos += n;
     }
 
+    // 1 サンプルも読めずに終わった (最初の read で失敗) = デコード不能。空 WAV を成功として
+    // 返すと無音の空クリップが無警告で取り込まれてしまう (破損 / 途中切れの MP3 や、途中で
+    // エラーを返す OS デコーダで起きうる)。ここで失敗にして呼び出し側に案内させる。
+    if (pos <= 0)
+    {
+        errorOut = "Could not decode audio";
+        writer.reset();
+        dst.deleteFile();
+        return false;
+    }
+
     writer->flush();
     return true;
 }
