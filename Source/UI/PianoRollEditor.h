@@ -8,7 +8,9 @@
 
 // MIDI クリップ用ピアノロール エディタ
 // 標準的な機能:
-//   - ノートの追加 (空エリアダブルクリック) / 削除 (Delete) / 移動 (ドラッグ) / リサイズ (端ドラッグ)
+//   - ノートの追加 (空エリアダブルクリック / ペンモード中はクリック+ドラッグ・D でトグル) /
+//     削除 (Delete) / 移動 (ドラッグ) / リサイズ (端ドラッグ) / 分割 (Option+クリック)
+//   - 追従 (自動ページング) は F でトグル (ボタンと同一経路)
 //   - 範囲選択 (空エリアドラッグ) / Shift / Cmd で複数選択
 //   - Cmd+C / Cmd+V / Cmd+X コピー・ペースト・カット
 //   - Cmd+A 全選択
@@ -42,7 +44,18 @@ public:
 
     // 自動ページング (再生バーがビュー外へ出たら次ページへ横スクロール) の ON/OFF。
     // アプリ全体設定 (AppPreferences::midiPagingEnabled) から MainComponent が設定する。
-    void setPagingEnabled(bool v) { pagingEnabled = v; }
+    // ルーラー右上の FOLLOW ボタンとも同期する。
+    void setPagingEnabled(bool v);
+
+    // FOLLOW ボタンでユーザーが追従を切替えたときの通知。
+    // MainComponent がアプリ設定 (midiPagingEnabled) へ書き戻して永続化する。
+    std::function<void(bool)> onFollowToggled;
+
+    // ツールチップの表示 ON/OFF (アプリ設定 showTooltips から MainComponent が設定)。
+    // ピアノロールは独立ウィンドウ (別ピア) のため、メイン画面の TooltipWindow では
+    // チップが出ない (JUCE は親と同じピアのコンポーネントしか対象にしない)。窓専用の
+    // TooltipWindow をここで生成/破棄する。
+    void setTooltipsEnabled(bool enabled);
 
     // グリッドモード変更
     void setSnapMode(SnapMode m) { snapMode = m; repaint(); }
@@ -122,6 +135,8 @@ private:
     void writeNotesToClip();
 
     // ─ 編集操作 ─
+    int  createNoteAt(juce::Point<int> pos);        // 新規ノート作成 (index / -1)。undo snapshot 込み
+    void splitNoteAt(int noteIdx, double rawSecs);  // Option+クリックのノート分割 (グリッドスナップ)
     void deleteSelected();
     void selectAll();
     void copySelected();
@@ -207,6 +222,20 @@ private:
 
     // 自動ページング (再生バーがビュー外へ出たら次ページへ横スクロール)。MainComponent が設定。
     bool pagingEnabled { false };
+    // 手動横スクロールで再生バーがビュー外に出ている間はページングを一時停止する
+    // (「スクロールすると追従に引き戻される」防止)。再生バーがビュー内へ戻ると自動再開。
+    bool followSuspended { false };
+    void noteManualHScroll();  // 手動横スクロール後に一時停止状態を更新する
+
+    // ペンツール (ON 中は空きエリアのクリックでノート作成 + ドラッグで長さ調整)
+    bool penMode { false };
+
+    // ルーラー右上のツールボタン (追従 = テキスト / ペン = 鉛筆アイコン)
+    juce::TextButton     followBtn;
+    juce::DrawableButton penBtn { "pen", juce::DrawableButton::ImageOnButtonBackground };
+
+    // この窓専用のツールチップ表示 (setTooltipsEnabled で生成/破棄)
+    std::unique_ptr<juce::TooltipWindow> tooltipWin;
 
     // グリッド (スナップ) 設定
     SnapMode       snapMode { SnapMode::Sixteenth };

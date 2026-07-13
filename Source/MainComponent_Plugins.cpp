@@ -393,6 +393,16 @@ void MainComponent::openPianoRollFor(MidiClip* clip, Track* track)
         ed->setUndoManager(&undoManager);
         // 自動ページング (再生バーがビュー外へ出たら次ページへ) をアプリ設定から反映
         ed->setPagingEnabled(appPrefs.midiPagingEnabled);
+        // ピアノロール内の FOLLOW ボタンでの切替をアプリ設定へ書き戻して永続化し、
+        // 開いている他のピアノロール (と環境設定の次回表示) にも反映する
+        ed->onFollowToggled = [this](bool v)
+        {
+            appPrefs.midiPagingEnabled = v;
+            appPrefs.save();
+            applyMidiPagingToOpenEditors();
+        };
+        // ピアノロール窓専用のツールチップ表示 (アプリ設定 showTooltips に追従)
+        ed->setTooltipsEnabled(appPrefs.showTooltips);
         // Space = 再生/停止。ピアノロール (独立ウィンドウ) にフォーカスがある間も再生できるよう、
         // メイン側のトランスポートへ委譲する (Windows で再生できない問題の対策・macOS は
         // GlobalKeyMonitor 経由なのでこの経路は実質未使用だが害はない)。

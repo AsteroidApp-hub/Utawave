@@ -4,6 +4,7 @@
 #include "PianoRollEditor.h"
 #include "../Localisation.h"
 #include "../AppColours.h"
+#include "UtawaveLookAndFeel.h"
 #include <cstring>
 #include <cmath>
 
@@ -79,6 +80,46 @@ PianoRollEditor::PianoRollEditor(MidiClip& clipRef, double projectBpm,
     };
     addAndMakeVisible(snapBox);
 
+    // ── 追従 (再生バー追従) / ペンツール トグルボタン ──
+    // DrawableButton (ImageOnButtonBackground) も背景色は TextButton の colour id を使うため
+    // 共通ヘルパで設定できる。
+    auto setupToolButton = [](juce::Button& b)
+    {
+        b.setClickingTogglesState(true);
+        b.setColour(juce::TextButton::buttonColourId,   juce::Colour(0xff2a2d31));
+        b.setColour(juce::TextButton::buttonOnColourId, AppColours::accent);
+        b.setColour(juce::TextButton::textColourOffId,  juce::Colours::white);
+        b.setColour(juce::TextButton::textColourOnId,   juce::Colours::white);
+        b.setWantsKeyboardFocus(false);
+    };
+    setupToolButton(followBtn);
+    followBtn.setButtonText(tr(u8"追従"));
+    followBtn.setToggleState(pagingEnabled, juce::dontSendNotification);
+    followBtn.setTooltip(tr(u8"再生バーに追従して自動スクロールします (手動で横スクロールすると一時停止し、再生バーが戻ると再開)") + " (F)");
+    followBtn.onClick = [this]
+    {
+        pagingEnabled   = followBtn.getToggleState();
+        followSuspended = false;
+        if (onFollowToggled) onFollowToggled(pagingEnabled);
+    };
+    addAndMakeVisible(followBtn);
+
+    setupToolButton(penBtn);
+    {
+        // 鉛筆アイコン (斜めの軸 + 先端の三角)。単位正方形で描き DrawableButton が縮尺する
+        juce::Path pen;
+        pen.addQuadrilateral(0.30f, 0.60f,  0.64f, 0.26f,  0.76f, 0.38f,  0.42f, 0.72f);
+        pen.addTriangle(0.20f, 0.82f,  0.26f, 0.64f,  0.38f, 0.76f);
+        juce::DrawablePath dp;
+        dp.setPath(pen);
+        dp.setFill(juce::Colours::white);
+        penBtn.setImages(&dp);
+    }
+    penBtn.setTooltip(platformShortcutText(
+        tr(u8"ペンツール: 空きエリアのクリックでノートを作成し、そのままドラッグで長さを調整 (ペンに関係なく Option+クリックでノート分割)")) + " (D)");
+    penBtn.onClick = [this] { penMode = penBtn.getToggleState(); };
+    addAndMakeVisible(penBtn);
+
     // 横スクロールバー
     hScrollBar.setAutoHide(false);
     hScrollBar.addListener(this);
@@ -105,6 +146,46 @@ PianoRollEditor::PianoRollEditor(MidiClip& clipRef, double projectBpm,
     }
 }
 
+void PianoRollEditor::setTooltipsEnabled(bool enabled)
+{
+    // ピアノロールは独立ウィンドウ (別ピア) のため専用の TooltipWindow を持つ
+    // (メイン画面の TooltipWindow は同一ピアのコンポーネントにしかチップを出さない)。
+    if (enabled)
+    {
+        if (tooltipWin == nullptr)
+        {
+            // LnF は TooltipWindow より長生きする必要があるため関数ローカル static
+            // (MainComponent::applyTooltipVisibility と同じ作法)
+            static UtawaveLookAndFeel tooltipLnF;
+            tooltipWin = std::make_unique<juce::TooltipWindow>(this);
+            tooltipWin->setLookAndFeel(&tooltipLnF);
+        }
+    }
+    else
+    {
+        tooltipWin.reset();
+    }
+}
+
+void PianoRollEditor::setPagingEnabled(bool v)
+{
+    pagingEnabled   = v;
+    followSuspended = false;
+    followBtn.setToggleState(v, juce::dontSendNotification);
+}
+
+void PianoRollEditor::noteManualHScroll()
+{
+    // 手動横スクロールで再生バーがビュー外に出たらページングを一時停止する
+    // (これが無いと、再生中に別の場所を見ようとスクロールした瞬間に引き戻される)。
+    // ビュー内へ戻した / 再生バーが追いついたら setPlayheadPosition が自動再開する。
+    if (playheadSec > -1e6)
+    {
+        const int phX = timeToX(juce::jmax(0.0, playheadSec));
+        followSuspended = (phX < keyboardW || phX > getWidth());
+    }
+}
+
 void PianoRollEditor::setPlayheadPosition(double secs)
 {
     const double prev = playheadSec;
@@ -113,10 +194,13 @@ void PianoRollEditor::setPlayheadPosition(double secs)
     // 自動ページング: 再生バーがビュー右端を越えた (または左端より前へ戻った) ら、
     // 次のページが見えるよう横スクロールを飛ばす。設定 ON のときだけ。
     // (手動シーク = ルーラークリックはビュー内の位置なので発火しない)
-    if (pagingEnabled && secs >= 0.0 && getWidth() > keyboardW)
+    if (secs >= 0.0 && getWidth() > keyboardW)
     {
         const int phX = timeToX(secs);
-        if (phX > getWidth() || phX < keyboardW)
+        const bool inView = (phX >= keyboardW && phX <= getWidth());
+        if (inView)
+            followSuspended = false;  // 再生バーがビューへ戻ったら追従を再開
+        if (pagingEnabled && !followSuspended && !inView)
         {
             // 再生バーをグリッド左端の少し右に置く (続き = 次ページの先頭が見える)
             const int leftMargin = 24;
@@ -329,6 +413,14 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
 
     // ノートヒット?
     auto hit = hitTestNote(e.getPosition());
+
+    // Option+クリック: ノートを分割 (タイムラインの Alt+Click 分割と同じ作法・グリッドスナップ)
+    if (hit.noteIdx >= 0 && e.mods.isAltDown() && !e.mods.isCommandDown())
+    {
+        splitNoteAt(hit.noteIdx, xToTime(e.x));
+        return;
+    }
+
     if (hit.noteIdx >= 0)
     {
         // 選択管理
@@ -360,6 +452,24 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
             firePreview(n.pitch, n.velocity, n.durationSec);
         }
         repaint();
+        return;
+    }
+
+    // ペンモード: 空エリアクリックでノート作成 (そのままドラッグで長さ調整)。
+    // Shift / Cmd 付きは従来どおり範囲選択に回す (ペン中でも複数選択できるように)。
+    if (penMode && e.x >= keyboardW && e.y >= rulerH
+        && !e.mods.isShiftDown() && !e.mods.isCommandDown())
+    {
+        const int idx = createNoteAt(e.getPosition());
+        if (idx >= 0)
+        {
+            createdNoteIdx  = idx;
+            createdStartSec = notes[(size_t) idx].startSec;
+            dragMode        = DragMode::CreateNote;
+            const auto& n = notes[(size_t) idx];
+            firePreview(n.pitch, n.velocity, n.durationSec);
+            repaint();
+        }
         return;
     }
 
@@ -426,6 +536,24 @@ void PianoRollEditor::mouseDrag(const juce::MouseEvent& e)
         }
         repaint();
     }
+    else if (dragMode == DragMode::CreateNote
+          && createdNoteIdx >= 0 && createdNoteIdx < (int) notes.size())
+    {
+        // ペンで作成中: 横ドラッグで長さ (グリッド単位)、縦ドラッグでピッチを調整
+        auto& n = notes[(size_t) createdNoteIdx];
+        double newEnd = snapTimeSecs(xToTime(e.x));
+        const double u = snapUnitSecs();
+        newEnd = juce::jmax(newEnd, createdStartSec + ((u > 0.0) ? u : 0.01));
+        if (clipLen > 0.0) newEnd = juce::jmin(newEnd, clipLen);
+        n.durationSec = juce::jmax(0.01, newEnd - createdStartSec);
+        const int newPitch = yToPitch(e.y);
+        if (newPitch != n.pitch)
+        {
+            n.pitch = newPitch;
+            firePreview(n.pitch, n.velocity, n.durationSec);
+        }
+        repaint();
+    }
     else if (dragMode == DragMode::RubberBand)
     {
         rubberBand = juce::Rectangle<int>::leftTopRightBottom(
@@ -466,10 +594,11 @@ void PianoRollEditor::mouseUp(const juce::MouseEvent&)
     {
         writeNotesToClip();
     }
-    dragMode    = DragMode::None;
-    rubberBand  = {};
-    draggedIdx  = -1;
-    velocityIdx = -1;
+    dragMode       = DragMode::None;
+    rubberBand     = {};
+    draggedIdx     = -1;
+    velocityIdx    = -1;
+    createdNoteIdx = -1;
     // ジェスチャ終了: 保留していた Undo をドラッグ全体で 1 アクションとして確定する
     gestureActive = false;
     if (pendingCommit) commitPendingUndoAction();
@@ -478,6 +607,9 @@ void PianoRollEditor::mouseUp(const juce::MouseEvent&)
 
 void PianoRollEditor::mouseDoubleClick(const juce::MouseEvent& e)
 {
+    // ペンモード中は無効 (1 クリック目で既にノートを作成済み。ここで既存ノート削除を
+    // 走らせると、作ったばかりのノートがダブルクリック判定で即消えてしまう)
+    if (penMode) return;
     // 空エリアダブルクリック: 新規ノート追加
     if (e.y > getHeight() - velocityH) return;
     auto hit = hitTestNote(e.getPosition());
@@ -491,10 +623,20 @@ void PianoRollEditor::mouseDoubleClick(const juce::MouseEvent& e)
         repaint();
         return;
     }
+    if (createNoteAt(e.getPosition()) < 0) return;
+    writeNotesToClip();
+    repaint();
+}
+
+// 新規ノートを作成して index を返す (作れない位置なら -1)。undo snapshot と選択更新まで
+// 行うが、writeNotesToClip は呼ばない (ダブルクリックは即確定 / ペンはドラッグ終了の
+// mouseUp で確定と、呼び出し側でタイミングが異なるため)。
+int PianoRollEditor::createNoteAt(juce::Point<int> pos)
+{
     // クリップ範囲 [0, clipLen] の外には作らない / はみ出さない (#範囲限定)
     const double clipLen = clip.getDuration();
-    double start = snapTimeSecs(juce::jmax(0.0, xToTime(e.x)));
-    if (clipLen > 0.0 && start >= clipLen) return;
+    double start = snapTimeSecs(juce::jmax(0.0, xToTime(pos.x)));
+    if (clipLen > 0.0 && start >= clipLen) return -1;
     const double u = snapUnitSecs();
     double dur = (u > 0.0) ? juce::jmax(0.05, u) : defaultNoteDurSec;
     if (clipLen > 0.0)
@@ -504,12 +646,37 @@ void PianoRollEditor::mouseDoubleClick(const juce::MouseEvent& e)
     }
     snapshotForUndo();
     Note n;
-    n.pitch       = yToPitch(e.y);
+    n.pitch       = yToPitch(pos.y);
     n.startSec    = start;
     n.durationSec = juce::jmax(0.01, dur);
     n.velocity    = 0.8f;
     notes.push_back(n);
     selected.clear();
+    selected.insert((int) notes.size() - 1);
+    return (int) notes.size() - 1;
+}
+
+// Option+クリックのノート分割。分割点はグリッドスナップし、スナップ点がノート外に
+// 出てしまう場合 (グリッドが粗い / ノートが短い) は生クリック位置へフォールバックする。
+void PianoRollEditor::splitNoteAt(int noteIdx, double rawSecs)
+{
+    if (noteIdx < 0 || noteIdx >= (int) notes.size()) return;
+    const Note orig  = notes[(size_t) noteIdx];
+    const double start = orig.startSec;
+    const double end   = orig.startSec + orig.durationSec;
+    const double kMin  = 0.01;  // 分割後の最小ノート長
+    double t = snapTimeSecs(rawSecs);
+    if (t <= start + kMin || t >= end - kMin)
+        t = rawSecs;
+    if (t <= start + kMin || t >= end - kMin) return;  // 短すぎて分割できない
+    snapshotForUndo();
+    notes[(size_t) noteIdx].durationSec = t - start;
+    Note right = orig;
+    right.startSec    = t;
+    right.durationSec = end - t;
+    notes.push_back(right);
+    selected.clear();
+    selected.insert(noteIdx);
     selected.insert((int) notes.size() - 1);
     writeNotesToClip();
     repaint();
@@ -520,11 +687,18 @@ void PianoRollEditor::mouseMove(const juce::MouseEvent& e)
     auto hit = hitTestNote(e.getPosition());
     if (hit.noteIdx >= 0)
     {
-        if      (hit.kind == HitKind::NoteLeftEdge
+        if (e.mods.isAltDown() && !e.mods.isCommandDown())
+            setMouseCursor(juce::MouseCursor::IBeamCursor);  // Option+クリック = 分割
+        else if (hit.kind == HitKind::NoteLeftEdge
               || hit.kind == HitKind::NoteRightEdge)
             setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
         else
             setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+    }
+    else if (penMode && e.y >= rulerH && e.y <= getHeight() - velocityH
+             && e.x >= keyboardW)
+    {
+        setMouseCursor(juce::MouseCursor::CrosshairCursor);  // ペンで書ける領域
     }
     else
     {
@@ -594,6 +768,7 @@ void PianoRollEditor::mouseWheelMove(const juce::MouseEvent& e, const juce::Mous
         scrollY = juce::jmax(0, scrollY - (int)(w.deltaY * 60));
         scrollX = juce::jmax(0, scrollX - (int)(w.deltaX * 200));
     }
+    noteManualHScroll();  // 再生バーがビュー外に出たら追従 (ページング) を一時停止
     updateScrollBarRange();
     repaint();
 }
@@ -669,6 +844,24 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
     if (k.getKeyCode() == juce::KeyPress::rightKey)  { nudgeSelected( 0.01, 0); return true; }
     if (k.getKeyCode() == juce::KeyPress::upKey)     { nudgeSelected(0.0,  1); return true; }
     if (k.getKeyCode() == juce::KeyPress::downKey)   { nudgeSelected(0.0, -1); return true; }
+
+    // F: 追従 (自動ページング) トグル / D: ペンツール トグル。
+    // setToggleState の sendNotification が onClick を発火するため、ボタンクリックと
+    // 完全に同一経路 (追従はアプリ設定への保存まで揃う)。修飾付き (Cmd+F 等) は対象外
+    if (!mods.isAnyModifierKeyDown())
+    {
+        const int kc = k.getKeyCode();
+        if (kc == 'F' || kc == 'f')
+        {
+            followBtn.setToggleState(!followBtn.getToggleState(), juce::sendNotification);
+            return true;
+        }
+        if (kc == 'D' || kc == 'd')
+        {
+            penBtn.setToggleState(!penBtn.getToggleState(), juce::sendNotification);
+            return true;
+        }
+    }
 
     // Shift+0〜9: グリッド (Snap) 切替 (メイン画面と同一マッピング)
     // 0=Off, 1=1/1, ..., 6=1/32, 7=1/4 三連, 8=1/8 三連, 9=1/16 三連
@@ -1081,8 +1274,10 @@ void PianoRollEditor::drawVelocityArea(juce::Graphics& g) const
 
 void PianoRollEditor::resized()
 {
-    // 右上隅に GRID ComboBox
+    // 右上隅に GRID ComboBox、その左に ペン (アイコン) / 追従 ボタン
     snapBox.setBounds(getWidth() - 130, 2, 124, rulerH - 4);
+    penBtn.setBounds(snapBox.getX() - 4 - 28, 2, 28, rulerH - 4);
+    followBtn.setBounds(penBtn.getX() - 4 - 56, 2, 56, rulerH - 4);
     // 底部に横スクロールバー (Velocity 領域の下)
     hScrollBar.setBounds(keyboardW, getHeight() - kScrollBarH,
                           juce::jmax(0, getWidth() - keyboardW), kScrollBarH);
@@ -1109,6 +1304,7 @@ void PianoRollEditor::scrollBarMoved(juce::ScrollBar*, double newRangeStart)
     if (newX != scrollX)
     {
         scrollX = newX;
+        noteManualHScroll();  // 手動スクロール → 追従の一時停止判定
         repaint();
     }
 }

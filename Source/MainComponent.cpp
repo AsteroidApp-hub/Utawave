@@ -34,6 +34,13 @@ void MainComponent::applyTooltipVisibility()
     {
         tooltipWindow.reset();   // 破棄するとアプリ全体でツールチップが出なくなる
     }
+
+    // ピアノロールは独立ウィンドウ (別ピア) で、メインの TooltipWindow ではチップが出ない
+    // ため、各エディタが持つ専用 TooltipWindow の生成/破棄も揃えて切替える
+    for (auto* w : pianoRollWindows)
+        if (w)
+            if (auto* ed = w->getEditor())
+                ed->setTooltipsEnabled(appPrefs.showTooltips);
 }
 
 MainComponent::MainComponent()
