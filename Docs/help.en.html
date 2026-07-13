@@ -378,11 +378,13 @@
     <p>Just pick Utawave in your streaming software's "Application Audio Capture" source. No extra setup needed.</p>
     <h3>When using ASIO (Stream Mirror Output)</h3>
     <p>ASIO bypasses the OS audio system, so streaming software cannot capture it directly. <b>Stream mirror output</b> also sends what you hear to a second output device so streaming software can pick it up.</p>
+    <div class="tip"><b>Before you start:</b> if your audio interface has a "loopback" feature, you can send audio to streaming software that way, so the stream mirror output is not needed (it is meant for interfaces without loopback).</div>
     <ol class="step">
       <li>Open <kbd>SETTING</kbd> (Preferences) → "Streaming" → turn on <b>"Use stream mirror output"</b>.</li>
       <li>Choose an output device <b>you are not listening to</b> (the PC's built-in speaker jack, an HDMI monitor, etc.). Avoid the same device as your main output — you would hear the sound doubled. The mirrored audio only needs to exist for the streaming software; nobody has to hear it.</li>
       <li>In your streaming software, add an "Application Audio Capture" source and pick Utawave.</li>
     </ol>
+    <div class="tip"><b>If the mirror device makes sound:</b> in Windows, open "Settings &rarr; System &rarr; Sound &rarr; Output," select the mirror device, and lower its volume. Because streaming software captures Utawave's audio directly, in most setups only the speakers go quiet while the streamed audio stays (check the meter in your streaming software just in case). If you pick an output that produces no sound — an unused HDMI port, for example — this step is unnecessary.</div>
     <div class="tip"><b>If video and audio drift apart:</b> adjust Utawave's sync offset in the streaming software's advanced audio properties. The mirror's delay is constant, so you only need to set it once.</div>
     <p>The mirror is a copy of the output, so recording and export are unaffected. On macOS, the system's app audio capture (macOS 13 or later, with support in your streaming software) works directly, so the mirror output is usually unnecessary.</p>
   </section>
