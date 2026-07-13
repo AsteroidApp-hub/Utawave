@@ -50,13 +50,15 @@ juce::String StreamMirrorOutput::start(const juce::String& deviceName, AudioEngi
     if (names.isEmpty())
         return tr(u8"出力デバイスが見つかりません");
 
-    juce::String name = deviceName;
-    if (name.isEmpty() || !names.contains(name))
-        name = names[juce::jlimit(0, names.size() - 1, type->getDefaultDeviceIndex(/*forInput*/ false))];
+    // 「OS 既定へのフォールバック」はしない (2026-07 撤去): 既定デバイス = メインで使っている
+    // インターフェイスという環境が大半で、黙って同じ I/O へミラーすると二重聞こえ事故になる。
+    // 未選択 / 繋ぎ直しで消えたデバイスは明示エラーにして、ユーザーに選び直させる
+    if (deviceName.isEmpty() || !names.contains(deviceName))
+        return tr(u8"ミラーの出力先デバイスが見つかりません。環境設定で選び直してください。");
 
-    device.reset(type->createDevice(name, {}));
+    device.reset(type->createDevice(deviceName, {}));
     if (device == nullptr)
-        return tr(u8"ミラー出力デバイスを開けませんでした") + ": " + name;
+        return tr(u8"ミラー出力デバイスを開けませんでした") + ": " + deviceName;
 
     // SR はメインエンジンと同じものを優先 (リサンプル最小化)。無ければ 48k → 44.1k → 先頭。
     // 違っても reader のドリフト補正リサンプラが吸収するので動作はする。

@@ -350,10 +350,10 @@ void MainComponent::showPreferences()
             setupLabel(mirrorDevLabel,
                        tr(u8"ミラーの出力先デバイス (メインと同じデバイスを選ぶと二重に聞こえます)"),
                        13.0f, juce::Colours::white);
-            mirrorDevCombo.addItem(tr(u8"既定の出力デバイス"), 1);
-            mirrorDevNames = StreamMirrorOutput::getOutputDeviceNames();
-            for (int i = 0; i < mirrorDevNames.size(); ++i)
-                mirrorDevCombo.addItem(mirrorDevNames[i], 100 + i);
+            // 候補の投入は showPreferences 側 (メイン出力デバイスの除外に audioEngine が要るため)。
+            // 「既定の出力デバイス」の選択肢は廃止 (2026-07): 既定 = メインと同じ I/O の環境が
+            // 大半で、ON にした瞬間に二重聞こえ事故になる導線だった。未選択の間は開始しない
+            mirrorDevCombo.setTextWhenNothingSelected(tr(u8"デバイスを選択…"));
             mirrorDevCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
             mirrorDevCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
             mirrorDevCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
@@ -939,9 +939,33 @@ void MainComponent::showPreferences()
             dlg->streamGuideLink.onClick = [this] { openBundledHelp("streaming"); };
             dlg->streamGuideLink.setVisible(true);
         }
+
+        // ミラー出力先の候補を投入する。**メイン出力と同じデバイスは候補から外す**
+        // (同じ I/O へのミラーは二重聞こえになるだけで正しい使い方が無いため・2026-07 要望)。
+        // 名前で同一判定できるのは同じ API 同士のみ: Mac は CoreAudio 同士で常に比較可、
+        // Windows はメインが標準ドライバ (Windows Audio 系) のときだけ。メインが ASIO のときは
+        // ASIO ドライバ名と WASAPI デバイス名が別物で確実に対応付けられないため除外しない
+        // (ラベルの「メインと同じデバイスを選ぶと二重に聞こえます」の注意書きでカバー)
+        {
+            dlg->mirrorDevNames = StreamMirrorOutput::getOutputDeviceNames();
+            if (auto* mainDev = audioEngine.getDeviceManager().getCurrentAudioDevice())
+            {
+               #if JUCE_MAC
+                const bool comparable = true;   // CoreAudio 同士
+               #else
+                const bool comparable = audioEngine.getDeviceManager()
+                                            .getCurrentAudioDeviceType().startsWith("Windows Audio");
+               #endif
+                if (comparable)
+                    dlg->mirrorDevNames.removeString(mainDev->getName());
+            }
+            for (int i = 0; i < dlg->mirrorDevNames.size(); ++i)
+                dlg->mirrorDevCombo.addItem(dlg->mirrorDevNames[i], 100 + i);
+        }
+
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
         dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
-        int selId = 1;   // 既定の出力デバイス
+        int selId = 0;   // 0 = 未選択 (「デバイスを選択…」表示・ミラーは開始しない)
         if (appPrefs.streamMirrorDevice.isNotEmpty())
         {
             const int idx = dlg->mirrorDevNames.indexOf(appPrefs.streamMirrorDevice);
@@ -952,6 +976,12 @@ void MainComponent::showPreferences()
             appPrefs.streamMirrorEnabled = v;
             appPrefs.save();
             dlg->mirrorDevCombo.setEnabled(v);
+            // ON にしたのに出力先が未選択なら、コンボを開いて選択を促す (選んだ瞬間に開始される)
+            if (v && dlg->mirrorDevCombo.getSelectedId() == 0)
+            {
+                dlg->mirrorDevCombo.showPopup();
+                return;
+            }
             applyStreamMirrorFromPrefs(/*showErrors*/ true);
         };
         dlg->onMirrorDeviceChanged = [this](juce::String dev) {
@@ -1024,7 +1054,7 @@ void MainComponent::showPreferences()
         dlg->diskStreamBtn.setToggleState(appPrefs.diskStreaming, juce::dontSendNotification);
         dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
-        dlg->mirrorDevCombo.setSelectedId(1, juce::dontSendNotification);
+        dlg->mirrorDevCombo.setSelectedId(0, juce::dontSendNotification);   // 未選択へ戻す
         dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
         dlg->uiScaleCombo.setSelectedId(uiScaleToId(appPrefs.resolvedUiScale()), juce::dontSendNotification);
 
@@ -1058,7 +1088,9 @@ void MainComponent::showPreferences()
 // 開始に失敗した場合は設定を OFF に戻さない (デバイスを繋ぎ直して再起動すれば復帰する)
 void MainComponent::applyStreamMirrorFromPrefs(bool showErrors)
 {
-    if (!appPrefs.streamMirrorEnabled)
+    // 出力先が未選択の間は開始しない (「既定の出力デバイス」廃止後の未選択状態。エラーにはしない
+    // — 旧設定の「既定」(空) が残っているユーザーも起動時に黙って停止し、設定画面で選び直させる)
+    if (!appPrefs.streamMirrorEnabled || appPrefs.streamMirrorDevice.isEmpty())
     {
         streamMirror.stop(audioEngine);
         return;

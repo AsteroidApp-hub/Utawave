@@ -33,7 +33,9 @@ public:
     // 選択可能な出力デバイス名 (環境設定のコンボ用)。message thread から呼ぶ。
     static juce::StringArray getOutputDeviceNames();
 
-    // 開始 (既に動いていれば止めてから)。deviceName 空 = OS 既定の出力デバイス。
+    // 開始 (既に動いていれば止めてから)。deviceName は必須 (空 / 不在はエラー)。
+    // 「OS 既定へのフォールバック」はしない — 既定 = メイン出力と同じ I/O の環境が多く、
+    // 黙って同じデバイスへミラーすると二重聞こえ事故になるため。
     // 戻り値はエラーメッセージ (成功なら空文字)。
     juce::String start(const juce::String& deviceName, AudioEngine& engine);
     // 停止 + エンジンから登録解除。リングは shared_ptr 所有 + エンジン側退役リスト保持なので
