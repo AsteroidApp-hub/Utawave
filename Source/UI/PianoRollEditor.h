@@ -11,6 +11,7 @@
 //   - ノートの追加 (空エリアダブルクリック / ペンモード中はクリック+ドラッグ・D でトグル) /
 //     削除 (Delete) / 移動 (ドラッグ) / リサイズ (端ドラッグ) / 分割 (Option+クリック)
 //   - 追従 (自動ページング) は F でトグル (ボタンと同一経路)
+//   - L でレガート (選択ノートを次のノートの開始位置まで伸ばす)
 //   - 範囲選択 (空エリアドラッグ) / Shift / Cmd で複数選択
 //   - Cmd+C / Cmd+V / Cmd+X コピー・ペースト・カット
 //   - Cmd+A 全選択
@@ -69,6 +70,7 @@ public:
     void mouseDoubleClick(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void modifierKeysChanged(const juce::ModifierKeys&) override;
     bool keyPressed(const juce::KeyPress&) override;
 
     // juce::ScrollBar::Listener
@@ -136,13 +138,14 @@ private:
 
     // ─ 編集操作 ─
     int  createNoteAt(juce::Point<int> pos);        // 新規ノート作成 (index / -1)。undo snapshot 込み
-    void splitNoteAt(int noteIdx, double rawSecs);  // Option+クリックのノート分割 (グリッドスナップ)
+    void splitNoteAt(int noteIdx, double rawSecs);  // Option+クリックのノート分割 (クリック位置ちょうど)
     void deleteSelected();
     void selectAll();
     void copySelected();
     void cutSelected();
     void pasteAtPlayhead();
     void nudgeSelected(double secs, int semis);
+    void legatoSelected();  // L: 選択ノートを次のノートの開始位置まで伸ばす (レガート)
     void snapshotForUndo();  // 状態を内部 Undo スタックへ保存
 
     // ─ 描画ヘルパー ─
@@ -227,11 +230,16 @@ private:
     bool followSuspended { false };
     void noteManualHScroll();  // 手動横スクロール後に一時停止状態を更新する
 
-    // ペンツール (ON 中は空きエリアのクリックでノート作成 + ドラッグで長さ調整)
+    // ペンツール (ON 中は空きエリアのクリックでノート作成 + ドラッグで長さ調整)。
+    // Cmd を押している間は penMode に依らず一時的にペンとして振る舞う (penActive)。
     bool penMode { false };
 
-    // ルーラー右上のツールボタン (追従 = テキスト / ペン = 鉛筆アイコン)
-    juce::TextButton     followBtn;
+    // ホバー時のカーソルを位置と修飾キーから決める (mouseMove / modifierKeysChanged 共用)
+    void updateHoverCursor(juce::Point<int> pos, const juce::ModifierKeys& mods);
+
+    // ルーラー右上のツールボタン (追従 = プレイヘッド追従アイコン / ペン = 鉛筆アイコン)
+    // 追従はテキスト "追従" だと Windows で潰れて読みにくいためアイコン化した
+    juce::DrawableButton followBtn { "follow", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton penBtn { "pen", juce::DrawableButton::ImageOnButtonBackground };
 
     // この窓専用のツールチップ表示 (setTooltipsEnabled で生成/破棄)
