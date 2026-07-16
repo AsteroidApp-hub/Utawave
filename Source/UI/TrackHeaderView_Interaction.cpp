@@ -287,23 +287,27 @@ void TrackHeaderView::handleTrackContextMenuResult(int result)
         repaint();
         if (onChanged) onChanged();
     }
+    // 削除/複製/フォルダ移動はトラック集合を変え、コールバック内の TrackHeaderPanel::refresh が
+    // この view ごと再生成する = メンバ std::function を実行中にその実体が破棄される UAF (id56/58)。
+    // ローカルへコピーしてから呼び、実行中のラムダ実体をスタック所有にする (呼んだ後は this に触らない)。
     else if (result == 200) {
-        if (onDeleteRequest) onDeleteRequest();
+        if (auto fn = onDeleteRequest) fn();
     }
     else if (result == 201) {
         // Option (Mac) / Alt (Win) 押下中はテイクリストを複製しない (Lane 0 のみ)
         const bool excludeTakes = juce::ModifierKeys::getCurrentModifiers().isAltDown();
-        if (onDuplicateRequest) onDuplicateRequest(!excludeTakes);
+        if (auto fn = onDuplicateRequest) fn(!excludeTakes);
     }
     else if (result == 699) {
-        if (onMoveToFolder) onMoveToFolder(-1);   // フォルダから出す
+        if (auto fn = onMoveToFolder) fn(-1);   // フォルダから出す
     }
     else if (result >= 700 && result < 800) {
         if (onMoveToFolder && getFolderTargets)
         {
             const auto folders = getFolderTargets();
             const size_t i = (size_t)(result - 700);
-            if (i < folders.size()) onMoveToFolder(folders[i].second);
+            if (i < folders.size())
+                if (auto fn = onMoveToFolder) fn(folders[i].second);
         }
     }
     else if (result >= 400 && result < 500) {

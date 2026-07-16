@@ -646,10 +646,13 @@ void TrackHeaderPanel::refresh()
         view->getDeleteCount = [this, idx] { return deleteScopeCount(idx); };
         view->onDuplicateRequest = [this, idx](bool includeTakeLanes)
         {
+            // 複製側の refresh がこのラムダを所有する view を再生成するため、破壊的
+            // 呼び出しの後にキャプチャへ触らない (必要なメンバは先にローカルへ写す・id56/58)
+            auto changed = onTrackChanged;
             // プラグインクローンは MainComponent 側で行う必要があるため必ず委譲
             if (onTrackDuplicateRequest)
                 onTrackDuplicateRequest(idx, includeTakeLanes);
-            if (onTrackChanged) onTrackChanged();
+            if (changed) changed();
         };
         view->onLanePromoteRequest   = [this, idx](int lane) { if (onLanePromoteRequest)  onLanePromoteRequest(idx, lane); };
         view->getLanePromoteEnabled  = [this, idx](int lane) { return onCanPromoteLane && onCanPromoteLane(idx, lane); };
