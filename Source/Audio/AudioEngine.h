@@ -687,10 +687,28 @@ private:
 public:
     // ピアノロール等の UI から MIDI ノート単発プレビュー (内蔵シンセ経由)
     void previewMidiNote(int trackIdx, int note, float velocity, bool isOn);
+
+    // ── MIDI キーボードのライブ入力 (環境設定「MIDI入力」) ──
+    // pushLiveMidi は MIDI 入力スレッドから呼ばれる (audio thread ではないので確保/ロック可)。
+    // ターゲットトラックの内蔵シンセと INS チェーン (VSTi) の両方へ届く。チャンネルは全受信。
+    void pushLiveMidi(const juce::MidiMessage& msg);
+    // ライブ MIDI の出力先トラック (-1 = 無効)。message thread から
+    // (MainComponent::updateLiveMidiTarget が選択中の MIDI トラックを publish する)
+    void setLiveMidiTargetTrack(int trackIdx) { liveMidiTargetTrack.store(trackIdx); }
+    int  getLiveMidiTargetTrack() const       { return liveMidiTargetTrack.load(); }
 private:
     struct PreviewMidiEvent { int trackIdx; int note; float velocity; bool isOn; };
     juce::CriticalSection previewMidiLock;
     std::vector<PreviewMidiEvent> pendingPreviewMidi;
+
+    // ライブ MIDI キュー (previewMidi と同じ作法: audio は ScopedTryLock で非ブロッキング drain)
+    juce::CriticalSection liveMidiLock;
+    std::vector<juce::MidiMessage> pendingLiveMidi;
+    std::atomic<int> liveMidiTargetTrack { -1 };
+    int liveMidiLastTarget { -1 };   // audio thread 専用 (ターゲット変更検知 → 旧 synth の allNotesOff)
+    int liveMidiChainFlush { -1 };   // audio thread 専用: 旧ターゲットの chain へ all-notes-off を送る予約
+    // このブロックで drain したライブイベント (audio thread 専用・停止/再生ブランチが共用)
+    juce::MidiBuffer liveMidiScratch;
 
     // マスターインサートチェーン（マスターゲイン前に適用）
     std::unique_ptr<PluginChain> masterChain;

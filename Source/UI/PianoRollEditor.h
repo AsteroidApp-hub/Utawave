@@ -11,6 +11,9 @@
 //   - ノートの追加 (空エリアダブルクリック / ペンモード中はクリック+ドラッグ・D でトグル) /
 //     削除 (Delete) / 移動 (ドラッグ) / リサイズ (端ドラッグ) / 分割 (Option+クリック)
 //   - 追従 (自動ページング) は F でトグル (ボタンと同一経路)
+//   - ステップ入力は I でトグル (MIDI キーボードでカーソル位置へ順にノートを置く。
+//     長さは STEP コンボ = GRID と同じ音価から選択・←/→ でカーソル移動 = 休符送り。
+//     S は macOS の GlobalKeyMonitor が「停止」として消費するため使えない)
 //   - L でレガート (選択ノートを次のノートの開始位置まで伸ばす)
 //   - 範囲選択 (空エリアドラッグ) / Shift / Cmd で複数選択
 //   - Cmd+C / Cmd+V / Cmd+X コピー・ペースト・カット
@@ -103,6 +106,12 @@ public:
     // MidiClip 側のシーケンスが外部から書き換わった (undo/redo 等) ときに
     // 内部 Note 配列を再構築する。MidiNotesAction から呼ばれる。
     void reloadNotesFromClip();
+
+    // ── ステップ入力 (MIDI キーボードで順にノートを置く・I でトグル) ──
+    // MainComponent が MIDI キーボードのノートを (message thread で) ここへ転送する。
+    // 同時に押した鍵は同じ位置に和音として置き、全部離した時にカーソルが 1 ステップ進む。
+    bool isStepInputActive() const { return stepMode; }
+    void handleStepInputMidi(int note, float velocity, bool isOn);
 
 private:
     struct Note
@@ -241,6 +250,18 @@ private:
     // 追従はテキスト "追従" だと Windows で潰れて読みにくいためアイコン化した
     juce::DrawableButton followBtn { "follow", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton penBtn { "pen", juce::DrawableButton::ImageOnButtonBackground };
+
+    // ステップ入力 (階段アイコン)。ON 中は stepLenBox (ノート長) を隣に出す
+    juce::DrawableButton stepBtn { "step", juce::DrawableButton::ImageOnButtonBackground };
+    bool           stepMode { false };
+    SnapMode       stepLenMode { SnapMode::Eighth };   // ステップで置くノートの長さ
+    bool           stepLenUserSet { false };           // 一度も触っていなければ ON 時に GRID から引き継ぐ
+    juce::ComboBox stepLenBox;                         // GRID と同じ音価の選択肢 (Off は除く)
+    double         stepPosSec { 0.0 };                 // 入力カーソル (クリップ先頭からの秒)
+    std::set<int>  stepHeldKeys;                       // 押下中の鍵 (全て離れたら 1 ステップ進む)
+    double         stepChordPos { 0.0 };               // いま置いている和音の開始位置
+    double stepLenSecs() const { return snapModeUnitSecs(stepLenMode, bpm); }
+    void   moveStepCursor(double newPos);              // クランプ + スクロール追従 + repaint
 
     // この窓専用のツールチップ表示 (setTooltipsEnabled で生成/破棄)
     std::unique_ptr<juce::TooltipWindow> tooltipWin;

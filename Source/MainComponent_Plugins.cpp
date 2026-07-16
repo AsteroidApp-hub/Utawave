@@ -25,6 +25,9 @@ MainComponent::~MainComponent()
     // VBlank コールバックは message thread で来る。破棄前にここで確実に外し、
     // onVBlank が参照する各メンバ (timelineView / audioEngine 等) より先に切り離す。
     vblankAttachment = {};
+    // MIDI 入力コールバックは専用スレッドで来る。audioEngine 等のメンバ破棄より先に閉じる
+    midiDeviceListConnection = juce::MidiDeviceListConnection();
+    midiKeyboardInput.reset();
    #if JUCE_MAC
     juce::MenuBarModel::setMacMainMenu(nullptr);
    #endif
@@ -339,6 +342,46 @@ void MainComponent::applyMidiPagingToOpenEditors()
         if (w)
             if (auto* ed = w->getEditor())
                 ed->setPagingEnabled(appPrefs.midiPagingEnabled);
+}
+
+// MIDI キーボード入力 (MIDI スレッドで来る)。UI/trackManager には触れず、AudioEngine の
+// ライブ MIDI キューへ積むだけ。ノートは message thread へ転送してステップ入力にも渡す
+void MainComponent::MidiKeyboardCallback::handleIncomingMidiMessage(
+    juce::MidiInput*, const juce::MidiMessage& m)
+{
+    auto* mc = owner;
+    if (mc == nullptr) return;
+    if (m.isActiveSense() || m.isMidiClock()
+        || m.isMidiStart() || m.isMidiStop() || m.isMidiContinue())
+        return;
+    mc->audioEngine.pushLiveMidi(m);
+    // ステップ入力中のピアノロールが無ければ message thread へ転送しない
+    // (ライブ演奏の毎ノートで無駄な callAsync を post しないための事前判定)
+    if (m.isNoteOnOrOff() && mc->stepInputWanted.load())
+    {
+        const int   note = m.getNoteNumber();
+        const float vel  = m.getFloatVelocity();
+        const bool  on   = m.isNoteOn();   // velocity 0 の note-on は off 扱い (isNoteOn は false)
+        auto safe = ownerSafe;             // master は ctor (message thread) 作成済み・コピーは安全
+        juce::MessageManager::callAsync([safe, note, vel, on]
+        {
+            if (auto* self = safe.getComponent())
+                self->dispatchStepInputNote(note, vel, on);
+        });
+    }
+}
+
+// ステップ入力が有効な開いているピアノロールへ MIDI キーボードのノートを渡す (先頭 1 枚のみ)
+void MainComponent::dispatchStepInputNote(int note, float velocity, bool isOn)
+{
+    for (auto* w : pianoRollWindows)
+        if (w != nullptr)
+            if (auto* ed = w->getEditor())
+                if (ed->isStepInputActive())
+                {
+                    ed->handleStepInputMidi(note, velocity, isOn);
+                    return;
+                }
 }
 
 void MainComponent::openPianoRollFor(MidiClip* clip, Track* track)

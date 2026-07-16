@@ -992,6 +992,17 @@ MainComponent::MainComponent()
     // (デバイス取り外し等) は稀だが配信前に気付けるようダイアログで知らせる
     applyStreamMirrorFromPrefs(/*showErrors*/ true);
 
+    // MIDI キーボード入力を設定に応じて開く。起動時はキーボードの電源が入っていないのが普通
+    // なのでエラーは出さない (抜き差しリスナーが後から繋がったデバイスを自動で開き直す)
+    midiKeyboardCallback.owner     = this;
+    midiKeyboardCallback.ownerSafe = this;   // WeakReference の master を message thread で作る
+    applyMidiInputFromPrefs(/*showErrors*/ false);
+    midiDeviceListConnection = juce::MidiDeviceListConnection::make([this]
+    {
+        if (appPrefs.midiInputEnabled)
+            applyMidiInputFromPrefs(/*showErrors*/ false);
+    });
+
     if (auto* dev = audioEngine.getDeviceManager().getCurrentAudioDevice())
     {
         int sr = (int)dev->getCurrentSampleRate();
@@ -1067,6 +1078,10 @@ MainComponent::MainComponent()
 
 void MainComponent::timerCallback()
 {
+    // ライブ MIDI の出力先トラックを選択/構成に追従させる (トラック走査のみで軽量。
+    // 選択変更・追加/削除/並べ替え・プロジェクト遷移の全経路を個別フックせずここで吸収)
+    updateLiveMidiTarget();
+
     // Metering: アイドル時 (再生/録音/入力モニターのいずれも無し) はメーター計算を省く。
     // 直後の数 tick は猶予として計算を続け、メーターが無音まで滑らかに減衰してから止める。
     bool meterActive = isPlaying || isRecording;

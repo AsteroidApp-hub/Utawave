@@ -274,6 +274,37 @@ private:
     // appPrefs.streamMirror* に応じて配信ミラー出力を開始 / 停止する (起動時と環境設定変更時)。
     // showErrors = 開始失敗時にダイアログで知らせるか (環境設定からの操作では true)
     void applyStreamMirrorFromPrefs(bool showErrors);
+
+    // ── MIDI キーボード入力 (appPrefs.midiInput*) ──
+    // appPrefs.midiInput* に応じて MIDI 入力デバイスを開く / 閉じる (起動時・環境設定変更時・
+    // デバイスの抜き差し時)。showErrors = 開けなかった時にダイアログで知らせるか
+    // (起動時はキーボードの電源が入っていないのが普通なので false = 黙って諦める)
+    void applyMidiInputFromPrefs(bool showErrors);
+    // ライブ MIDI の出力先トラックをエンジンへ publish する。選択中のトラックが MIDI トラック
+    // ならそこへ、そうでなければ最初の MIDI トラックへ (初心者がトラック選択を意識しなくても
+    // 鳴る)。選択/構成変更に確実に追従するよう timerCallback (20Hz) から毎 tick 呼ぶ (軽量)
+    void updateLiveMidiTarget();
+    // MIDI キーボードのノートを、ステップ入力が有効な開いているピアノロールへ転送する
+    // (message thread。MIDI スレッドからは callAsync 経由で届く)
+    void dispatchStepInputNote(int note, float velocity, bool isOn);
+    // MIDI 入力コールバック (MIDI スレッドで来る)。UI に触れず AudioEngine のキューへ積み、
+    // ノートだけ callAsync でステップ入力へ転送する
+    struct MidiKeyboardCallback : juce::MidiInputCallback
+    {
+        MainComponent* owner { nullptr };
+        // MIDI スレッドから安全に message thread へ渡すための弱参照 (ctor で message thread が
+        // 作成 = WeakReference の master はコピーだけがスレッド横断する)
+        juce::Component::SafePointer<MainComponent> ownerSafe;
+        void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage&) override;
+    };
+    MidiKeyboardCallback midiKeyboardCallback;
+    std::unique_ptr<juce::MidiInput> midiKeyboardInput;
+    // MIDI デバイスの抜き差しに追従して開き直す (電源を後から入れても設定し直し不要)
+    juce::MidiDeviceListConnection midiDeviceListConnection;
+    // ステップ入力が有効なピアノロールが開いているか。MIDI スレッドが「ノートを message
+    // thread へ転送 (callAsync) するか」の事前判定に読む (ライブ演奏中に毎ノートの
+    // 無駄なメッセージ post をしない)。updateLiveMidiTarget (20Hz) が更新する
+    std::atomic<bool> stepInputWanted { false };
     void commitRetrospective();
     // ── オーディオインポート ──
     // 変換本体 (ファイル I/O のみ・UI/trackManager に触れない)。バックグラウンドスレッドから

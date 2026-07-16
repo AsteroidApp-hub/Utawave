@@ -131,6 +131,74 @@ PianoRollEditor::PianoRollEditor(MidiClip& clipRef, double projectBpm,
     penBtn.onClick = [this] { penMode = penBtn.getToggleState(); };
     addAndMakeVisible(penBtn);
 
+    // ── ステップ入力トグル + ノート長 ComboBox ──
+    setupToolButton(stepBtn);
+    {
+        // 階段アイコン (左下から右上へ上がる 3 段 = 順に置いていくイメージ)
+        juce::Path stairs;
+        stairs.addRectangle(0.16f, 0.62f, 0.22f, 0.22f);
+        stairs.addRectangle(0.40f, 0.40f, 0.22f, 0.44f);
+        stairs.addRectangle(0.64f, 0.18f, 0.22f, 0.66f);
+        juce::DrawablePath dp;
+        dp.setPath(stairs);
+        dp.setFill(juce::Colours::white);
+        stepBtn.setImages(&dp);
+    }
+    stepBtn.setTooltip(
+        tr(u8"ステップ入力: MIDIキーボードを弾くと、カーソル位置へ選んだ長さのノートを順に置きます (←/→ でカーソル移動・同時に押した鍵は和音)") + " (I)");
+    stepBtn.onClick = [this]
+    {
+        stepMode = stepBtn.getToggleState();
+        stepHeldKeys.clear();
+        if (stepMode)
+        {
+            // 一度も選んでいなければ現在の GRID から長さを引き継ぐ (Off は既定 1/8 のまま)
+            if (!stepLenUserSet && snapMode != SnapMode::Off)
+            {
+                stepLenMode = snapMode;
+                stepLenBox.setSelectedId((int) stepLenMode + 1, juce::dontSendNotification);
+            }
+            // カーソルは再生バー位置 (クリップ範囲内・グリッドへスナップ) から始める。
+            // スナップの丸めがクリップ末尾を越えると全ノートが「置けない」判定になるため、
+            // スナップ後にもう一度クリップ範囲へクランプする
+            double start = (playheadSec > -1e6) ? juce::jmax(0.0, playheadSec) : 0.0;
+            const double clipLen = clip.getDuration();
+            if (clipLen > 0.0) start = juce::jmin(start, clipLen);
+            stepPosSec = juce::jmax(0.0, snapTimeSecs(start));
+            if (clipLen > 0.0) stepPosSec = juce::jmin(stepPosSec, clipLen);
+        }
+        stepLenBox.setVisible(stepMode);
+        resized();
+        repaint();
+    };
+    addAndMakeVisible(stepBtn);
+
+    // ステップで置くノートの長さ (GRID と同じ選択肢・Off は除く)
+    stepLenBox.addItem(tr(u8"STEP: 1/1"),  (int) SnapMode::Bar + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/2"),  (int) SnapMode::Half + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/4"),  (int) SnapMode::Quarter + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/8"),  (int) SnapMode::Eighth + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/16"), (int) SnapMode::Sixteenth + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/32"), (int) SnapMode::ThirtySecond + 1);
+    stepLenBox.addSeparator();
+    stepLenBox.addItem(tr(u8"STEP: 1/4 三連"),  (int) SnapMode::QuarterT + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/8 三連"),  (int) SnapMode::EighthT + 1);
+    stepLenBox.addItem(tr(u8"STEP: 1/16 三連"), (int) SnapMode::SixteenthT + 1);
+    stepLenBox.setSelectedId((int) stepLenMode + 1, juce::dontSendNotification);
+    stepLenBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff2a2d31));
+    stepLenBox.setColour(juce::ComboBox::textColourId,       juce::Colours::white);
+    stepLenBox.setColour(juce::ComboBox::arrowColourId,      juce::Colours::white);
+    stepLenBox.setColour(juce::ComboBox::outlineColourId,    juce::Colour(0xff555555));
+    stepLenBox.setWantsKeyboardFocus(false);
+    stepLenBox.setTooltip(tr(u8"ステップ入力で置くノートの長さ"));
+    stepLenBox.onChange = [this]
+    {
+        stepLenMode    = (SnapMode) (stepLenBox.getSelectedId() - 1);
+        stepLenUserSet = true;
+    };
+    stepLenBox.setVisible(false);   // ステップ入力 ON の間だけ表示
+    addChildComponent(stepLenBox);
+
     // 横スクロールバー
     hScrollBar.setAutoHide(false);
     hScrollBar.addListener(this);
@@ -423,6 +491,9 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
         const double secsInClip = juce::jmax(0.0, xToTime(e.x));
         setPlayheadPosition(secsInClip);  // 即座にビジュアル反映
         if (onSeek) onSeek(secsInClip);   // メイン側のプレイヘッドも同期
+        // ステップ入力中はカーソルも移動する (入力位置の指定手段。GRID にスナップ)
+        if (stepMode)
+            moveStepCursor(snapTimeSecs(secsInClip));
         return;
     }
 
@@ -884,6 +955,17 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
         }
         return true;
     }
+    // ステップ入力中の ←/→ は入力カーソルを 1 ステップ動かす (→ = 休符送りを兼ねる)。
+    // ノートのナッジより優先する (ステップ入力の主操作のため)。↑/↓ は従来どおりピッチナッジ
+    if (stepMode && !mods.isAnyModifierKeyDown())
+    {
+        const double len = stepLenSecs();
+        if (len > 0.0)
+        {
+            if (k.getKeyCode() == juce::KeyPress::leftKey)  { moveStepCursor(stepPosSec - len); return true; }
+            if (k.getKeyCode() == juce::KeyPress::rightKey) { moveStepCursor(stepPosSec + len); return true; }
+        }
+    }
     if (k.getKeyCode() == juce::KeyPress::leftKey)   { nudgeSelected(-0.01, 0); return true; }
     if (k.getKeyCode() == juce::KeyPress::rightKey)  { nudgeSelected( 0.01, 0); return true; }
     if (k.getKeyCode() == juce::KeyPress::upKey)     { nudgeSelected(0.0,  1); return true; }
@@ -903,6 +985,14 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
         if (kc == 'D' || kc == 'd')
         {
             penBtn.setToggleState(!penBtn.getToggleState(), juce::sendNotification);
+            return true;
+        }
+        // I: ステップ入力トグル (ボタンクリックと同一経路)。S は使わない — macOS の
+        // GlobalKeyMonitor が無修飾 S を「停止」として全ウィンドウで消費するため届かない
+        // (D/F/L と同じく監視対象外のキーから選定。I = step Input)
+        if (kc == 'I' || kc == 'i')
+        {
+            stepBtn.setToggleState(!stepBtn.getToggleState(), juce::sendNotification);
             return true;
         }
         // L: レガート (選択ノートを次のノートの開始位置まで伸ばす)
@@ -1254,6 +1344,22 @@ void PianoRollEditor::paint(juce::Graphics& g)
         }
     }
 
+    // ステップ入力カーソル (アクセント色の縦線 + 上端の下向き三角)
+    if (stepMode)
+    {
+        const int sx = timeToX(juce::jmax(0.0, stepPosSec));
+        if (sx >= keyboardW && sx < getWidth())
+        {
+            g.setColour(AppColours::accent);
+            g.fillRect(sx - 1, rulerH, 2, getHeight() - velocityH - rulerH);
+            juce::Path tri;
+            tri.addTriangle((float) sx - 5.0f, (float) rulerH,
+                            (float) sx + 5.0f, (float) rulerH,
+                            (float) sx,        (float) rulerH + 7.0f);
+            g.fillPath(tri);
+        }
+    }
+
     // ラバーバンド
     if (dragMode == DragMode::RubberBand && !rubberBand.isEmpty())
     {
@@ -1362,10 +1468,13 @@ void PianoRollEditor::drawVelocityArea(juce::Graphics& g) const
 
 void PianoRollEditor::resized()
 {
-    // 右上隅に GRID ComboBox、その左に ペン (アイコン) / 追従 (アイコン) ボタン
+    // 右上隅に GRID ComboBox、その左に ペン (アイコン) / 追従 (アイコン) / ステップ (アイコン)。
+    // ステップ入力 ON の間はさらに左へ STEP 長 ComboBox を出す
     snapBox.setBounds(getWidth() - 130, 2, 124, rulerH - 4);
     penBtn.setBounds(snapBox.getX() - 4 - 28, 2, 28, rulerH - 4);
     followBtn.setBounds(penBtn.getX() - 4 - 28, 2, 28, rulerH - 4);
+    stepBtn.setBounds(followBtn.getX() - 4 - 28, 2, 28, rulerH - 4);
+    stepLenBox.setBounds(stepBtn.getX() - 4 - 110, 2, 110, rulerH - 4);
     // 底部に横スクロールバー (Velocity 領域の下)
     hScrollBar.setBounds(keyboardW, getHeight() - kScrollBarH,
                           juce::jmax(0, getWidth() - keyboardW), kScrollBarH);
@@ -1407,4 +1516,62 @@ double PianoRollEditor::snapTimeSecs(double secs) const
     const double u = snapUnitSecs();
     if (u <= 0.0) return secs;
     return std::round(secs / u) * u;
+}
+
+// ── ステップ入力 ─────────────────────────────────────────────────────────
+void PianoRollEditor::moveStepCursor(double newPos)
+{
+    const double clipLen = clip.getDuration();
+    stepPosSec = juce::jmax(0.0, newPos);
+    if (clipLen > 0.0) stepPosSec = juce::jmin(stepPosSec, clipLen);
+    // カーソルがビュー外へ出たら追いかける (置いた続きが常に見える)
+    const int x = timeToX(stepPosSec);
+    if (x < keyboardW || x > getWidth() - 40)
+    {
+        scrollX = juce::jmax(0, (int) std::round(stepPosSec * pixelsPerSec) - 80);
+        updateScrollBarRange();
+    }
+    repaint();
+}
+
+// MIDI キーボードのノートを受けてカーソル位置へノートを置く (MainComponent から message
+// thread で呼ばれる)。同時に押した鍵は同じ開始位置 (stepChordPos) に和音として置き、
+// 全ての鍵が離れた時点でカーソルを 1 ステップ進める (一般的な DAW のステップ入力と同じ)。
+void PianoRollEditor::handleStepInputMidi(int note, float velocity, bool isOn)
+{
+    if (!stepMode) return;
+    const double len = stepLenSecs();
+    if (len <= 0.0) return;
+    const double clipLen = clip.getDuration();
+
+    if (!isOn)
+    {
+        // 対応する note-on を受けていない迷子 note-off (S トグル前から押していた鍵等) では
+        // 進めない — 空集合のまま advance すると stale な stepChordPos へカーソルが飛ぶ
+        if (stepHeldKeys.erase(note) > 0 && stepHeldKeys.empty())
+            moveStepCursor(stepChordPos + len);
+        return;
+    }
+
+    if (stepHeldKeys.empty())
+    {
+        stepChordPos = stepPosSec;
+        selected.clear();   // 新しいステップ = 新しい和音の選択に切り替える
+    }
+    stepHeldKeys.insert(note);
+
+    // クリップ末尾より先には置けない (advance の対称性のため held には積んだままにする)
+    if (clipLen > 0.0 && stepChordPos >= clipLen - 1e-9)
+        return;
+
+    snapshotForUndo();
+    Note n;
+    n.pitch       = juce::jlimit(0, 127, note);
+    n.velocity    = juce::jlimit(0.05f, 1.0f, velocity);
+    n.startSec    = stepChordPos;
+    n.durationSec = juce::jmax(0.01, (clipLen > 0.0) ? juce::jmin(len, clipLen - stepChordPos) : len);
+    notes.push_back(n);
+    selected.insert((int) notes.size() - 1);
+    writeNotesToClip();
+    repaint();
 }

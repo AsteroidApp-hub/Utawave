@@ -100,6 +100,24 @@ void AudioEngine::previewMidiNote(int trackIdx, int note, float velocity, bool i
     pendingPreviewMidi.push_back({ trackIdx, note, velocity, isOn });
 }
 
+void AudioEngine::pushLiveMidi(const juce::MidiMessage& msg)
+{
+    const juce::ScopedLock sl(liveMidiLock);
+    // MIDI スレッド側で先に確保しておく (audio の trylock を realloc 中に外させない)
+    if (pendingLiveMidi.capacity() < 600)
+        pendingLiveMidi.reserve(600);
+    // audio callback が止まっている (デバイス停止等) 間に無限に溜めない。
+    // 溜まった分は stale なので捨てるが、note-off も一緒に落ちるため all-notes-off を仕込み、
+    // callback 再開時に押しっぱなしノートが残らないようにする (synth / chain の両方が drain で受ける)
+    if (pendingLiveMidi.size() >= 512)
+    {
+        pendingLiveMidi.clear();
+        for (int ch = 1; ch <= 16; ++ch)
+            pendingLiveMidi.push_back(juce::MidiMessage::allNotesOff(ch));
+    }
+    pendingLiveMidi.push_back(msg);
+}
+
 // ── 録音設定スナップショットの公開・回収 (recLock の lock-free 化) ──
 void AudioEngine::publishRecConfig(std::shared_ptr<const RecordingConfig> next, bool drain)
 {
@@ -841,10 +859,13 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             masterChain->prepareToPlay(currentSampleRate, currentBufferSize);
 
         // ── MIDI 再生キャッシュ構築 ──
+        // クリップ 0 個の MIDI トラックも含める (events は空)。MIDI キーボードのライブ入力
+        // (pushLiveMidi) が空のトラックでも synth / INS チェーン (VSTi) を鳴らせるようにするため。
+        // 空トラックの再生コストは synth の idle 早期 return + チェーンの空チェックでほぼゼロ
         for (int ti = 0; ti < tm.getTrackCount(); ++ti)
         {
             auto* tr = tm.getTrack(ti);
-            if (!tr || !tr->isMidiTrack() || tr->getMidiClipCount() == 0) continue;
+            if (!tr || !tr->isMidiTrack()) continue;
             MidiPlayback mp;
             mp.trackIdx = ti;
             mp.track    = tr;
@@ -1349,6 +1370,8 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     // 停止中シンセプレビュー用に十分なサイズで先に確保 (audio thread での realloc を回避)
     const int previewCh = juce::jmax(2, device->getActiveOutputChannels().countNumberOfSetBits());
     previewBuf.setSize(previewCh, currentBufferSize);
+    // ライブ MIDI の drain 先も先に確保 (最初の和音/キュー溢れ時の audio thread realloc を回避)
+    liveMidiScratch.ensureSize(4096);
     // クリップ読み出し用スクラッチは PlaybackSnapshot::clipScratch (トラック単位) に移行した
     // (マルチコア描画でワーカーが並列に renderClip を呼んでも競合しないように)。確保は
     // preparePlayback で行う。これにより mono→stereo 切替時の renderClip 内 setSize も容量内に収まる。
@@ -1964,6 +1987,11 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                 if (!exportTrackActive(mp.trackIdx, mp.track, explicitFilter, includeSet, anySolo,
                                        folderOfIn(*snap, mp.trackIdx)))
                     continue;
+                // クリップ 0 個で synth もチェーンも無い MIDI トラックは何も出さない
+                // (空 MIDI トラックを snap に含めるようにした分のコスト節約・出力不変)
+                if (mp.events.empty() && !mp.track->isSynthEnabled()
+                    && mp.track->getPluginChain().getActivePluginCountAtomic() == 0)
+                    continue;
 
                 auto& syn = offlineSynths[mp.trackIdx];
                 if (!syn)
@@ -2535,6 +2563,58 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         }
     }
 
+    // ── MIDI キーボードのライブ入力を drain (停止/再生ブランチ共用) ──
+    // 対象トラックの内蔵シンセへはここで note-on/off を直接適用する (プレビューと同じ経路)。
+    // INS チェーン (VSTi) へは liveMidiScratch を各ブランチが processBlock の MIDI に合流させる
+    // (再生ブランチでは synth 処理の「後」に mb へ足す = 内蔵シンセの二重発音を防ぐ)。
+    const int liveMidiTarget = liveMidiTargetTrack.load();
+    liveMidiScratch.clear();
+    {
+        const juce::ScopedTryLock sl(liveMidiLock);
+        if (sl.isLocked() && !pendingLiveMidi.empty())
+        {
+            for (const auto& m : pendingLiveMidi)
+                liveMidiScratch.addEvent(m, 0);
+            pendingLiveMidi.clear();
+        }
+    }
+    if (liveMidiLastTarget != liveMidiTarget)
+    {
+        // ターゲット変更 (トラック選択の切替等): 旧トラックで押しっぱなしのノートを止める。
+        // synth は即時 allNotesOff、chain (VSTi) へは再生ループで all-notes-off を送る予約
+        if (liveMidiLastTarget >= 0 && liveMidiLastTarget < (int) snap->synths.size()
+            && snap->synths[(size_t) liveMidiLastTarget])
+            snap->synths[(size_t) liveMidiLastTarget]->allNotesOff();
+        liveMidiChainFlush = liveMidiLastTarget;
+        liveMidiLastTarget = liveMidiTarget;
+    }
+    if (!liveMidiScratch.isEmpty()
+        && liveMidiTarget >= 0 && liveMidiTarget < (int) snap->synths.size()
+        && snap->synths[(size_t) liveMidiTarget])
+    {
+        // 内蔵シンセ OFF のトラックには **note-on を**適用しない (停止中は synth プレビューが
+        // synthEnabled に依らず全 synth を描画するため、適用すると VSTi (チェーン) と二重に
+        // 鳴ってしまう)。note-off / all-notes-off / pitch wheel は常に届ける — 押しっぱなしの
+        // まま synth を ON→OFF に切替えた場合に落とすと、鳴動中のボイスを止められず
+        // 鳴り続ける (clearPlayback 直後の snap->midi が空の窓でも note-off は失わない)
+        bool synthOn = false;
+        for (const auto& mp : snap->midi)
+            if (mp.trackIdx == liveMidiTarget)
+            {
+                synthOn = (mp.track != nullptr && mp.track->isSynthEnabled());
+                break;
+            }
+        auto& syn = snap->synths[(size_t) liveMidiTarget];
+        for (const auto meta : liveMidiScratch)
+        {
+            const auto m = meta.getMessage();
+            if      (m.isNoteOn())     { if (synthOn) syn->noteOn(m.getNoteNumber(), m.getFloatVelocity()); }
+            else if (m.isNoteOff())    syn->noteOff(m.getNoteNumber());
+            else if (m.isPitchWheel()) syn->setPitchWheel(m.getPitchWheelValue());
+            else if (m.isAllNotesOff() || m.isAllSoundOff()) syn->allNotesOff();
+        }
+    }
+
     if (!playing.load())
     {
         // 再生が止まった最初のブロックでリバーブのテールをリセットする。
@@ -2619,6 +2699,79 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                     const float chGain = vol * (ch == 0 ? panL : panR);
                     const float* src = buf.getReadPointer(juce::jmin(ch, buf.getNumChannels() - 1));
                     juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
+                }
+            }
+
+            // ── ライブ MIDI (MIDI キーボード) 対象トラックの INS チェーン (VSTi) ──
+            // MIDI トラックは clipTracks (音声クリップのトラック一覧) に出ないため上のループでは
+            // 処理されない。停止中でも VSTi 音源で弾けるよう、対象トラックのチェーンだけ毎ブロック
+            // 処理する (発音イベントの無いブロックも回す = 押しっぱなし/テールの継続レンダリング)。
+            // trackIdx → MidiPlayback の解決ヘルパ (snap->midi 内で trackIdx は一意)
+            auto findMidiPlayback = [&snap](int tidx) -> const MidiPlayback*
+            {
+                if (tidx < 0) return nullptr;
+                for (auto& mp : snap->midi)
+                    if (mp.trackIdx == tidx) return &mp;
+                return nullptr;
+            };
+            auto chainProcessable = [&](const MidiPlayback* mp) -> PluginChain*
+            {
+                if (mp == nullptr || mp->track == nullptr) return nullptr;
+                if (mp->trackIdx >= (int) snap->trackBuffers.size()) return nullptr;
+                auto& chain = mp->track->getPluginChain();
+                if (chain.getActivePluginCountAtomic() == 0) return nullptr;
+                if (monActive && &chain == monChain) return nullptr;   // モニタ経路と二重処理しない
+                if (!chain.isPreparedFor(currentSampleRate, currentBufferSize)) return nullptr;
+                return &chain;
+            };
+
+            // ターゲット変更で残った旧トラックのチェーンへ all-notes-off を届ける (再生ループの
+            // liveMidiChainFlush 消費と対)。これをしないと、停止中にトラック選択を切替えた時
+            // 旧 VSTi の押しっぱなしノートがプラグイン内部に残り、再ターゲット時に鳴り出す
+            if (liveMidiChainFlush >= 0)
+            {
+                if (auto* mp = findMidiPlayback(liveMidiChainFlush))
+                    if (auto* chain = chainProcessable(mp))
+                    {
+                        auto& buf = snap->trackBuffers[(size_t) mp->trackIdx];
+                        buf.setSize(2, numSamples, false, false, true);
+                        buf.clear();
+                        chainMidiScratch.clear();
+                        for (int ch = 1; ch <= 16; ++ch)
+                            chainMidiScratch.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
+                        chain->processBlock(buf, chainMidiScratch, &playHead);
+                        // 出力は混ぜない (旧ターゲットの停止処理なので無音で良い)
+                    }
+                liveMidiChainFlush = -1;
+            }
+
+            if (auto* mp = findMidiPlayback(liveMidiTarget))
+            {
+                if (auto* chain = chainProcessable(mp))
+                {
+                    auto& buf = snap->trackBuffers[(size_t) mp->trackIdx];
+                    buf.setSize(2, numSamples, false, false, true);
+                    buf.clear();
+                    chainMidiScratch.clear();
+                    chainMidiScratch.addEvents(liveMidiScratch, 0, numSamples, 0);
+                    chain->processBlock(buf, chainMidiScratch, &playHead);
+
+                    // ミュート中もイベントは届けて (上で processBlock 済み) 出力だけ混ぜない。
+                    // ミュートでチェーン処理ごと止めると、ミュート中に離した鍵の note-off が
+                    // プラグインに届かず、ミュート解除後に鳴りっぱなしになる
+                    if (!mp->track->isMuted())
+                    {
+                        const float vol  = juce::Decibels::decibelsToGain(mp->track->getVolume(), -60.0f);
+                        const float pan  = juce::jlimit(-1.0f, 1.0f, mp->track->getPan());
+                        const float panL = std::cos((pan * 0.5f + 0.5f) * juce::MathConstants<float>::halfPi);
+                        const float panR = std::sin((pan * 0.5f + 0.5f) * juce::MathConstants<float>::halfPi);
+                        for (int ch = 0; ch < numOutputChannels; ++ch)
+                        {
+                            const float chGain = vol * (ch == 0 ? panL : panR);
+                            const float* src = buf.getReadPointer(juce::jmin(ch, buf.getNumChannels() - 1));
+                            juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
+                        }
+                    }
                 }
             }
         }
@@ -2851,6 +3004,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         for (auto& mp : snap->midi)
         {
             if (mp.track == nullptr) continue;
+            // クリップ 0 個で何も鳴らさない MIDI トラック (ライブ対象でも flush 対象でもなく、
+            // synth OFF・チェーン空) はバッファ確保/メータ/マスター加算のコストを払わない
+            // (空 MIDI トラックを snap に含めるようにした分の節約)
+            if (mp.events.empty()
+                && mp.trackIdx != liveMidiTarget && mp.trackIdx != liveMidiChainFlush
+                && !mp.track->isSynthEnabled()
+                && mp.track->getPluginChain().getActivePluginCountAtomic() == 0)
+                continue;
             Track* midiFld = folderOf(mp.trackIdx);
             if (mp.track->isMuted() || (midiFld != nullptr && midiFld->isMuted())) continue;
             if (anySolo && !mp.track->isSoloed()
@@ -2942,6 +3103,19 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             // OFF のときは trackBuf は空のまま、MIDI を INS チェーン (VST 音源等) に渡して鳴らす。
             if (mp.track->isSynthEnabled())
                 syn->processBlock(trackBuf, mb);
+
+            // ライブ MIDI (MIDI キーボード) を対象トラックの INS チェーン (VSTi) へ渡す。
+            // 内蔵シンセへは drain 時に noteOn を直接適用済みなので、synth 処理の「後」に
+            // mb へ足す (mb 経由でも synth に届くと二重発音になる)。ターゲットが切り替わった
+            // 直後は旧トラックの chain へ all-notes-off を送り、押しっぱなしノートを止める
+            if (mp.trackIdx == liveMidiTarget && !liveMidiScratch.isEmpty())
+                mb.addEvents(liveMidiScratch, 0, numSamples, 0);
+            if (mp.trackIdx == liveMidiChainFlush)
+            {
+                for (int ch = 1; ch <= 16; ++ch)
+                    mb.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
+                liveMidiChainFlush = -1;
+            }
 
             // プラグインチェーン（音源プラグインなら MIDI から音を生成、エフェクトなら trackBuf を加工）。
             // ロックを取らずに処理対象有無を判定する。mb は本トラックの note/state 入力なのでそのまま渡す。

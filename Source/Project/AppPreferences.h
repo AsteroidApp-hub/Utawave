@@ -92,6 +92,14 @@ public:
     // 環境が大半で、黙って同じデバイスへミラーすると二重聞こえ事故になるため。
     juce::String streamMirrorDevice;
 
+    // ── MIDI 入力 (MIDI キーボード・ハードウェア依存のためアプリ全体設定) ──
+    // 接続した MIDI キーボードで、選択中の MIDI トラックの音源 (内蔵シンセ / INS の
+    // プラグイン音源) をライブ演奏できるようにするか (既定: OFF)。
+    // チャンネルは全て受信する (初心者にチャンネル選択をさせない)。
+    bool midiInputEnabled { false };
+    // MIDI 入力デバイス名 (空 = 未選択 = 開かない。streamMirrorDevice と同じ「未選択は開始しない」作法)
+    juce::String midiInputDevice;
+
     // 歌詞表示窓の文字サイズ (px)。歌唱中の見やすさは人それぞれなのでアプリ全体で記憶する
     // (歌詞テキスト自体はプロジェクトごとに .uta へ保存)。load 時に妥当範囲へクランプ。
     int lyricsFontSize { 16 };

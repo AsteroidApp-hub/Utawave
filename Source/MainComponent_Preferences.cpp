@@ -40,6 +40,10 @@ void MainComponent::showPreferences()
         juce::Label        mirrorDevLabel;
         juce::ComboBox     mirrorDevCombo;      // ミラーの出力先デバイス (1 = OS 既定、100+ = 実デバイス名)
         juce::StringArray  mirrorDevNames;      // combo の 100+i に対応するデバイス名
+        juce::ToggleButton midiInBtn;           // MIDI キーボードを使用する (アプリ全体設定。初期状態は showPreferences 側)
+        juce::Label        midiInDevLabel;
+        juce::ComboBox     midiInDevCombo;      // MIDI 入力デバイス (100+i = 実デバイス名)
+        juce::StringArray  midiInDevNames;      // combo の 100+i に対応するデバイス名
         // 「配信」見出しの隣に出す、同梱ヘルプの配信セクション (#streaming) へのリンク。
         // URL は設定しない (HyperlinkButton の URL 起動は file:// のフラグメントを保持できない
         // ため見た目だけ使い、遷移は onClick → MainComponent::openBundledHelp("streaming"))
@@ -51,7 +55,7 @@ void MainComponent::showPreferences()
             void mouseDoubleClick (const juce::MouseEvent&) override { showTextBox(); }
         };
         TypeInSlider       recCompOffsetSlider;
-        juce::Label        exportLabel, startupLabel, streamLabel;
+        juce::Label        exportLabel, startupLabel, streamLabel, midiInLabel;
         const bool         adsUi { AppPreferences::adsCompiledIn() };  // 広告がコンパイル時有効な時だけ UI を出す
         juce::TextButton closeBtn, resetBtn;
         // 設定項目は縦に長いので Viewport でスクロールさせる (ウィンドウは従来の約半分の高さ)。
@@ -85,6 +89,8 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onMulticoreChanged;
         std::function<void(bool)>          onMirrorChanged;
         std::function<void(juce::String)>  onMirrorDeviceChanged;   // 空 = OS 既定
+        std::function<void(bool)>          onMidiInChanged;
+        std::function<void(juce::String)>  onMidiInDeviceChanged;   // 空 = 未選択
         std::function<void()>      onResetDefaults;
 
         PrefsDlg(int curBits, bool curFollowSel, bool curRtz,
@@ -367,6 +373,36 @@ void MainComponent::showPreferences()
             };
             addAndMakeVisible(mirrorDevCombo);
 
+            // MIDI 入力 (アプリ全体設定。初期状態と候補投入は showPreferences 側)。
+            // 接続した MIDI キーボードで選択中の MIDI トラックの音源を弾けるようにする。
+            // チャンネル指定は初心者に厳しいため設けない (全チャンネル受信)
+            setupLabel(midiInLabel, tr(u8"MIDI入力"), 13.0f, juce::Colours::white);
+            midiInBtn.setButtonText(
+                tr(u8"MIDIキーボードを使用する (弾いた音を選択中の MIDI トラックで鳴らす)"));
+            midiInBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            midiInBtn.setTooltip(
+                tr(u8"接続した MIDI キーボードで、選択中の MIDI トラックの音源 (内蔵シンセ / INS のプラグイン音源) をそのまま演奏できます。MIDI チャンネルは全て受信します。ピアノロールのステップ入力にも使えます。"));
+            midiInBtn.onClick = [this] {
+                if (onMidiInChanged) onMidiInChanged(midiInBtn.getToggleState());
+            };
+            addAndMakeVisible(midiInBtn);
+
+            setupLabel(midiInDevLabel, tr(u8"MIDIキーボードのデバイス"),
+                       13.0f, juce::Colours::white);
+            midiInDevCombo.setTextWhenNothingSelected(tr(u8"デバイスを選択…"));
+            midiInDevCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
+            midiInDevCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+            midiInDevCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
+            midiInDevCombo.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff555555));
+            midiInDevCombo.onChange = [this] {
+                if (onMidiInDeviceChanged)
+                {
+                    const int id = midiInDevCombo.getSelectedId();
+                    onMidiInDeviceChanged(id >= 100 ? midiInDevNames[id - 100] : juce::String());
+                }
+            };
+            addAndMakeVisible(midiInDevCombo);
+
             // 自動保存: 無効 + 5 分刻み (5/10/15/20/25/30)
             // ID = minutes + 1 (無効=1, 5分=6, ...)
             autoSaveCombo.addItem(tr(u8"無効"),  1);
@@ -625,6 +661,12 @@ void MainComponent::showPreferences()
             y = check(mirrorBtn, y);
             y = label(mirrorDevLabel, y);
             y = combo(mirrorDevCombo, y);
+
+            // ── MIDI入力 ──
+            y += gSec; y = label(midiInLabel, y);
+            y = check(midiInBtn, y);
+            y = label(midiInDevLabel, y);
+            y = combo(midiInDevCombo, y);
 
             // ── 保存 / メータ / 音量 ──
             y += gSec; y = label(autoSaveLabel, y);    y = combo(autoSaveCombo, y);
@@ -991,6 +1033,45 @@ void MainComponent::showPreferences()
                 applyStreamMirrorFromPrefs(/*showErrors*/ true);   // デバイス変更を即反映
         };
     }
+    // MIDI 入力 (アプリ全体設定)。即時保存 + デバイスの開閉を即反映。
+    {
+        for (const auto& d : juce::MidiInput::getAvailableDevices())
+            dlg->midiInDevNames.add(d.name);
+        for (int i = 0; i < dlg->midiInDevNames.size(); ++i)
+            dlg->midiInDevCombo.addItem(dlg->midiInDevNames[i], 100 + i);
+
+        dlg->midiInBtn.setToggleState(appPrefs.midiInputEnabled, juce::dontSendNotification);
+        dlg->midiInDevCombo.setEnabled(appPrefs.midiInputEnabled);
+        int selId = 0;   // 0 = 未選択 (「デバイスを選択…」表示・開かない)
+        if (appPrefs.midiInputDevice.isNotEmpty())
+        {
+            const int idx = dlg->midiInDevNames.indexOf(appPrefs.midiInputDevice);
+            if (idx >= 0) selId = 100 + idx;
+        }
+        dlg->midiInDevCombo.setSelectedId(selId, juce::dontSendNotification);
+        dlg->onMidiInChanged = [this, dlg](bool v) {
+            appPrefs.midiInputEnabled = v;
+            appPrefs.save();
+            dlg->midiInDevCombo.setEnabled(v);
+            // ON にしたのにデバイス未選択なら選択を促す。候補が 1 つだけなら自動選択
+            // (MIDI キーボードは 1 台だけ繋いでいるのが普通なのでワンクリックで済ませる)
+            if (v && dlg->midiInDevCombo.getSelectedId() == 0)
+            {
+                if (dlg->midiInDevNames.size() == 1)
+                    dlg->midiInDevCombo.setSelectedId(100);   // onChange 経由で保存 + 適用される
+                else
+                    dlg->midiInDevCombo.showPopup();
+                return;
+            }
+            applyMidiInputFromPrefs(/*showErrors*/ true);
+        };
+        dlg->onMidiInDeviceChanged = [this](juce::String dev) {
+            appPrefs.midiInputDevice = dev;
+            appPrefs.save();
+            if (appPrefs.midiInputEnabled)
+                applyMidiInputFromPrefs(/*showErrors*/ true);   // デバイス変更を即反映
+        };
+    }
     dlg->onResetDefaults = [this, dlg, uiScaleToId]
     {
         // AppSettings の各フィールドをデフォルト値 (構造体の初期化子) に揃える
@@ -1030,6 +1111,8 @@ void MainComponent::showPreferences()
         appPrefs.multicoreAudio     = defPrefs.multicoreAudio;
         appPrefs.streamMirrorEnabled = defPrefs.streamMirrorEnabled;
         appPrefs.streamMirrorDevice  = defPrefs.streamMirrorDevice;
+        appPrefs.midiInputEnabled    = defPrefs.midiInputEnabled;
+        appPrefs.midiInputDevice     = defPrefs.midiInputDevice;
         appPrefs.uiScale            = defPrefs.uiScale;
         appPrefs.uiScaleUserSet     = defPrefs.uiScaleUserSet;   // 自動判定へ戻す
         appPrefs.save();
@@ -1041,6 +1124,7 @@ void MainComponent::showPreferences()
         audioEngine.setDiskStreamingEnabled(appPrefs.diskStreaming);
         audioEngine.setMulticoreAudioEnabled(appPrefs.multicoreAudio);
         applyStreamMirrorFromPrefs(/*showErrors*/ false);   // 既定 OFF へ (ミラー停止)
+        applyMidiInputFromPrefs(/*showErrors*/ false);      // 既定 OFF へ (MIDI 入力を閉じる)
         syncInputMonitorStateToEngine();   // モニタ FX 経路を既定 (ON) に戻す
         dlg->showMidiExportBtn.setToggleState(appPrefs.showMidiExportMenu, juce::dontSendNotification);
         dlg->exportDoneDlgBtn.setToggleState(appPrefs.showExportCompleteDialog, juce::dontSendNotification);
@@ -1056,6 +1140,9 @@ void MainComponent::showPreferences()
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
         dlg->mirrorDevCombo.setSelectedId(0, juce::dontSendNotification);   // 未選択へ戻す
         dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
+        dlg->midiInBtn.setToggleState(appPrefs.midiInputEnabled, juce::dontSendNotification);
+        dlg->midiInDevCombo.setSelectedId(0, juce::dontSendNotification);   // 未選択へ戻す
+        dlg->midiInDevCombo.setEnabled(appPrefs.midiInputEnabled);
         dlg->uiScaleCombo.setSelectedId(uiScaleToId(appPrefs.resolvedUiScale()), juce::dontSendNotification);
 
         // ダイアログの UI を新しい値に同期
@@ -1107,4 +1194,77 @@ void MainComponent::applyStreamMirrorFromPrefs(bool showErrors)
                 .withMessage(tr(u8"配信ミラー出力を開始できませんでした。") + "\n" + err)
                 .withButton("OK"), nullptr);
     }
+}
+
+// MIDI キーボード入力の開閉を appPrefs に同期させる (起動時・環境設定変更時・デバイス抜き差し時)。
+// デバイスは名前で照合する (streamMirrorDevice と同じ作法。identifier は OS/再接続で変わりうる)
+void MainComponent::applyMidiInputFromPrefs(bool showErrors)
+{
+    midiKeyboardInput.reset();   // 既存を閉じる (OFF / デバイス変更 / 開き直しの共通経路)
+    if (appPrefs.midiInputEnabled && appPrefs.midiInputDevice.isNotEmpty())
+    {
+        for (const auto& d : juce::MidiInput::getAvailableDevices())
+        {
+            if (d.name != appPrefs.midiInputDevice) continue;
+            midiKeyboardInput = juce::MidiInput::openDevice(d.identifier, &midiKeyboardCallback);
+            break;
+        }
+        if (midiKeyboardInput != nullptr)
+            midiKeyboardInput->start();
+        else if (showErrors)
+            juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle(tr(u8"MIDI入力"))
+                .withMessage(tr(u8"MIDIキーボードを開けませんでした。デバイスの接続を確認してください。"))
+                .withButton("OK"), nullptr);
+    }
+    updateLiveMidiTarget();
+}
+
+// ライブ MIDI の出力先トラックをエンジンへ publish する。優先順: (1) ステップ入力中の
+// ピアノロールの編集対象トラック (置くクリップとモニタ音源を一致させる)、(2) 選択中の
+// トラックが MIDI トラックならそこ、(3) 最初の MIDI トラック (1 本ならどこを選んでいても
+// 鳴る)。デバイスが開いていない間は -1 (無効)。ついでにステップ入力の有無フラグ
+// (stepInputWanted・MIDI スレッドの callAsync 事前判定) もここで更新する
+void MainComponent::updateLiveMidiTarget()
+{
+    int  target     = -1;
+    bool stepWanted = false;
+    // dispatchStepInputNote と同じ順 (pianoRollWindows 先頭から) で最初のステップ入力中
+    // エディタを探し、そのクリップを持つ MIDI トラックを解決する
+    for (auto* w : pianoRollWindows)
+    {
+        if (w == nullptr) continue;
+        auto* ed = w->getEditor();
+        if (ed == nullptr || !ed->isStepInputActive()) continue;
+        stepWanted = true;
+        if (auto* clip = w->getClip())
+            for (int i = 0; i < trackManager.getTrackCount() && target < 0; ++i)
+                if (auto* t = trackManager.getTrack(i); t != nullptr && t->isMidiTrack())
+                    for (int c = 0; c < t->getMidiClipCount(); ++c)
+                        if (t->getMidiClip(c) == clip) { target = i; break; }
+        break;
+    }
+    stepInputWanted.store(stepWanted);
+
+    if (midiKeyboardInput == nullptr)
+    {
+        audioEngine.setLiveMidiTargetTrack(-1);
+        return;
+    }
+    if (target < 0)
+    {
+        auto* sel = (selectedTrackIndex >= 0 && selectedTrackIndex < trackManager.getTrackCount())
+                        ? trackManager.getTrack(selectedTrackIndex) : nullptr;
+        if (sel != nullptr && sel->isMidiTrack())
+            target = selectedTrackIndex;
+        else
+            for (int i = 0; i < trackManager.getTrackCount(); ++i)
+                if (auto* t = trackManager.getTrack(i); t != nullptr && t->isMidiTrack())
+                {
+                    target = i;
+                    break;
+                }
+    }
+    audioEngine.setLiveMidiTargetTrack(target);
 }

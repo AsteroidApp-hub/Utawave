@@ -214,6 +214,48 @@ private:
     int pos { 0 };
 };
 
+// ノートが押されている間だけ 0.5 を出力する MIDI 反応スタブ (VSTi 音源の代役)。
+// 「ライブ MIDI が INS チェーンへ届いたか」を出力レベルで判定できる
+class MidiTriggeredFakePlugin : public juce::AudioPluginInstance
+{
+public:
+    MidiTriggeredFakePlugin()
+        : juce::AudioPluginInstance(BusesProperties()
+              .withInput ("In",  juce::AudioChannelSet::stereo())
+              .withOutput("Out", juce::AudioChannelSet::stereo())) {}
+    int heldNotes { 0 };
+    const juce::String getName() const override            { return "MidiTriggered"; }
+    void prepareToPlay(double, int) override               {}
+    void releaseResources() override                       {}
+    void processBlock(juce::AudioBuffer<float>& b, juce::MidiBuffer& midi) override
+    {
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            if      (m.isNoteOn())      ++heldNotes;
+            else if (m.isNoteOff())     heldNotes = juce::jmax(0, heldNotes - 1);
+            else if (m.isAllNotesOff()) heldNotes = 0;
+        }
+        if (heldNotes > 0)
+            for (int ch = 0; ch < b.getNumChannels(); ++ch)
+                juce::FloatVectorOperations::fill(b.getWritePointer(ch), 0.5f, b.getNumSamples());
+    }
+    using juce::AudioProcessor::processBlock;
+    double getTailLengthSeconds() const override           { return 0.0; }
+    bool acceptsMidi() const override                      { return true; }
+    bool producesMidi() const override                     { return false; }
+    juce::AudioProcessorEditor* createEditor() override    { return nullptr; }
+    bool hasEditor() const override                        { return false; }
+    int getNumPrograms() override                          { return 1; }
+    int getCurrentProgram() override                       { return 0; }
+    void setCurrentProgram(int) override                   {}
+    const juce::String getProgramName(int) override        { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override  {}
+    void setStateInformation(const void*, int) override    {}
+    void fillInPluginDescription(juce::PluginDescription& d) const override { d.name = getName(); }
+};
+
 // audioDeviceAboutToStart に渡す最小スタブ。SR / buffer size / チャンネル構成だけを返す。
 struct FakeAudioIODevice : public juce::AudioIODevice
 {
@@ -370,6 +412,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testLoopWrapFromOutside();
         testMonitorThroughInserts();
         testStoppedPluginPreview();
+        testLiveMidiInput();
         testDiskStreamingDeterminism();
         testMulticoreDeterminism();
         testEmptyRangeOfflineRender();
@@ -1593,6 +1636,151 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             t->setMuted(true);
             s.start();
             expect(stoppedPeak(s.engine, 4) < 1.0e-4f, "stopped: muted track => no preview");
+        }
+    }
+
+    // MIDI キーボードのライブ入力 (pushLiveMidi / setLiveMidiTargetTrack)。
+    // クリップ 0 個の MIDI トラックも snap->midi / synths に載る (preparePlayback の変更)、
+    // 停止中は内蔵シンセ + INS チェーン (VSTi) の両方が鳴る、再生中に二重発音しない
+    // (drain の直接 noteOn と mb 経由が重ならない)、ターゲット解除で鳴り止む、を固定する
+    void testLiveMidiInput()
+    {
+        beginTest("live MIDI input: empty MIDI track sounds via synth and INS chain (stopped/playing)");
+
+        // 停止中プレビューのパンは sin/cos 則 (センター ≒ 0.707)。再生ブランチはリニア
+        // バランス則 (センター減衰なし = 1.0)。内蔵シンセ 1 ボイスのフル振幅は velocity*0.25
+        const float kCenterPan = std::cos(0.5f * juce::MathConstants<float>::halfPi);
+
+        auto addEmptyMidiTrack = [](Scene& s, bool synthOn) -> Track*
+        {
+            auto* t = s.tm->addTrack({}, false);
+            t->setMidiTrack(true);
+            t->setSynthEnabled(synthOn);
+            t->setVolume(0.0f);
+            t->setPan(0.0f);
+            return t;
+        };
+
+        // (1) 停止中 + 内蔵シンセ: noteOn で鳴り、noteOff のリリース (50ms) 後に無音へ。
+        //     ターゲット解除 (トラック選択の切替相当) でも allNotesOff で鳴り止む
+        {
+            Scene s;
+            auto* t = addEmptyMidiTrack(s, /*synthOn*/ true);
+            s.start();
+            s.engine.setLiveMidiTargetTrack(0);
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 127));
+            float pL = 0, pR = 0;
+            runBlocks(s.engine, 8, &pL, &pR);
+            expectWithinAbsoluteError(pL, 0.25f * kCenterPan, 0.03f,
+                                      "stopped: synth sounds on live note-on (L)");
+            expectWithinAbsoluteError(pR, 0.25f * kCenterPan, 0.03f,
+                                      "stopped: synth sounds on live note-on (R)");
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 69));
+            runBlocks(s.engine, 30);   // リリース 50ms を通過
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "stopped: silent after live note-off");
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 127));
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL > 0.1f, "held note sounds before target change");
+            s.engine.setLiveMidiTargetTrack(-1);
+            runBlocks(s.engine, 30);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "target cleared: hanging note is stopped (allNotesOff)");
+
+            // 押しっぱなしのまま synth を ON→OFF に切替えても note-off は落とさない
+            // (ゲートは note-on のみ。落とすと停止中プレビューがボイスを鳴らし続ける)
+            s.engine.setLiveMidiTargetTrack(0);
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 127));
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL > 0.1f, "note sounds before synth toggle");
+            t->setSynthEnabled(false);
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 69));
+            runBlocks(s.engine, 30);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "note-off delivered even after synth was disabled mid-hold");
+        }
+
+        // (2) 停止中 + INS チェーン (VSTi 相当): synth OFF でもチェーンへ MIDI が届いて鳴る
+        {
+            Scene s;
+            auto* t = addEmptyMidiTrack(s, /*synthOn*/ false);
+            t->getPluginChain().addPlugin(std::make_unique<MidiTriggeredFakePlugin>());
+            s.start();
+            s.engine.setLiveMidiTargetTrack(0);
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100));
+            float pL = 0, pR = 0;
+            runBlocks(s.engine, 4, &pL, &pR);
+            expectWithinAbsoluteError(pL, 0.5f * kCenterPan, 0.03f,
+                                      "stopped: live MIDI reaches the INS chain (VSTi)");
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 60));
+            runBlocks(s.engine, 2);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "stopped: chain silent after note-off");
+
+            // ターゲット解除でチェーンの処理自体が止まる (押しっぱなしでも鳴り続けない)
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100));
+            runBlocks(s.engine, 2, &pL, &pR);
+            expect(pL > 0.3f, "held chain note sounds before target change");
+            s.engine.setLiveMidiTargetTrack(-1);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "target cleared: chain stops rendering");
+
+            // ターゲットを戻しても鳴り出さない: 停止中の切替時に旧チェーンへ all-notes-off
+            // (liveMidiChainFlush) が届いている (旧実装は flush が再生ループ専用で、押しっぱなし
+            // ノートがプラグイン内部に残り、再ターゲットで復活して鳴り続けた)
+            s.engine.setLiveMidiTargetTrack(0);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "re-target: stale held note was flushed while stopped");
+
+            // ミュート中もイベントはチェーンへ届く (出力だけ混ぜない):
+            // ミュート中に離した鍵がミュート解除後に鳴り残らない
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 62, (juce::uint8) 100));
+            runBlocks(s.engine, 2, &pL, &pR);
+            expect(pL > 0.3f, "note sounds before mute");
+            t->setMuted(true);
+            runBlocks(s.engine, 2, &pL, &pR);
+            expect(pL < 0.01f, "muted: chain output not mixed");
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 62));
+            runBlocks(s.engine, 2);
+            t->setMuted(false);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL < 0.01f, "unmuted: note released during mute stays off");
+        }
+
+        // (3) 再生中 + 内蔵シンセ: ちょうど 1 ボイス (~0.25)。二重発音なら ~0.5 になる
+        {
+            Scene s;
+            addEmptyMidiTrack(s, /*synthOn*/ true);
+            s.start();
+            s.engine.setLiveMidiTargetTrack(0);
+            s.engine.play();
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 127));
+            float pL = 0, pR = 0;
+            runBlocks(s.engine, 8, &pL, &pR);
+            expectWithinAbsoluteError(pL, 0.25f, 0.03f,
+                                      "playing: exactly one voice (no double trigger)");
+        }
+
+        // (4) 再生中 + INS チェーン: ライブ MIDI が mb 経由でチェーンへ届く
+        {
+            Scene s;
+            auto* t = addEmptyMidiTrack(s, /*synthOn*/ false);
+            t->getPluginChain().addPlugin(std::make_unique<MidiTriggeredFakePlugin>());
+            s.start();
+            s.engine.setLiveMidiTargetTrack(0);
+            s.engine.play();
+
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100));
+            float pL = 0, pR = 0;
+            runBlocks(s.engine, 4, &pL, &pR);
+            expectWithinAbsoluteError(pL, 0.5f, 0.03f,
+                                      "playing: live MIDI reaches the INS chain");
         }
     }
 };
