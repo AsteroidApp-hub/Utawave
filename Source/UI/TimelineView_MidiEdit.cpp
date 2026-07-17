@@ -11,6 +11,7 @@
 #include "../Edit/SilenceDetector.h"
 #include "../Audio/BpmDetector.h"
 #include "../Audio/LufsMeter.h"
+#include "../MIDI/MidiRecorder.h"
 #include "TextImageCache.h"
 #include <set>
 #include <map>
@@ -171,7 +172,22 @@ void TimelineView::splitMidiClip(Track* track, MidiClip* clip, double absSplitTi
     {
         auto* ev = seq.getEventPointer(i);
         const auto& m = ev->message;
-        if (!m.isNoteOn()) continue;
+        if (!m.isNoteOn())
+        {
+            // CC / ピッチベンド等 (ピアノロールの下部レーンで編集) も時刻で振り分けて保全する
+            if (!m.isNoteOff())
+            {
+                auto copy = m;
+                if (m.getTimeStamp() < relSplit)
+                    left.sequence.addEvent(copy);
+                else
+                {
+                    copy.setTimeStamp(m.getTimeStamp() - relSplit);
+                    right.sequence.addEvent(copy);
+                }
+            }
+            continue;
+        }
         const double onT  = m.getTimeStamp();
         const int    offI = seq.getIndexOfMatchingKeyUp(i);
         const double offT = (offI >= 0) ? seq.getEventPointer(offI)->message.getTimeStamp() : onT + 0.25;
@@ -194,6 +210,173 @@ void TimelineView::splitMidiClip(Track* track, MidiClip* clip, double absSplitTi
 
     clearAllSelections();  // 元クリップを指す選択を先に解除 (差し替えで破棄されるため)
     pushMidiReplaceAction(track, { clip }, { std::move(left), std::move(right) });
+}
+
+// ── MIDI 録音の確定配置 ──────────────────────────────────────────────────
+// キャプチャ列 (タイムライン秒タイムスタンプ) を小節単位のクリップにして track へ置く。
+// 重なった既存クリップは置換し、録音範囲の外へはみ出した部分だけを断片として残す
+// (音声のパンチイン trimAndCrossfadeOnLane0 と同じ「上書き」作法・テイクレーンは作らない)。
+// 全体を 1 つの MidiClipReplaceAction で積む = Cmd+Z 1 回で録音前へ戻る
+void TimelineView::placeRecordedMidiClip(Track* track,
+                                         const std::vector<juce::MidiMessage>& absEvents,
+                                         double stopPos)
+{
+    if (track == nullptr) return;
+    double firstOn = 0.0, lastEnd = 0.0;
+    if (!MidiRecorder::noteSpan(absEvents, stopPos, firstOn, lastEnd))
+        return;   // ノートが 1 つも無ければクリップを作らない (CC だけの誤爆防止)
+    firstOn = juce::jmax(0.0, firstOn);
+    lastEnd = juce::jmax(lastEnd, firstOn + 0.01);
+
+    // クリップ範囲は小節単位 (MIDI クリップの既存仕様)。先頭 = 最初のノートを含む小節頭、
+    // 末尾 = 最後のノート終端を含む小節の次の小節頭 (境界ちょうどはそのまま)
+    const double clipStart = ruler.barStartSecs(ruler.barAtTime(firstOn));
+    const double clipEnd   = ruler.barStartSecs(
+        ruler.barAtTime(juce::jmax(clipStart, lastEnd) - 1e-6) + 1);
+    if (clipEnd <= clipStart + 1e-6) return;
+
+    using NewMidiClip = EditActions::MidiClipReplaceAction::NewMidiClip;
+    NewMidiClip np;
+    np.startPos = clipStart;
+    np.duration = clipEnd - clipStart;
+    np.name     = track->getName();
+    np.sequence = MidiRecorder::buildClipSequence(absEvents, clipStart, clipEnd, stopPos);
+
+    std::vector<MidiClip*>   removes;
+    std::vector<NewMidiClip> adds;
+    for (int ci = 0; ci < track->getMidiClipCount(); ++ci)
+    {
+        auto* c = track->getMidiClip(ci);
+        if (c == nullptr) continue;
+        const double cs = c->getStartPosition();
+        const double ce = c->getEndPosition();
+        if (ce <= clipStart + 1e-6 || cs >= clipEnd - 1e-6) continue;   // 重なりなし
+
+        removes.push_back(c);
+        // 録音範囲の外へはみ出した部分を断片として残す (ノートは境界でクランプして振り分け。
+        // splitMidiClip と同じ要領。既存クリップも小節単位なので断片も小節単位になる)
+        auto makePiece = [&](double pieceStart, double pieceEnd)
+        {
+            if (pieceEnd - pieceStart <= 1e-4) return;
+            NewMidiClip piece;
+            piece.startPos = pieceStart;
+            piece.duration = pieceEnd - pieceStart;
+            piece.name     = c->getName();
+            piece.colour   = c->getColour();
+            piece.channel  = c->getChannel();
+            const double relA = pieceStart - cs;
+            const double relB = pieceEnd   - cs;
+            const auto& seq = c->getSequence();
+            for (int i = 0; i < seq.getNumEvents(); ++i)
+            {
+                auto* ev = seq.getEventPointer(i);
+                const auto& m = ev->message;
+                if (!m.isNoteOn())
+                {
+                    // CC / ピッチベンド等は断片の範囲内のものを保全する
+                    if (!m.isNoteOff())
+                    {
+                        const double t = m.getTimeStamp();
+                        if (t >= relA && t < relB)
+                        {
+                            auto copy = m;
+                            copy.setTimeStamp(t - relA);
+                            piece.sequence.addEvent(copy);
+                        }
+                    }
+                    continue;
+                }
+                const double onT  = m.getTimeStamp();
+                const int    offI = seq.getIndexOfMatchingKeyUp(i);
+                const double offT = (offI >= 0)
+                    ? seq.getEventPointer(offI)->message.getTimeStamp() : onT + 0.25;
+                const double on  = juce::jmax(onT,  relA);
+                const double off = juce::jmin(offT, relB);
+                if (off - on <= 0.001) continue;
+                auto nOn  = juce::MidiMessage::noteOn (m.getChannel(), m.getNoteNumber(),
+                                                       m.getFloatVelocity());
+                auto nOff = juce::MidiMessage::noteOff(m.getChannel(), m.getNoteNumber());
+                nOn.setTimeStamp (on  - relA);
+                nOff.setTimeStamp(off - relA);
+                piece.sequence.addEvent(nOn);
+                piece.sequence.addEvent(nOff);
+            }
+            piece.sequence.updateMatchedPairs();
+            adds.push_back(std::move(piece));
+        };
+        makePiece(cs, clipStart);
+        makePiece(clipEnd, ce);
+    }
+    adds.push_back(std::move(np));
+
+    clearAllSelections();   // 置換で破棄されるクリップを指す選択を先に解除
+    pushMidiReplaceAction(track, std::move(removes), std::move(adds));
+}
+
+// ── MIDI クリップのクォンタイズ (タイムライン右クリック) ─────────────────
+// 全ノートの開始位置を GRID へスナップする (長さは維持・CC 等はそのまま)。スナップは
+// タイムライン絶対位置で行うので途中テンポ/変拍子にも追従する (snapTime = GridSnapMath)。
+// クリップのインスタンスは保つ (MidiSequenceAction) ため、開いているピアノロールは
+// onMidiClipContentChanged → reloadNotesFromClip で追従する
+void TimelineView::quantizeMidiClip(Track* track, MidiClip* clip)
+{
+    if (track == nullptr || clip == nullptr) return;
+    if (snapModeUnitSecs(appSettings.snapMode, bpm) <= 0.0) return;   // GRID Off
+
+    const double cs  = clip->getStartPosition();
+    const double dur = clip->getDuration();
+    auto& seq = clip->getSequence();
+
+    juce::MidiMessageSequence after;
+    bool changed = false;
+    for (int i = 0; i < seq.getNumEvents(); ++i)
+    {
+        auto* ev = seq.getEventPointer(i);
+        const auto& m = ev->message;
+        if (m.isNoteOff()) continue;                       // ペアの off は on 側で出す
+        if (!m.isNoteOn()) { after.addEvent(m); continue; } // CC / ピッチベンド等は保持
+        const double onT  = m.getTimeStamp();
+        const int    offI = seq.getIndexOfMatchingKeyUp(i);
+        const double offT = (offI >= 0)
+            ? seq.getEventPointer(offI)->message.getTimeStamp() : onT + 0.25;
+        double s = snapTime(cs + onT) - cs;
+        s = juce::jlimit(0.0, juce::jmax(0.0, dur - 0.01), s);
+        const double len = juce::jmax(0.01, juce::jmin(offT - onT, dur - s));
+        if (std::abs(s - onT) > 1e-9) changed = true;
+        auto nOn  = juce::MidiMessage::noteOn (m.getChannel(), m.getNoteNumber(),
+                                               m.getFloatVelocity());
+        auto nOff = juce::MidiMessage::noteOff(m.getChannel(), m.getNoteNumber());
+        nOn.setTimeStamp(s);
+        nOff.setTimeStamp(s + len);
+        after.addEvent(nOn);
+        after.addEvent(nOff);
+    }
+    if (!changed) return;   // 既にグリッド上 → Undo に積まない
+    after.sort();
+    after.updateMatchedPairs();
+
+    auto onApplied = [this](MidiClip* c)
+    {
+        if (onMidiClipContentChanged) onMidiClipContentChanged(c);
+        if (editChangeCb) editChangeCb();
+        repaint();
+    };
+    juce::MidiMessageSequence before;
+    before.addSequence(seq, 0.0);
+
+    if (undoManager)
+    {
+        undoManager->beginNewTransaction();
+        undoManager->perform(new EditActions::MidiSequenceAction(
+            clip, std::move(before), std::move(after), onApplied));
+    }
+    else
+    {
+        seq.clear();
+        seq.addSequence(after, 0.0);
+        seq.updateMatchedPairs();
+        onApplied(clip);
+    }
 }
 
 void TimelineView::mouseDoubleClick(const juce::MouseEvent& e)

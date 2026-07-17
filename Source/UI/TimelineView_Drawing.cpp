@@ -1355,6 +1355,28 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
                 g.restoreState();
             }
 
+            // ── MIDI 録音中の赤インジケータ (アーム済み MIDI トラック・録音開始 → 再生バー) ──
+            // 音声のライブ波形オーバーレイに相当する「録音している実感」表示。ノートの
+            // ライブ描画はせず領域だけ示す (確定クリップは停止時に placeRecordedMidiClip が置く)
+            if (li == 0 && track->isMidiTrack() && midiRecIndicator && track->isRecArmed()
+                && playheadSecs > midiRecIndicatorStart)
+            {
+                const int x1 = (int) positionToX(midiRecIndicatorStart);
+                const int x2 = (int) positionToX(playheadSecs);
+                if (x2 > x1)
+                {
+                    g.saveState();
+                    g.reduceClipRegion(laneBounds);
+                    juce::Rectangle<int> r { x1, laneBounds.getY() + 1,
+                                             x2 - x1, laneBounds.getHeight() - 2 };
+                    g.setColour(track->getColour().withAlpha(0.20f));
+                    g.fillRoundedRectangle(r.toFloat(), 2.0f);
+                    g.setColour(AppColours::recRed.withAlpha(0.9f));
+                    g.drawRoundedRectangle(r.toFloat(), 2.0f, 1.5f);
+                    g.restoreState();
+                }
+            }
+
             if (isLiveLane)
             {
                 // ── ライブ録音中の波形をオーバーレイ ──

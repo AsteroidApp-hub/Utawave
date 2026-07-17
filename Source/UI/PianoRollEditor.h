@@ -15,6 +15,7 @@
 //     長さは STEP コンボ = GRID と同じ音価から選択・←/→ でカーソル移動 = 休符送り。
 //     S は macOS の GlobalKeyMonitor が「停止」として消費するため使えない)
 //   - L でレガート (選択ノートを次のノートの開始位置まで伸ばす)
+//   - Q でクォンタイズ (選択ノート / 未選択なら全ノートの開始を GRID の最寄りへスナップ)
 //   - 範囲選択 (空エリアドラッグ) / Shift / Cmd で複数選択
 //   - Cmd+C / Cmd+V / Cmd+X コピー・ペースト・カット
 //   - Cmd+A 全選択
@@ -72,6 +73,7 @@ public:
     void mouseUp(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void modifierKeysChanged(const juce::ModifierKeys&) override;
     bool keyPressed(const juce::KeyPress&) override;
@@ -112,6 +114,20 @@ public:
     // 同時に押した鍵は同じ位置に和音として置き、全部離した時にカーソルが 1 ステップ進む。
     bool isStepInputActive() const { return stepMode; }
     void handleStepInputMidi(int note, float velocity, bool isOn);
+    // MIDI キーボードが使える時だけステップ入力ボタンを出す (未接続では入力手段が無い)。
+    // MainComponent が生成時 (openPianoRollFor) と接続状態の変化時 (applyMidiInputFromPrefs)
+    // に設定する。切断時はステップ入力中でも解除する
+    void setMidiInputAvailable(bool v);
+
+    // Velocity 領域の高さ (境界ドラッグで調整可)。MainComponent がアプリ設定
+    // (AppPreferences::pianoRollVelocityH) から生成時に適用し、変更を保存する
+    void setVelocityAreaHeight(int h)
+    {
+        velocityH = juce::jlimit(kVelMinH, kVelMaxH, h);
+        layoutLaneBox();
+        repaint();
+    }
+    std::function<void(int)> onVelocityAreaResized;
 
 private:
     struct Note
@@ -155,6 +171,7 @@ private:
     void pasteAtPlayhead();
     void nudgeSelected(double secs, int semis);
     void legatoSelected();  // L: 選択ノートを次のノートの開始位置まで伸ばす (レガート)
+    void quantizeSelected(); // Q: 選択ノート (未選択なら全ノート) の開始を GRID にスナップ
     void snapshotForUndo();  // 状態を内部 Undo スタックへ保存
 
     // ─ 描画ヘルパー ─
@@ -162,6 +179,53 @@ private:
     void drawGrid(juce::Graphics&) const;
     void drawNotes(juce::Graphics&) const;
     void drawVelocityArea(juce::Graphics&) const;
+    void drawCtrlLane(juce::Graphics&) const;      // Velocity 以外の下部レーン (CC / PB)
+    void drawValueReadout(juce::Graphics&) const;  // ドラッグ/ホバー中の数値表示
+
+    // ── 下部レーン (Velocity / MIDI コントロール) ──────────────────────────
+    // Velocity 以外は MidiClip シーケンス内のイベント (ピッチベンド / CC) を直接編集する。
+    // ノート以外のイベントは ctrlMsgs に保持し、writeNotesToClip がノートと一緒に書き戻す
+    // (旧実装は書き戻しでノート以外を全て失っていた = SMF 由来の CC も編集で消えていた)。
+    enum class CtrlLane { Velocity = 0, PitchBend, Modulation, Expression, Pan, Sustain };
+    CtrlLane       ctrlLane { CtrlLane::Velocity };
+    juce::ComboBox laneBox;                        // レーン種類の選択 (領域左上)
+    void layoutLaneBox();                          // velocityH に追従して置き直す
+    std::vector<juce::MidiMessage> ctrlMsgs;       // ノート以外の全イベント (時刻順・クリップ相対秒)
+
+    static bool msgMatchesLane(const juce::MidiMessage& m, CtrlLane lane);
+    juce::MidiMessage makeLaneMessage(CtrlLane lane, int value, double t) const;
+    juce::String laneName(CtrlLane lane) const;
+    static juce::String laneValueText(CtrlLane lane, int value);  // PB は ±表示 / Pan は L/C/R / Sustain は ON/OFF
+    int  laneValueFromY(int y, CtrlLane lane) const;   // レーン内 y → 値 (PB 0..16383 / CC 0..127)
+    int  laneValueToY(int value, CtrlLane lane) const;
+    int  laneEffectiveValueAt(double t, CtrlLane lane) const;  // t 時点の実効値 (直前イベント / 既定値)
+    void removeLaneEventsBetween(double t1, double t2, CtrlLane lane);
+    void insertLaneEvent(const juce::MidiMessage& m);  // 時刻順を保って挿入
+    // ドラッグ 1 点を適用 (前回点から線形補間で埋める)。erase=true は範囲の消去のみ
+    void applyCtrlDragPoint(juce::Point<int> pos, bool erase);
+    double ctrlDragLastT { -1.0 };
+    int    ctrlDragLastV { 0 };
+    bool   ctrlErasing   { false };
+    static constexpr double kCtrlStepSec { 0.01 };  // GRID:Off 時の補間の最小間隔 (10ms)
+
+    // レーンの時間範囲選択 (通常ドラッグ)。Delete で範囲内のレーンイベントを一括削除する
+    bool   ctrlSelActive  { false };
+    double ctrlSelT1      { 0.0 };
+    double ctrlSelT2      { 0.0 };
+    double ctrlSelAnchorT { 0.0 };
+    void   deleteCtrlSelection();
+
+    // ダブルクリックの数値直接入力 (小さな TextEditor を出す。Enter 確定 / Esc・フォーカス喪失で取消)
+    std::unique_ptr<juce::TextEditor> ctrlValueEditor;
+    double ctrlValueEditT { 0.0 };
+    void beginCtrlValueEdit(juce::Point<int> pos);
+    void applyCtrlValueEdit(const juce::String& text);
+
+    // 数値の見える化: ドラッグ / ホバー中に「レーン名 値」をカーソル脇に表示する
+    juce::String     ctrlReadout;
+    juce::Point<int> ctrlReadoutPos;
+    void setReadout(const juce::String& text, juce::Point<int> pos);
+    void clearReadout();
 
     MidiClip&           clip;
     double              bpm;
@@ -174,15 +238,29 @@ private:
     int    scrollX      { 0 };
     int    scrollY      { 0 };
     int    keyboardW    { 48 };
+    // Velocity 領域の高さ。上端の境界を上下ドラッグで調整できる (kVelMinH〜、上限は
+    // グリッド域を最低 kGridMinH 残す)。値はアプリ全体設定 (AppPreferences::pianoRollVelocityH)
+    // として記憶し、次に開くピアノロールにも引き継ぐ
     int    velocityH    { 80 };
+    static constexpr int kVelMinH        { 40 };
+    static constexpr int kVelMaxH        { 400 };
+    static constexpr int kGridMinH       { 100 };  // 調整中もノートグリッドを最低これだけ残す
+    static constexpr int kVelResizeHitPx { 4 };    // 境界の掴み判定 (±px)
+    int    velResizeStartH { 80 };                 // ドラッグ開始時の velocityH
     int    rulerH       { 22 };
+    // ルーラーの上のツールバー段 (ステップ入力/追従/ペン/GRID 等のボタン置き場)。
+    // 以前は小節番号バーにボタンを重ねていたが、機能が増えて番号と被り見づらくなった
+    // ため段を分離した。グリッド域の上端は topH() = toolbarH + rulerH
+    int    toolbarH     { 26 };
+    int    topH() const { return toolbarH + rulerH; }
 
     // ピッチ表示範囲 (常時)
     static constexpr int minPitch = 0;
     static constexpr int maxPitch = 127;
 
     // ドラッグ状態
-    enum class DragMode { None, MoveNotes, ResizeLeft, ResizeRight, RubberBand, AdjustVelocity, CreateNote };
+    enum class DragMode { None, MoveNotes, ResizeLeft, ResizeRight, RubberBand, AdjustVelocity,
+                          CreateNote, ResizeVelocityArea, DrawCtrl, SelectCtrlRange };
     DragMode          dragMode { DragMode::None };
     juce::Point<int>  dragStart;
     int               draggedIdx { -1 };
@@ -251,8 +329,10 @@ private:
     juce::DrawableButton followBtn { "follow", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton penBtn { "pen", juce::DrawableButton::ImageOnButtonBackground };
 
-    // ステップ入力 (階段アイコン)。ON 中は stepLenBox (ノート長) を隣に出す
+    // ステップ入力 (階段アイコン)。ON 中は stepLenBox (ノート長) を隣に出す。
+    // ボタン自体は MIDI キーボード接続中のみ表示 (setMidiInputAvailable)
     juce::DrawableButton stepBtn { "step", juce::DrawableButton::ImageOnButtonBackground };
+    bool           midiInputAvailable { false };
     bool           stepMode { false };
     SnapMode       stepLenMode { SnapMode::Eighth };   // ステップで置くノートの長さ
     bool           stepLenUserSet { false };           // 一度も触っていなければ ON 時に GRID から引き継ぐ

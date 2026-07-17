@@ -1078,6 +1078,23 @@ void TimelineView::repaintRecordingArea()
         x2 = juce::jmin(area.getRight(), x2);
         if (x2 > x1) repaint(x1, trackTop, x2 - x1, trackH);
     }
+
+    // MIDI 録音インジケータ (アーム済み MIDI トラック行の録音開始 → 再生バー) も伸びる領域を
+    // 部分 repaint する (MIDI のみの録音ではライブ波形レーンが無く上のループを通らないため)
+    if (midiRecIndicator)
+        for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+        {
+            auto* tr = trackManager.getTrack(ti);
+            if (!tr || !tr->isMidiTrack() || !tr->isRecArmed()) continue;
+            const int trackTop = area.getY() + trackManager.getTrackY(ti) - scrollY;
+            const int trackH   = tr->getTotalHeight();
+            if (trackH <= 0) continue;
+            int x1 = (int)(midiRecIndicatorStart * bps * pixelsPerBeat - scrollX) - 2;
+            int x2 = (int)(playheadSecs * bps * pixelsPerBeat - scrollX) + 6;
+            x1 = juce::jmax(area.getX(), x1);
+            x2 = juce::jmin(area.getRight(), x2);
+            if (x2 > x1) repaint(x1, trackTop, x2 - x1, trackH);
+        }
 }
 
 void TimelineView::repaintLiveLeadingEdge()

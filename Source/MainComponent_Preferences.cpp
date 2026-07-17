@@ -1218,6 +1218,14 @@ void MainComponent::applyMidiInputFromPrefs(bool showErrors)
                 .withMessage(tr(u8"MIDIキーボードを開けませんでした。デバイスの接続を確認してください。"))
                 .withButton("OK"), nullptr);
     }
+    // 接続中だけ MIDI トラックに R (録音アーム) ボタンを出す
+    trackHeaderPanel.setMidiInputAvailable(midiKeyboardInput != nullptr);
+    // 開いているピアノロールのステップ入力ボタンも接続状態に追従させる
+    // (切断時はステップ入力中でも解除される)
+    for (auto* w : pianoRollWindows)
+        if (w != nullptr)
+            if (auto* ed = w->getEditor())
+                ed->setMidiInputAvailable(midiKeyboardInput != nullptr);
     updateLiveMidiTarget();
 }
 
@@ -1252,6 +1260,16 @@ void MainComponent::updateLiveMidiTarget()
         audioEngine.setLiveMidiTargetTrack(-1);
         return;
     }
+    // Rec アーム済みの MIDI トラックがあればそこを優先する (録音先とモニタ音源を一致させる。
+    // アーム = 「このトラックを弾く」意思表示なので、選択がどこにあっても鳴らす)
+    if (target < 0)
+        for (int i = 0; i < trackManager.getTrackCount(); ++i)
+            if (auto* t = trackManager.getTrack(i);
+                t != nullptr && t->isMidiTrack() && !t->isClickTrack() && t->isRecArmed())
+            {
+                target = i;
+                break;
+            }
     if (target < 0)
     {
         auto* sel = (selectedTrackIndex >= 0 && selectedTrackIndex < trackManager.getTrackCount())

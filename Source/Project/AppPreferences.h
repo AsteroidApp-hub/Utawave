@@ -23,6 +23,11 @@ public:
     // 小さい窓で MIDI を見ながら歌う用途で、手動スクロールせずに続きを追える。
     bool midiPagingEnabled { true };
 
+    // ピアノロールの Velocity 領域の高さ (px)。上端境界のドラッグで調整でき、次に開く
+    // ピアノロールにも引き継ぐ。load 時に PianoRollEditor::kVelMinH/kVelMaxH と同じ範囲へ
+    // クランプ (UI へ依存させないため数値で持つ)
+    int pianoRollVelocityH { 80 };
+
     // ── 録音レイテンシ補正 (ハードウェア依存のためアプリ全体設定) ──
     // 録音クリップをデバイス報告の入出力レイテンシ分だけ手前へずらすか (既定: ON)。
     bool recLatencyAutoComp { true };

@@ -127,6 +127,21 @@ public:
                    "showExportCompleteDialog round trips false");
         }
 
+        beginTest("pianoRollVelocityH: load clamp and round trip");
+        {
+            // 既定 80。境界ドラッグの保存値は load 時に [40, 400] へクランプ
+            expect(AppPreferences{}.pianoRollVelocityH == 80, "default velocity area height 80");
+            writeStore("pianoRollVelocityH=\"10\"");
+            expect(AppPreferences::load().pianoRollVelocityH == 40, "under-range clamps to 40");
+            writeStore("pianoRollVelocityH=\"9999\"");
+            expect(AppPreferences::load().pianoRollVelocityH == 400, "over-range clamps to 400");
+            AppPreferences p;
+            p.pianoRollVelocityH = 140;
+            expect(p.save(), "save succeeds");
+            expect(AppPreferences::load().pianoRollVelocityH == 140,
+                   "velocity area height round trips (140)");
+        }
+
         beginTest("save/load round trip for last-used project SR / bit depth");
         {
             // 既定: SR 未設定 (0) / ビット深度 32。作成後の値を保存 → load で引き継がれる

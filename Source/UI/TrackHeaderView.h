@@ -47,6 +47,15 @@ public:
     void setVuReferenceLevel(float dB) { vuReferenceLevel = dB; repaint(); }
     // ラウドネス自動調整のターゲット (LUFS)
     void setLoudnessTargetLufs(float lufs) { loudnessTargetLufs = lufs; }
+    // MIDI キーボード (環境設定「MIDI入力」) が使える間だけ、MIDI トラックにも R (録音アーム)
+    // ボタンを出す。ctor は MIDI トラックの recBtn を隠すので、Panel が生成時と接続状態の
+    // 変化時にこれで上書きする (音声トラックには無関係)
+    void setMidiRecAvailable(bool v)
+    {
+        midiRecAvailable = v;
+        if (track.isMidiTrack() && !track.isClickTrack() && !track.isFolderTrack())
+            recBtn.setVisible(v);
+    }
 
     std::function<void()>      onChanged;
     // メイン高さリサイズのドラッグ中に新しい高さ (px) を通知する。Panel 側で複数選択トラックへ
@@ -217,6 +226,8 @@ private:
     juce::uint32 peakClipUntilMs { 0 };   // 赤クリップ表示の保持期限 (ms・0=非表示)
     bool         peakClipShown   { false };// 直近に赤クリップを描いたか (repaint 判定用)
     float loudnessTargetLufs { -24.0f };
+    // MIDI キーボードが使えるか (MIDI トラックの R ボタン表示。setMidiRecAvailable 参照)
+    bool midiRecAvailable { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrackHeaderView)
 };

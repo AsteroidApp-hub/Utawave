@@ -305,6 +305,19 @@ private:
     // thread へ転送 (callAsync) するか」の事前判定に読む (ライブ演奏中に毎ノートの
     // 無駄なメッセージ post をしない)。updateLiveMidiTarget (20Hz) が更新する
     std::atomic<bool> stepInputWanted { false };
+
+    // ── MIDI 録音 (MIDI キーボード → Rec アーム済み MIDI トラックへクリップ配置) ──
+    // キャプチャは MIDI スレッド (MidiKeyboardCallback) がタイムライン秒のタイムスタンプ
+    // (エンジン位置 − 出力レイテンシ = 演奏者が聞こえた音に合わせた位置) を付けて積む。
+    // 停止時に finalizeMidiRecording が小節単位の MIDI クリップとして配置する
+    // (テイクレーンは作らない。重なった既存クリップは置換 = 音声のパンチインと同じ作法)
+    std::atomic<bool> midiCaptureActive { false };
+    juce::CriticalSection midiCaptureLock;         // MIDI スレッド / message スレッド間
+    std::vector<juce::MidiMessage> capturedMidi;   // タイムスタンプ = タイムライン秒
+    double midiCaptureStartPos { 0.0 };            // R 押下位置 (リテイクの戻り先)
+    bool beginMidiCapture(double recStart);        // アーム済み MIDI トラックが無ければ false
+    // discard=true はテイクを捨てる (Q リテイク)。配置は Rec アーム済みの全 MIDI トラックへ
+    void finalizeMidiRecording(double stopPos, bool discard);
     void commitRetrospective();
     // ── オーディオインポート ──
     // 変換本体 (ファイル I/O のみ・UI/trackManager に触れない)。バックグラウンドスレッドから

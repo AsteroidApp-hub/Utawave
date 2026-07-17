@@ -355,6 +355,19 @@ void MainComponent::MidiKeyboardCallback::handleIncomingMidiMessage(
         || m.isMidiStart() || m.isMidiStop() || m.isMidiContinue())
         return;
     mc->audioEngine.pushLiveMidi(m);
+    // MIDI 録音キャプチャ: タイムライン秒でタイムスタンプして積む。エンジン位置は
+    // 「今生成中」の位置 = 聞こえている音より出力レイテンシ分先なので、演奏者が
+    // 聞こえた音に合わせて弾いた意図位置 (= その分手前) へ補正する
+    if (mc->midiCaptureActive.load())
+    {
+        auto stamped = m;
+        stamped.setTimeStamp(juce::jmax(0.0,
+            mc->audioEngine.getCurrentPositionSeconds()
+            - mc->audioEngine.getOutputLatencySecs()));
+        const juce::ScopedLock sl(mc->midiCaptureLock);
+        if (mc->capturedMidi.size() < 200000)   // 暴走ガード (~1 時間の連打でも届かない)
+            mc->capturedMidi.push_back(std::move(stamped));
+    }
     // ステップ入力中のピアノロールが無ければ message thread へ転送しない
     // (ライブ演奏の毎ノートで無駄な callAsync を post しないための事前判定)
     if (m.isNoteOnOrOff() && mc->stepInputWanted.load())
@@ -446,6 +459,15 @@ void MainComponent::openPianoRollFor(MidiClip* clip, Track* track)
         };
         // ピアノロール窓専用のツールチップ表示 (アプリ設定 showTooltips に追従)
         ed->setTooltipsEnabled(appPrefs.showTooltips);
+        // ステップ入力ボタンは MIDI キーボード接続中のみ表示 (未接続では入力手段が無い)
+        ed->setMidiInputAvailable(midiKeyboardInput != nullptr);
+        // Velocity 領域の高さ (境界ドラッグで調整可) をアプリ設定から適用し、変更を保存する
+        ed->setVelocityAreaHeight(appPrefs.pianoRollVelocityH);
+        ed->onVelocityAreaResized = [this](int h)
+        {
+            appPrefs.pianoRollVelocityH = h;
+            appPrefs.save();
+        };
         // Space = 再生/停止。ピアノロール (独立ウィンドウ) にフォーカスがある間も再生できるよう、
         // メイン側のトランスポートへ委譲する (Windows で再生できない問題の対策・macOS は
         // GlobalKeyMonitor 経由なのでこの経路は実質未使用だが害はない)。

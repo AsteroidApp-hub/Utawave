@@ -57,6 +57,9 @@ AppPreferences AppPreferences::load()
         p.showMidiExportMenu = xml->getBoolAttribute("showMidiExportMenu", p.showMidiExportMenu);
         p.showAds            = xml->getBoolAttribute("showAds", p.showAds);
         p.midiPagingEnabled  = xml->getBoolAttribute("midiPagingEnabled", p.midiPagingEnabled);
+        // 範囲は PianoRollEditor::kVelMinH/kVelMaxH と一致させる
+        p.pianoRollVelocityH = juce::jlimit(40, 400,
+            xml->getIntAttribute("pianoRollVelocityH", p.pianoRollVelocityH));
         p.recLatencyAutoComp = xml->getBoolAttribute("recLatencyAutoComp", p.recLatencyAutoComp);
         p.recLatencyManualMs = juce::jlimit(-300.0, 300.0,
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
@@ -91,6 +94,7 @@ bool AppPreferences::save() const
     xml.setAttribute("showMidiExportMenu", showMidiExportMenu);
     xml.setAttribute("showAds", showAds);
     xml.setAttribute("midiPagingEnabled", midiPagingEnabled);
+    xml.setAttribute("pianoRollVelocityH", pianoRollVelocityH);
     xml.setAttribute("recLatencyAutoComp", recLatencyAutoComp);
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
     xml.setAttribute("retakeKeepsTake", retakeKeepsTake);

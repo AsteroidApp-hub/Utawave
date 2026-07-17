@@ -24,6 +24,7 @@
 #include "../Source/Recording/LiveRecordingBuffer.h"
 #include "../Source/Recording/RecordingManager.h"
 #include "../Source/Audio/AudioEngine.h"
+#include "../Source/MIDI/MidiRecorder.h"
 
 namespace
 {
@@ -61,6 +62,134 @@ public:
         testStopTakesOnlyNormal();
         testStopTakesOnlyLoop();
         testPunchFromRetroTakesOnlyAndDiscard();
+        testMidiRecorderBuildSequence();
+    }
+
+    // ── MIDI 録音: キャプチャ列 → クリップシーケンス変換 (MidiRecorder 純関数) ──
+    void testMidiRecorderBuildSequence()
+    {
+        beginTest("MidiRecorder: capture events -> clip sequence (pairing / hanging / clamp)");
+
+        auto on  = [](double t, int note, juce::uint8 vel = 100, int ch = 1)
+        {
+            auto m = juce::MidiMessage::noteOn(ch, note, vel);
+            m.setTimeStamp(t);
+            return m;
+        };
+        auto off = [](double t, int note, int ch = 1)
+        {
+            auto m = juce::MidiMessage::noteOff(ch, note);
+            m.setTimeStamp(t);
+            return m;
+        };
+        auto findNote = [](const juce::MidiMessageSequence& seq, int note,
+                           double& outOn, double& outOff) -> bool
+        {
+            for (int i = 0; i < seq.getNumEvents(); ++i)
+            {
+                const auto& m = seq.getEventPointer(i)->message;
+                if (!m.isNoteOn() || m.getNoteNumber() != note) continue;
+                outOn = m.getTimeStamp();
+                const int offI = seq.getIndexOfMatchingKeyUp(i);
+                outOff = (offI >= 0) ? seq.getEventPointer(offI)->message.getTimeStamp() : -1.0;
+                return true;
+            }
+            return false;
+        };
+
+        // (1) 基本ペア + noteSpan
+        {
+            std::vector<juce::MidiMessage> ev { on(1.0, 60), off(1.5, 60) };
+            double firstOn = -1, lastEnd = -1;
+            expect(MidiRecorder::noteSpan(ev, 2.0, firstOn, lastEnd), "span found");
+            expect(approxEq(firstOn, 1.0, 1e-9) && approxEq(lastEnd, 1.5, 1e-9), "span times");
+            auto seq = MidiRecorder::buildClipSequence(ev, 0.0, 4.0, 2.0);
+            double nOn = -1, nOff = -1;
+            expect(findNote(seq, 60, nOn, nOff), "note present");
+            expect(approxEq(nOn, 1.0, 1e-9) && approxEq(nOff, 1.5, 1e-9), "note times");
+        }
+
+        // (2) 押しっぱなし: off 無し → 停止位置で閉じる (noteSpan も stopPos まで届く)
+        {
+            std::vector<juce::MidiMessage> ev { on(1.0, 62) };
+            double firstOn = -1, lastEnd = -1;
+            expect(MidiRecorder::noteSpan(ev, 2.5, firstOn, lastEnd), "hanging span found");
+            expect(approxEq(lastEnd, 2.5, 1e-9), "hanging span end = stopPos");
+            auto seq = MidiRecorder::buildClipSequence(ev, 0.0, 4.0, 2.5);
+            double nOn = -1, nOff = -1;
+            expect(findNote(seq, 62, nOn, nOff), "hanging note present");
+            expect(approxEq(nOff, 2.5, 1e-9), "hanging note closed at stopPos");
+        }
+
+        // (3) 時刻順でない入力 (ループ録音のラップ) でも正しくペアリング
+        {
+            std::vector<juce::MidiMessage> ev { on(3.0, 64), off(3.5, 64), on(1.0, 65), off(1.5, 65) };
+            auto seq = MidiRecorder::buildClipSequence(ev, 0.0, 4.0, 4.0);
+            double aOn = -1, aOff = -1, bOn = -1, bOff = -1;
+            expect(findNote(seq, 64, aOn, aOff) && findNote(seq, 65, bOn, bOff), "both notes present");
+            expect(approxEq(aOn, 3.0, 1e-9) && approxEq(bOn, 1.0, 1e-9), "out-of-order paired");
+        }
+
+        // (4) クリップ範囲へのクランプ: 末尾を跨ぐノートは切り詰め、範囲外は捨てる
+        {
+            std::vector<juce::MidiMessage> ev { on(3.5, 60), off(5.0, 60), on(4.5, 61), off(4.8, 61) };
+            auto seq = MidiRecorder::buildClipSequence(ev, 0.0, 4.0, 5.0);
+            double nOn = -1, nOff = -1;
+            expect(findNote(seq, 60, nOn, nOff), "straddling note kept");
+            expect(approxEq(nOff, 4.0, 1e-9), "straddling note clamped to clip end");
+            double dummy1 = 0, dummy2 = 0;
+            expect(!findNote(seq, 61, dummy1, dummy2), "note fully outside clip dropped");
+        }
+
+        // (5) クリップ相対時刻へのシフト + velocity 保持 + CC は範囲内のみ通す
+        {
+            std::vector<juce::MidiMessage> ev { on(2.0, 60, (juce::uint8) 90) };
+            auto cc = juce::MidiMessage::controllerEvent(1, 64, 127);   // サスティンペダル
+            cc.setTimeStamp(2.5);
+            ev.push_back(cc);
+            auto ccOut = juce::MidiMessage::controllerEvent(1, 64, 0);
+            ccOut.setTimeStamp(9.0);                                    // 範囲外 → 捨てる
+            ev.push_back(ccOut);
+            ev.push_back(off(3.0, 60));
+            auto seq = MidiRecorder::buildClipSequence(ev, 1.0, 5.0, 3.0);
+            double nOn = -1, nOff = -1;
+            expect(findNote(seq, 60, nOn, nOff), "shifted note present");
+            expect(approxEq(nOn, 1.0, 1e-9) && approxEq(nOff, 2.0, 1e-9), "clip-relative times");
+            int ccCount = 0;
+            for (int i = 0; i < seq.getNumEvents(); ++i)
+            {
+                const auto& m = seq.getEventPointer(i)->message;
+                if (m.isController()) { ++ccCount; expect(approxEq(m.getTimeStamp(), 1.5, 1e-9), "CC shifted"); }
+            }
+            expect(ccCount == 1, "in-range CC kept, out-of-range CC dropped");
+            for (int i = 0; i < seq.getNumEvents(); ++i)
+            {
+                const auto& m = seq.getEventPointer(i)->message;
+                if (m.isNoteOn()) expect(m.getVelocity() == 90, "velocity preserved");
+            }
+        }
+
+        // (6) 同一ピッチの再押下 (off 欠落): 前のノートを再押下位置で閉じる
+        {
+            std::vector<juce::MidiMessage> ev { on(1.0, 60), on(2.0, 60), off(2.5, 60) };
+            auto seq = MidiRecorder::buildClipSequence(ev, 0.0, 4.0, 3.0);
+            int noteCount = 0;
+            for (int i = 0; i < seq.getNumEvents(); ++i)
+                if (seq.getEventPointer(i)->message.isNoteOn()) ++noteCount;
+            expect(noteCount == 2, "retrigger closes previous note (2 notes)");
+        }
+
+        // (7) ノート無し (CC のみ / 空) → noteSpan false
+        {
+            std::vector<juce::MidiMessage> empty;
+            double a = 0, b = 0;
+            expect(!MidiRecorder::noteSpan(empty, 1.0, a, b), "empty -> no span");
+            std::vector<juce::MidiMessage> ccOnly;
+            auto cc = juce::MidiMessage::controllerEvent(1, 1, 64);
+            cc.setTimeStamp(1.0);
+            ccOnly.push_back(cc);
+            expect(!MidiRecorder::noteSpan(ccOnly, 2.0, a, b), "CC-only -> no span");
+        }
     }
 
     // lane0 に直接クリップを足す (overlaps チェック無しでそのまま lane0 に入る)

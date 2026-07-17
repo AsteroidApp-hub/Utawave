@@ -122,6 +122,9 @@ public:
     // ファイルに書かれる。録音クリップ配置時にこの量だけ手前へずらして補正する。
     // デバイス報告の入出力レイテンシ合計 (秒)。audioDeviceAboutToStart で更新。
     double getDeviceRoundTripLatencySecs() const { return deviceRoundTripSecs.load(); }
+    // 出力レイテンシ単体 (MIDI 録音のタイムスタンプ補正用: 演奏者は聞こえた音 = エンジン位置より
+    // 出力レイテンシ分過去に合わせて弾くので、キャプチャ時刻からこの分を引く)
+    double getOutputLatencySecs() const { return deviceOutputLatencySecs.load(); }
     // 自動補正 ON/OFF + 手動追加オフセット (ms, +で手前へ)。アプリ全体設定から反映。
     void setRecordingLatencyComp(bool autoComp, double manualMs)
     {
@@ -660,6 +663,7 @@ private:
 
     // ── 録音レイテンシ補正 (getRecordingLatencyCompSecs 参照) ──
     std::atomic<double> deviceRoundTripSecs { 0.0 };
+    std::atomic<double> deviceOutputLatencySecs { 0.0 };   // MIDI 録音のタイムスタンプ補正用
     std::atomic<bool>   recLatencyAutoComp  { true };
     std::atomic<double> recLatencyManualMs  { 0.0 };
 

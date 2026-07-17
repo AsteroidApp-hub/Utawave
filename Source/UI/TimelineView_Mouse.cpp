@@ -247,6 +247,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
             juce::PopupMenu m;
             m.addItem(1, tr(u8"ピアノロールを開く"));
+            // ノートの開始位置を GRID にスナップ (GRID:Off の間は選べない)
+            m.addItem(3, tr(u8"クォンタイズ (GRID)"),
+                      snapModeUnitSecs(appSettings.snapMode, bpm) > 0.0);
             m.addSeparator();
             m.addItem(2, tr(u8"削除"));
             // メニュー表示中にプロジェクトを閉じる / クリップが消えることがあるため、
@@ -267,6 +270,10 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                         tv->selectedMidiClip  = clip;
                         tv->selectedMidiTrack = track;
                         tv->deleteSelectedMidiClip();
+                    }
+                    else if (result == 3)
+                    {
+                        tv->quantizeMidiClip(track, clip);
                     }
                 });
             return;

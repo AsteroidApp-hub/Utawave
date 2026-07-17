@@ -1362,9 +1362,14 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 
     // 録音レイテンシ補正用: デバイス報告の入出力レイテンシ合計を公開する
     if (currentSampleRate > 0.0)
+    {
         deviceRoundTripSecs.store((device->getInputLatencyInSamples()
                                    + device->getOutputLatencyInSamples())
                                   / currentSampleRate);
+        // MIDI 録音のタイムスタンプ補正用: 出力レイテンシ単体も公開する
+        // (演奏者は「聞こえた音」= エンジン位置より出力レイテンシ分過去に合わせて弾く)
+        deviceOutputLatencySecs.store(device->getOutputLatencyInSamples() / currentSampleRate);
+    }
     mixer.prepareToPlay(currentBufferSize, currentSampleRate);
     workBuffer.setSize(2, currentBufferSize);
     // 停止中シンセプレビュー用に十分なサイズで先に確保 (audio thread での realloc を回避)
@@ -2621,6 +2626,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         // (凍結保持された前回のテールが次の再生開始で漏れ出すのを防ぐ)
         if (reverbBusDirty) { masterReverbBus.reset(); reverbBusDirty = false; }
 
+        // このブロックでメータを測定したトラックの記録 (再生ブランチと同じ trackMeterFed 方式。
+        // 停止中もシンセ/チェーンのプレビュー音・ライブ MIDI 演奏をメータへ反映し、
+        // 測定しなかったトラックだけを後段で減衰させる)
+        juce::zeromem(trackMeterFed, sizeof(trackMeterFed));
+
         // ── 停止時もシンセに残った音 (プレビュー音含む) は鳴らす ──
         // 各内蔵シンセを軽量に rendering してマスター出力にミックス。
         // トラックの Vol / Pan / Mute は反映する (プレビュー爆音防止)。
@@ -2657,6 +2667,17 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 const float chGain = vol * (ch == 0 ? panL : panR);
                 const float* src = previewBuf.getReadPointer(juce::jmin(ch, previewBuf.getNumChannels() - 1));
                 juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
+            }
+
+            // トラック出力メータへ反映 (ライブ MIDI 演奏 / プレビューで Peak・VU が動くように)
+            if ((int) ti < kMaxTracksMeters)
+            {
+                trackMeterFed[ti] = 1;
+                measureStereoBuf(previewBuf, numSamples,
+                                 trackOutPeakL[ti], trackOutPeakR[ti],
+                                 trackOutVUSmoothL[ti], trackOutVUSmoothR[ti],
+                                 trackOutVUL[ti], trackOutVUR[ti],
+                                 vuCoef, vol * panL, vol * panR);
             }
         }
 
@@ -2699,6 +2720,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                     const float chGain = vol * (ch == 0 ? panL : panR);
                     const float* src = buf.getReadPointer(juce::jmin(ch, buf.getNumChannels() - 1));
                     juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
+                }
+                if (tidx < kMaxTracksMeters)
+                {
+                    trackMeterFed[tidx] = 1;
+                    measureStereoBuf(buf, numSamples,
+                                     trackOutPeakL[tidx], trackOutPeakR[tidx],
+                                     trackOutVUSmoothL[tidx], trackOutVUSmoothR[tidx],
+                                     trackOutVUL[tidx], trackOutVUR[tidx],
+                                     vuCoef, vol * panL, vol * panR);
                 }
             }
 
@@ -2771,36 +2801,79 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                             const float* src = buf.getReadPointer(juce::jmin(ch, buf.getNumChannels() - 1));
                             juce::FloatVectorOperations::addWithMultiply(outputChannelData[ch], src, chGain, numSamples);
                         }
+                        if (mp->trackIdx < kMaxTracksMeters)
+                        {
+                            trackMeterFed[mp->trackIdx] = 1;
+                            measureStereoBuf(buf, numSamples,
+                                             trackOutPeakL[mp->trackIdx], trackOutPeakR[mp->trackIdx],
+                                             trackOutVUSmoothL[mp->trackIdx], trackOutVUSmoothR[mp->trackIdx],
+                                             trackOutVUL[mp->trackIdx], trackOutVUR[mp->trackIdx],
+                                             vuCoef, vol * panL, vol * panR);
+                        }
                     }
                 }
             }
         }
 
-        // ── 停止時はメータを徐々に減衰させて 0 に落とす ──
-        // ピークは linear gain で乗算減衰（block ≈ 10ms 想定で約 0.4〜0.5 秒で -96 へ）
-        // VU は既存のスムージング係数 (0.97) を流用
-        const float peakDecay = 0.80f;
-        auto decayPeakDb = [peakDecay](std::atomic<float>& vDb)
+        // ── 停止時のマスターメータ ──
+        // プレビュー / ライブ MIDI の音が出ているブロックはその出力を測定して反映し
+        // (弾いた音で Peak・VU が動くように)、無音なら従来どおり徐々に減衰させて 0 に落とす。
+        // 測定点はモニタ返し (mixInputMonitoring) の前 = ここまでの出力はプレビュー音のみ
         {
-            float db = vDb.load();
-            if (db <= -96.0f) return;
-            float g = juce::Decibels::decibelsToGain(db, -96.0f) * peakDecay;
-            vDb.store(juce::Decibels::gainToDecibels(g, -96.0f));
-        };
-        decayPeakDb(peakL);
-        decayPeakDb(peakR);
-        vuSmoothL *= vuCoef;
-        vuSmoothR *= vuCoef;
-        vuL.store(juce::Decibels::gainToDecibels(vuSmoothL, -96.0f));
-        vuR.store(juce::Decibels::gainToDecibels(vuSmoothR, -96.0f));
+            float magL = 0.0f, magR = 0.0f;
+            if (numOutputChannels >= 1 && outputChannelData[0] != nullptr)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax(outputChannelData[0], numSamples);
+                magL = juce::jmax(std::abs(r.getStart()), std::abs(r.getEnd()));
+            }
+            if (numOutputChannels >= 2 && outputChannelData[1] != nullptr)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax(outputChannelData[1], numSamples);
+                magR = juce::jmax(std::abs(r.getStart()), std::abs(r.getEnd()));
+            }
+            else
+                magR = magL;
 
-        // 実トラック数までに制限。完全無音 (peak/VU とも底) のスキップと減衰の実体は
+            if (magL > 1.0e-6f || magR > 1.0e-6f)
+            {
+                peakL.store(juce::Decibels::gainToDecibels(magL, -96.0f));
+                peakR.store(juce::Decibels::gainToDecibels(magR, -96.0f));
+                const float oneMinus = 1.0f - vuCoef;
+                vuSmoothL = vuSmoothL * vuCoef + magL * oneMinus;
+                vuSmoothR = vuSmoothR * vuCoef + magR * oneMinus;
+                vuL.store(juce::Decibels::gainToDecibels(vuSmoothL, -96.0f));
+                vuR.store(juce::Decibels::gainToDecibels(vuSmoothR, -96.0f));
+            }
+            else
+            {
+                // ピークは linear gain で乗算減衰（block ≈ 10ms 想定で約 0.4〜0.5 秒で -96 へ）
+                // VU は既存のスムージング係数 (0.97) を流用
+                const float peakDecay = 0.80f;
+                auto decayPeakDb = [peakDecay](std::atomic<float>& vDb)
+                {
+                    float db = vDb.load();
+                    if (db <= -96.0f) return;
+                    float g = juce::Decibels::decibelsToGain(db, -96.0f) * peakDecay;
+                    vDb.store(juce::Decibels::gainToDecibels(g, -96.0f));
+                };
+                decayPeakDb(peakL);
+                decayPeakDb(peakR);
+                vuSmoothL *= vuCoef;
+                vuSmoothR *= vuCoef;
+                vuL.store(juce::Decibels::gainToDecibels(vuSmoothL, -96.0f));
+                vuR.store(juce::Decibels::gainToDecibels(vuSmoothR, -96.0f));
+            }
+        }
+
+        // 実トラック数までに制限。このブロックで測定した (プレビュー/ライブ MIDI の) トラックは
+        // 減衰させない。完全無音 (peak/VU とも底) のスキップと減衰の実体は
         // decayTrackMeter (再生中の「未測定トラックの減衰」と共通ヘルパ) が行う。
         const int meterN = juce::jmin(meterTrackCount.load(), kMaxTracksMeters);
         for (int t = 0; t < meterN; ++t)
-            decayTrackMeter(trackOutPeakL[t], trackOutPeakR[t],
-                            trackOutVUSmoothL[t], trackOutVUSmoothR[t],
-                            trackOutVUL[t], trackOutVUR[t], vuCoef);
+            if (!trackMeterFed[t])
+                decayTrackMeter(trackOutPeakL[t], trackOutPeakR[t],
+                                trackOutVUSmoothL[t], trackOutVUSmoothR[t],
+                                trackOutVUL[t], trackOutVUR[t], vuCoef);
 
         // 停止中も入力モニタリングは通す (ドライ返し + モニターリバーブ、INS があれば FX も)
         mixInputMonitoring(inputChannelData, numInputChannels,

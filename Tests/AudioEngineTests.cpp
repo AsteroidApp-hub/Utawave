@@ -1676,6 +1676,9 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
                                       "stopped: synth sounds on live note-on (L)");
             expectWithinAbsoluteError(pR, 0.25f * kCenterPan, 0.03f,
                                       "stopped: synth sounds on live note-on (R)");
+            // 停止中のライブ演奏でも Peak/VU が反応する (マスター + トラック出力メータ)
+            expect(s.engine.getPeakL() > -40.0f, "stopped: master peak reacts to live playing");
+            expect(s.engine.getTrackOutputPeakL(0) > -40.0f, "stopped: track meter reacts to live playing");
 
             s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 69));
             runBlocks(s.engine, 30);   // リリース 50ms を通過
@@ -1716,6 +1719,8 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             runBlocks(s.engine, 4, &pL, &pR);
             expectWithinAbsoluteError(pL, 0.5f * kCenterPan, 0.03f,
                                       "stopped: live MIDI reaches the INS chain (VSTi)");
+            expect(s.engine.getPeakL() > -40.0f, "stopped: master peak reacts to chain output");
+            expect(s.engine.getTrackOutputPeakL(0) > -40.0f, "stopped: track meter reacts to chain output");
 
             s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 60));
             runBlocks(s.engine, 2);

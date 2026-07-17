@@ -81,6 +81,9 @@ bool RecordingManager::startRecording(double recStartSec, double playFromSec,
     {
         auto* track = trackManager.getTrack(i);
         if (!track->isRecArmed()) continue;
+        // MIDI トラックの録音は音声 writer でなく MIDI キャプチャ
+        // (MainComponent::beginMidiCapture) が担当する
+        if (track->isMidiTrack()) continue;
         if (punchFromRetro && track == retroTrack) continue;   // retro writer が担当
 
         auto file   = createRecordingFile(track->getName());

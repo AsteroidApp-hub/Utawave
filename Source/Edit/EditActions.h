@@ -787,4 +787,39 @@ private:
     std::vector<MidiClip*>                 addedPtrs;      // 追加したクリップ (現在 track にある間)
 };
 
+// MIDI クリップのシーケンス内容だけを差し替える (タイムラインのクォンタイズ等)。
+// クリップのインスタンスは保つので、開いているピアノロールは onApplied → reload で追従する。
+// MidiClip* の生存は履歴中のインスタンス保存系アクション (MidiClipReplaceAction が
+// extract/insert で同一インスタンスを保つ) が保証する — ピアノロールの MidiNotesAction が
+// MidiClip& を保持するのと同じ前提。
+class MidiSequenceAction : public juce::UndoableAction
+{
+public:
+    MidiSequenceAction(MidiClip* c,
+                       juce::MidiMessageSequence before,
+                       juce::MidiMessageSequence after,
+                       std::function<void(MidiClip*)> onAppliedCb)
+        : clip(c), beforeSeq(std::move(before)), afterSeq(std::move(after)),
+          onApplied(std::move(onAppliedCb)) {}
+
+    bool perform() override { return apply(afterSeq); }
+    bool undo()    override { return apply(beforeSeq); }
+
+private:
+    bool apply(const juce::MidiMessageSequence& src)
+    {
+        if (clip == nullptr) return false;
+        auto& dst = clip->getSequence();
+        dst.clear();
+        dst.addSequence(src, 0.0);
+        dst.updateMatchedPairs();
+        if (onApplied) onApplied(clip);
+        return true;
+    }
+
+    MidiClip* clip;
+    juce::MidiMessageSequence beforeSeq, afterSeq;
+    std::function<void(MidiClip*)> onApplied;
+};
+
 }  // namespace EditActions

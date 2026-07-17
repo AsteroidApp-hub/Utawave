@@ -437,6 +437,15 @@ MainComponent::MainComponent()
                 break;
             }
     };
+    // タイムライン側の編集 (クォンタイズ等) でシーケンス内容が書き換わったら、開いている
+    // ピアノロールのノート配列を再構築する (undo/redo の外部 reload と同じ経路)
+    timelineView.onMidiClipContentChanged = [this](MidiClip* mc)
+    {
+        for (auto* w : pianoRollWindows)
+            if (w && w->getClip() == mc)
+                if (auto* ed = w->getEditor())
+                    ed->reloadNotesFromClip();
+    };
     timelineView.onWaveformRefreshNeeded = [this]
     {
         scheduleWaveformRefresh();
@@ -1084,7 +1093,10 @@ void MainComponent::timerCallback()
 
     // Metering: アイドル時 (再生/録音/入力モニターのいずれも無し) はメーター計算を省く。
     // 直後の数 tick は猶予として計算を続け、メーターが無音まで滑らかに減衰してから止める。
-    bool meterActive = isPlaying || isRecording;
+    // MIDI キーボードのライブ演奏 (停止中) でも Peak/VU が動くよう、ライブ MIDI の
+    // ターゲットが有効な間 (= キーボード接続中で MIDI トラックがある) はメータを止めない
+    bool meterActive = isPlaying || isRecording
+                       || audioEngine.getLiveMidiTargetTrack() >= 0;
     if (!meterActive)
     {
         for (int i = 0; i < trackManager.getTrackCount(); ++i)
@@ -1350,7 +1362,9 @@ void MainComponent::syncInputMonitorStateToEngine()
                 havePrimary = true;
             }
         }
-        if (t->isRecArmed()) anyRecArmed = true;
+        // MIDI トラックのアームは音声入力を使わない (キーボード録音) ので、
+        // エンジンの入力メータ活性 (anyRecArmed) には含めない
+        if (t->isRecArmed() && !t->isMidiTrack()) anyRecArmed = true;
     }
     audioEngine.setInputMonitoringActive(anyMonitoring);
     audioEngine.setAnyTrackRecArmed(anyRecArmed);
@@ -1794,6 +1808,7 @@ void MainComponent::startRecording()
     {
         auto* t = trackManager.getTrack(i);
         if (!t || !t->isRecArmed()) continue;
+        if (t->isMidiTrack()) continue;   // MIDI 録音は Lane を使わない (クリップ配置の Undo は MidiClipReplaceAction)
         auto* lane = t->getLane(0);
         if (!lane) continue;
         PreRecSnapshot ps;
@@ -1812,10 +1827,14 @@ void MainComponent::startRecording()
         preRecSnaps.push_back(std::move(ps));
     }
 
-    isRecording = recordingMgr.startRecording(recStart, playFrom,
-                                              useLoopRec,
-                                              loopStartSecs, loopEndSecs);
-    lastRecordingWasLoop = isRecording && useLoopRec;
+    const bool audioRecording = recordingMgr.startRecording(recStart, playFrom,
+                                                            useLoopRec,
+                                                            loopStartSecs, loopEndSecs);
+    // MIDI キーボード録音: アーム済み MIDI トラックがあればキャプチャ開始 (音声と並行可)
+    const bool midiRecording = beginMidiCapture(recStart);
+    isRecording = audioRecording || midiRecording;
+    lastRecordingWasLoop = audioRecording && useLoopRec;
+    timelineView.setMidiRecordingIndicator(midiRecording, recStart);
     toolbar.setRecording(isRecording);
 
     // 録音ファイルを作れなかったトラックがあれば通知する (silent failure 防止。
@@ -1848,6 +1867,9 @@ void MainComponent::stopRecording(bool takesOnly)
 
     double stopPos = audioEngine.getCurrentPositionSeconds();
     recordingMgr.stopRecording(stopPos, takesOnly);
+    // MIDI 録音の確定 (テイクレーンが無いので takesOnly = Q リテイクの「テイクを残す」でも
+    // 破棄する。残す先が無く、次の録り直しの重なり置換で消える運命のクリップを置かない)
+    finalizeMidiRecording(stopPos, /*discard*/ takesOnly);
     isRecording = false;
     markProjectDirty();   // 録音結果はプロジェクトの変更
     toolbar.setRecording(false);
@@ -1955,6 +1977,56 @@ void MainComponent::stopRecording(bool takesOnly)
     }
 }
 
+// ── MIDI 録音 (MIDI キーボード → Rec アーム済み MIDI トラック) ──
+// キャプチャ自体は MidiKeyboardCallback (MIDI スレッド) が midiCaptureActive を見て積む。
+// ここでは開始条件の判定とバッファの初期化だけを行う
+bool MainComponent::beginMidiCapture(double recStart)
+{
+    if (midiKeyboardInput == nullptr) return false;
+    bool anyArmedMidi = false;
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+        if (auto* t = trackManager.getTrack(i);
+            t != nullptr && t->isMidiTrack() && !t->isClickTrack() && t->isRecArmed())
+        {
+            anyArmedMidi = true;
+            break;
+        }
+    if (!anyArmedMidi) return false;
+
+    {
+        const juce::ScopedLock sl(midiCaptureLock);
+        capturedMidi.clear();
+    }
+    midiCaptureStartPos = recStart;
+    midiCaptureActive.store(true);
+    updateLiveMidiTarget();   // アームトラックをモニタ対象へ即反映 (タイマー待ちにしない)
+    return true;
+}
+
+// 録音停止/リテイクからの確定。discard=true はキャプチャを捨てるだけ (クリップを置かない)。
+// 配置は Rec アーム済みの全 MIDI トラックへ (音声の複数トラック同時録音と同じ作法。
+// 小節スナップ / 重なり置換 / Undo は TimelineView::placeRecordedMidiClip が行う)
+void MainComponent::finalizeMidiRecording(double stopPos, bool discard)
+{
+    timelineView.setMidiRecordingIndicator(false, 0.0);
+    if (!midiCaptureActive.load()) return;
+    midiCaptureActive.store(false);
+
+    std::vector<juce::MidiMessage> events;
+    {
+        const juce::ScopedLock sl(midiCaptureLock);
+        events.swap(capturedMidi);
+    }
+    if (discard || events.empty()) return;
+
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+    {
+        auto* t = trackManager.getTrack(i);
+        if (t == nullptr || !t->isMidiTrack() || t->isClickTrack() || !t->isRecArmed()) continue;
+        timelineView.placeRecordedMidiClip(t, events, stopPos);
+    }
+}
+
 void MainComponent::scheduleWaveformRefresh()
 {
     // AudioThumbnail はバックグラウンドで非同期にロードされ、進捗ごとに
@@ -2055,8 +2127,11 @@ void MainComponent::retakeRecording()
     // 録音中のみ (Q で通常の録音開始はさせない)
     if (!isRecording) return;
 
-    // 戻り先 = R 押下位置 (パンチイン/ループ録音でも録音を始めた位置)
-    const double anchor = recordingMgr.getActiveRecordStartPos(playPosition);
+    // 戻り先 = R 押下位置 (パンチイン/ループ録音でも録音を始めた位置)。
+    // MIDI のみの録音では audio 側の activeRecordings が空なので、MIDI キャプチャの
+    // 開始位置をフォールバックにする (playPosition だと現在位置へ戻ってしまう)
+    const double anchor = recordingMgr.getActiveRecordStartPos(
+        midiCaptureActive.load() ? midiCaptureStartPos : playPosition);
 
     if (appPrefs.retakeKeepsTake)
     {
@@ -2069,6 +2144,7 @@ void MainComponent::retakeRecording()
         // 既定: 今のテイクを破棄 (テイクレーン配置済み分・録音ファイルとも残さない)。
         // 破棄なので Undo アクションも積まない
         recordingMgr.discardRecording();
+        finalizeMidiRecording(0.0, /*discard*/ true);   // MIDI キャプチャも破棄
         isRecording = false;
         preRecSnaps.clear();
         toolbar.setRecording(false);

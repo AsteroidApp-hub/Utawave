@@ -700,6 +700,7 @@ void TrackHeaderPanel::refresh()
             view->getNumInputChannels = onGetNumInputChannels;
         view->setVuReferenceLevel(vuReferenceLevel);
         view->setLoudnessTargetLufs(loudnessTargetLufs);
+        view->setMidiRecAvailable(midiInputAvailable);
         view->refresh();
         // パネル側でドラッグ&ドロップ並び替えを処理するため、view のマウスイベント
         // (子コンポーネント含む) を転送
@@ -754,6 +755,14 @@ void TrackHeaderPanel::setLoudnessTargetLufs(float lufs)
     loudnessTargetLufs = lufs;
     for (auto& v : headerViews)
         v->setLoudnessTargetLufs(lufs);
+}
+
+void TrackHeaderPanel::setMidiInputAvailable(bool v)
+{
+    if (midiInputAvailable == v) return;
+    midiInputAvailable = v;
+    for (auto& hv : headerViews)
+        hv->setMidiRecAvailable(v);
 }
 
 void TrackHeaderPanel::setScrollY(int y)

@@ -248,6 +248,22 @@ public:
     std::function<void(class MidiClip* /*clip*/, Track* /*track*/)> onMidiClipDoubleClicked;
     // MIDI クリップを破棄する直前に通知 (開いているピアノロールを閉じる等)
     std::function<void(class MidiClip* /*clip*/)> onMidiClipWillBeRemoved;
+    // MIDI クリップのシーケンス内容がタイムライン側の編集 (クォンタイズ等) で書き換わった時の
+    // 通知。MainComponent が開いているピアノロールへ reloadNotesFromClip を届ける
+    std::function<void(class MidiClip* /*clip*/)> onMidiClipContentChanged;
+    // MIDI 録音 (キーボード) 中の表示: Rec アーム済み MIDI トラックの行に録音開始位置 →
+    // 再生バーの赤い領域を描く (描画のみ・録音状態の真実源は MainComponent)
+    void setMidiRecordingIndicator(bool active, double startPos)
+    {
+        midiRecIndicator      = active;
+        midiRecIndicatorStart = startPos;
+        repaint();
+    }
+    // MIDI 録音の確定配置: キャプチャ列 (タイムライン秒タイムスタンプ) を小節単位のクリップに
+    // して track へ置く。重なった既存クリップは置換 (音声のパンチインと同じ作法・テイク無し)。
+    // 1 トラック 1 トランザクション (pushMidiReplaceAction 経由で Undo 可)
+    void placeRecordedMidiClip(Track* track, const std::vector<juce::MidiMessage>& absEvents,
+                               double stopPos);
     // クリップを全トラックより下の空き領域へドロップした時: 新規トラックを作って移す。
     // MainComponent が Undo (TrackAdd + ClipDelete + ClipAdd) を 1 トランザクションで配線する。
     std::function<void(const EditActions::ClipParams& /*p*/, bool /*stereo*/,
@@ -502,6 +518,12 @@ private:
     double gridUnitSecs() const;
     // MIDI クリップを absSplitTime (小節頭にスナップ) で 2 つに分割する
     void   splitMidiClip(Track* track, MidiClip* clip, double absSplitTime);
+    // MIDI クリップの全ノートを GRID にクォンタイズする (開始位置のみ・長さ維持。
+    // クリップのインスタンスは保つ = 開いているピアノロールは reload で追従)
+    void   quantizeMidiClip(Track* track, MidiClip* clip);
+    // MIDI 録音インジケータ (setMidiRecordingIndicator)
+    bool   midiRecIndicator { false };
+    double midiRecIndicatorStart { 0.0 };
     // 構造編集 (分割/削除/Undo) 後、selectedMidiClip が実在しなくなっていたら選択を解除する
     // (作り直しや破棄で生ポインタがダングリングするのを防ぐ)
     void   clearMidiSelectionIfStale();

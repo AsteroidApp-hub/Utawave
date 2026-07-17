@@ -36,6 +36,9 @@ public:
     void setScrollY(int y);
     // VU メータの 0 VU 基準レベル (dBFS) を全トラックビューに反映
     void setVuReferenceLevel(float dB);
+    // MIDI キーボードの接続状態 (接続中だけ MIDI トラックに R = 録音アームボタンを出す)。
+    // MainComponent::applyMidiInputFromPrefs が開閉のたびに反映する
+    void setMidiInputAvailable(bool v);
     // ラウドネス自動調整のターゲット (LUFS) を全トラックビューに反映
     void setLoudnessTargetLufs(float lufs);
     // 入力レベル更新（タイマーから呼ぶ）。levelGetter は input ch index を取り (peak,vu) を返す
@@ -167,6 +170,7 @@ private:
     std::vector<Track*> displayedTracks;
     float vuReferenceLevel { -18.0f };
     float loudnessTargetLufs { -24.0f };
+    bool  midiInputAvailable { false };   // setMidiInputAvailable 参照
 
     // 複数選択状態 (anchor を含む全ての選択 index)
     std::set<int> selectedIndices;
