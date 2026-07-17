@@ -202,29 +202,15 @@ PianoRollEditor::PianoRollEditor(MidiClip& clipRef, double projectBpm,
     addChildComponent(stepLenBox);
 
     // ── 下部レーンの種類選択 (Velocity / ピッチベンド / CC) ──
-    laneBox.addItem("Velocity",                (int) CtrlLane::Velocity + 1);
-    laneBox.addItem(tr(u8"ピッチベンド"),       (int) CtrlLane::PitchBend + 1);
-    laneBox.addItem(tr(u8"モジュレーション"),   (int) CtrlLane::Modulation + 1);
-    laneBox.addItem(tr(u8"エクスプレッション"), (int) CtrlLane::Expression + 1);
-    laneBox.addItem(tr(u8"パン"),               (int) CtrlLane::Pan + 1);
-    laneBox.addItem(tr(u8"サスティーン"),       (int) CtrlLane::Sustain + 1);
-    laneBox.setSelectedId((int) ctrlLane + 1, juce::dontSendNotification);
-    laneBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff2a2d31));
-    laneBox.setColour(juce::ComboBox::textColourId,       juce::Colours::white);
-    laneBox.setColour(juce::ComboBox::arrowColourId,      juce::Colours::white);
-    laneBox.setColour(juce::ComboBox::outlineColourId,    juce::Colour(0xff555555));
-    laneBox.setWantsKeyboardFocus(false);
-    laneBox.setTooltip(platformShortcutText(
-        tr(u8"下のレーンに表示する情報を選択します (Velocity 以外: Cmd+ドラッグで描画・ドラッグで範囲選択して Delete で削除・Option+ドラッグで消去・ダブルクリックで数値入力)")));
-    laneBox.onChange = [this]
-    {
-        ctrlLane = (CtrlLane) (laneBox.getSelectedId() - 1);
-        ctrlSelActive = false;       // 範囲選択はレーン単位なので切替で解除
-        ctrlValueEditor.reset();     // 数値入力中なら取消
-        clearReadout();
-        repaint();
-    };
-    addAndMakeVisible(laneBox);
+    // 左ヘッダセル (鍵盤列と同じ幅) に収まる小型ボタン。クリックで正式名称のポップアップ
+    laneBtn.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a2d31));
+    laneBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    laneBtn.setWantsKeyboardFocus(false);
+    laneBtn.setTooltip(platformShortcutText(
+        tr(u8"下のレーンに表示する情報を選択します (Velocity 以外: Cmd+ドラッグで描画 (ペンツール中は Cmd 不要)・ドラッグで範囲選択して Delete で削除・Option+ドラッグで消去・ダブルクリックで数値入力)")));
+    laneBtn.onClick = [this] { showLaneMenu(); };
+    addAndMakeVisible(laneBtn);
+    selectCtrlLane(CtrlLane::Velocity);   // ボタンラベルを初期化
 
     // 横スクロールバー
     hScrollBar.setAutoHide(false);
@@ -528,16 +514,16 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
     if (e.y < toolbarH)
         return;
 
-    // ルーラー (小節番号バー) クリック → プレイヘッドをクリップ内のその時刻へ
-    // キーボード列より右側 (ノートグリッドの上) のみ反応する
+    // ルーラー (小節番号バー): クリック = シーク (mouseUp で確定)、縦ドラッグ = 横ズーム
+    // (メインのルーラーと同じ。即シークするとズーム操作で再生バーが飛ぶため保留する)
     if (e.y < topH() && e.x >= keyboardW)
     {
-        const double secsInClip = juce::jmax(0.0, xToTime(e.x));
-        setPlayheadPosition(secsInClip);  // 即座にビジュアル反映
-        if (onSeek) onSeek(secsInClip);   // メイン側のプレイヘッドも同期
-        // ステップ入力中はカーソルも移動する (入力位置の指定手段。GRID にスナップ)
-        if (stepMode)
-            moveStepCursor(snapTimeSecs(secsInClip));
+        dragMode            = DragMode::RulerDrag;
+        rulerSeekArmed      = true;
+        rulerZooming        = false;
+        rulerZoomStartPps   = pixelsPerSec;
+        rulerZoomAnchorTime = juce::jmax(0.0, xToTime(e.x));
+        rulerZoomAnchorX    = e.x;
         return;
     }
 
@@ -552,6 +538,9 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
     // Velocity 領域 / コントロールレーン
     if (e.y > getHeight() - velocityH)
     {
+        // 左ヘッダセル (レーン名ボタン / 目盛り) はキャンバス操作の対象外
+        if (e.x < keyboardW)
+            return;
         if (ctrlLane == CtrlLane::Velocity)
         {
             velocityIdx = hitTestVelocityBar(e.getPosition());
@@ -564,10 +553,13 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
                            e.getPosition());
             }
         }
-        else if (e.mods.isCommandDown() || e.mods.isAltDown())
+        else if ((penMode && !e.mods.isShiftDown())
+                 || e.mods.isCommandDown() || e.mods.isAltDown())
         {
             // Cmd+ドラッグで描画 / Option+ドラッグで消去。素のクリックでは値を入れない
-            // (誤クリックでピッチベンド等が書き換わる事故防止。Cmd = ペンの一時作画と同じ作法)
+            // (誤クリックでピッチベンド等が書き換わる事故防止。Cmd = ペンの一時作画と同じ作法)。
+            // **ペンツール (D) 中は Cmd 不要で素のドラッグでも描画** (ノートグリッドのペンと
+            // 同じ体系。範囲選択はペン中でも Shift+ドラッグでできる)
             snapshotForUndo();
             dragMode      = DragMode::DrawCtrl;
             ctrlErasing   = e.mods.isAltDown();
@@ -758,8 +750,8 @@ void PianoRollEditor::mouseDrag(const juce::MouseEvent& e)
     else if (dragMode == DragMode::AdjustVelocity && velocityIdx >= 0)
     {
         const int top    = getHeight() - velocityH;
-        const int bottom = getHeight();
-        const float v = 1.0f - (float)(e.y - top) / (float)(bottom - top);
+        const int bottom = getHeight() - kScrollBarH;   // バーの描画レンジと揃える
+        const float v = 1.0f - (float)(e.y - top) / (float) juce::jmax(1, bottom - top);
         auto& n = notes[(size_t) velocityIdx];
         n.velocity = juce::jlimit(0.01f, 1.0f, v);
         // 入力中の数値をカーソル脇に表示 (見える化・数値のみ)
@@ -779,6 +771,27 @@ void PianoRollEditor::mouseDrag(const juce::MouseEvent& e)
         ctrlSelT1 = juce::jmin(ctrlSelAnchorT, t);
         ctrlSelT2 = juce::jmax(ctrlSelAnchorT, t);
         repaint();
+    }
+    else if (dragMode == DragMode::RulerDrag)
+    {
+        // 方向確定: 縦が支配的なら横ズームへ (メインの TimelineRuler と同じしきい値)
+        if (!rulerZooming && std::abs(dy) > 6 && std::abs(dy) > std::abs(dx) * 1.5)
+            rulerZooming = true;
+        if (rulerZooming)
+        {
+            rulerSeekArmed = false;   // ズーム操作は再生位置を動かさない
+            // 下方向 = 拡大 (1px ≈ 1.2% の指数変化)。クリック位置の時刻を支点に保つ
+            const double factor = std::pow(1.012, (double) dy);
+            const double newPps = juce::jlimit(20.0, 4000.0, rulerZoomStartPps * factor);
+            if (std::abs(newPps - pixelsPerSec) > 1e-9)
+            {
+                pixelsPerSec = newPps;
+                scrollX = juce::jmax(0, (int) std::round(
+                    rulerZoomAnchorTime * newPps - (rulerZoomAnchorX - keyboardW)));
+                updateScrollBarRange();
+                repaint();
+            }
+        }
     }
     else if (dragMode == DragMode::ResizeVelocityArea)
     {
@@ -805,6 +818,18 @@ void PianoRollEditor::mouseUp(const juce::MouseEvent&)
     // Velocity 領域の高さ変更を確定 (アプリ設定として保存してもらう)
     if (dragMode == DragMode::ResizeVelocityArea && onVelocityAreaResized)
         onVelocityAreaResized(velocityH);
+    // ルーラー: ズームに化けなかった純粋なクリックはここでシークを確定する
+    if (dragMode == DragMode::RulerDrag && rulerSeekArmed)
+    {
+        const double secsInClip = rulerZoomAnchorTime;
+        setPlayheadPosition(secsInClip);
+        if (onSeek) onSeek(secsInClip);
+        // ステップ入力中はカーソルも移動する (入力位置の指定手段。GRID にスナップ)
+        if (stepMode)
+            moveStepCursor(snapTimeSecs(secsInClip));
+    }
+    rulerSeekArmed = false;
+    rulerZooming   = false;
     // ドラッグせずクリックしただけ (幅ほぼ 0) なら選択解除
     if (dragMode == DragMode::SelectCtrlRange && ctrlSelT2 - ctrlSelT1 < 1.0e-4)
         ctrlSelActive = false;
@@ -823,13 +848,16 @@ void PianoRollEditor::mouseUp(const juce::MouseEvent&)
 
 void PianoRollEditor::mouseDoubleClick(const juce::MouseEvent& e)
 {
-    // コントロールレーンのダブルクリック = 数値の直接入力 (小さな入力欄を出す)
+    // コントロールレーンのダブルクリック = 数値の直接入力 (小さな入力欄を出す)。
+    // ペン (または Cmd/Option の描画・消去) 中は無効 — 1・2 クリック目が既に点を
+    // 描いており、続けて入力欄を出すと描いた点と二重管理になるため
     if (e.y > getHeight() - velocityH
         && std::abs(e.y - (getHeight() - velocityH)) > kVelResizeHitPx
         && e.x >= keyboardW
         && ctrlLane != CtrlLane::Velocity)
     {
-        beginCtrlValueEdit(e.getPosition());
+        if (!penMode && !e.mods.isCommandDown() && !e.mods.isAltDown())
+            beginCtrlValueEdit(e.getPosition());
         return;
     }
     // ペン中は無効 (penMode ON、または Cmd 一時ペン。1 クリック目で既にノートを作成済みで、
@@ -955,12 +983,12 @@ void PianoRollEditor::updateHoverCursor(juce::Point<int> pos, const juce::Modifi
         setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
         return;
     }
-    // コントロールレーン (Velocity 以外): Cmd (描画) / Option (消去) 中だけ十字カーソル。
-    // 素のドラッグは範囲選択なので通常カーソルのまま
+    // コントロールレーン (Velocity 以外): 描画できる状態 (ペンツール中 / Cmd / Option) だけ
+    // 十字カーソル。素のドラッグは範囲選択なので通常カーソルのまま
     if (pos.y > getHeight() - velocityH && ctrlLane != CtrlLane::Velocity
         && pos.x >= keyboardW)
     {
-        setMouseCursor((mods.isCommandDown() || mods.isAltDown())
+        setMouseCursor((penMode || mods.isCommandDown() || mods.isAltDown())
                            ? juce::MouseCursor::CrosshairCursor
                            : juce::MouseCursor::NormalCursor);
         return;
@@ -1668,20 +1696,145 @@ void PianoRollEditor::drawNotes(juce::Graphics& g) const
     }
 }
 
-void PianoRollEditor::drawVelocityArea(juce::Graphics& g) const
+const char* PianoRollEditor::laneShortName(CtrlLane lane)
 {
-    const int top    = getHeight() - velocityH;
+    // 左ヘッダセル (幅 ~44px) に収まる短縮名。正式名称はポップアップ / ツールチップで見せる
+    switch (lane)
+    {
+        case CtrlLane::PitchBend:  return "PB";
+        case CtrlLane::Modulation: return "Mod";
+        case CtrlLane::Expression: return "Exp";
+        case CtrlLane::Pan:        return "Pan";
+        case CtrlLane::Sustain:    return "Sus";
+        case CtrlLane::Velocity:
+        default:                   return "Vel";
+    }
+}
+
+void PianoRollEditor::selectCtrlLane(CtrlLane lane)
+{
+    ctrlLane = lane;
+    laneBtn.setButtonText(juce::String(laneShortName(lane)) + " "
+                          + juce::String::fromUTF8(u8"▾"));
+    ctrlSelActive = false;       // 範囲選択はレーン単位なので切替で解除
+    ctrlValueEditor.reset();     // 数値入力中なら取消
+    clearReadout();
+    repaint();
+}
+
+void PianoRollEditor::showLaneMenu()
+{
+    juce::PopupMenu m;
+    auto add = [&](CtrlLane lane)
+    {
+        m.addItem((int) lane + 1, laneName(lane), true, ctrlLane == lane);
+    };
+    add(CtrlLane::Velocity);
+    add(CtrlLane::PitchBend);
+    add(CtrlLane::Modulation);
+    add(CtrlLane::Expression);
+    add(CtrlLane::Pan);
+    add(CtrlLane::Sustain);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&laneBtn),
+        [safe = juce::Component::SafePointer<PianoRollEditor>(this)](int result)
+        {
+            if (auto* self = safe.getComponent(); self != nullptr && result > 0)
+                self->selectCtrlLane((CtrlLane) (result - 1));
+        });
+}
+
+// レーンの枠: コンテンツ背景 + 拍グリッド + クリップ範囲外の暗転 + 左ヘッダセル (レーン名
+// ボタンの下に値の目盛り)。参考にした一般的な DAW のレーン表示と同じく、レーンを本体グリッド
+// から独立した 1 つのパネルとして見せる (バーやイベントが鍵盤列側へはみ出さない)
+void PianoRollEditor::drawLaneFrame(juce::Graphics& g) const
+{
+    const int top     = getHeight() - velocityH;
+    const int cBottom = getHeight() - kScrollBarH;   // コンテンツ下端 (スクロールバー帯は含めない)
+
+    // コンテンツ背景 (全幅)
     g.setColour(juce::Colour(0xff15171a));
     g.fillRect(0, top, getWidth(), velocityH);
-    g.setColour(AppColours::separator);
-    g.drawHorizontalLine(top, 0.0f, (float) getWidth());
 
-    // ラベルはレーン選択 ComboBox (laneBox) が兼ねるため描画しない
+    // レーン内の拍グリッド (本体と同じ位置・控えめな色) + クリップ範囲外の暗転
+    {
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(keyboardW, top + 1,
+                           juce::jmax(0, getWidth() - keyboardW),
+                           juce::jmax(0, cBottom - top - 1));
+        const double secsPerBeat   = 60.0 / juce::jmax(1.0, bpm);
+        const double leftSec       = xToTime(keyboardW);
+        const double rightSec      = xToTime(getWidth());
+        const int clipStartBeats   = (int) std::llround(clip.getStartPosition() / secsPerBeat);
+        for (int b = (int) std::floor(leftSec / secsPerBeat);
+             b <= (int) std::ceil(rightSec / secsPerBeat); ++b)
+        {
+            const int x = timeToX(b * secsPerBeat);
+            if (x < keyboardW || x >= getWidth()) continue;
+            const bool isBar = ((b + clipStartBeats) % 4 == 0);
+            g.setColour(isBar ? juce::Colour(0xff2c2f33) : juce::Colour(0xff232527));
+            g.drawVerticalLine(x, (float)(top + 1), (float) cBottom);
+        }
+        const double clipLen = clip.getDuration();
+        if (clipLen > 0.0)
+        {
+            const int xEnd = timeToX(clipLen);
+            if (xEnd < getWidth())
+            {
+                g.setColour(juce::Colours::black.withAlpha(0.45f));
+                g.fillRect(juce::jmax(keyboardW, xEnd), top + 1,
+                           getWidth() - juce::jmax(keyboardW, xEnd), cBottom - top - 1);
+            }
+        }
+    }
+
+    // 左ヘッダセル (鍵盤列と同じ幅)
+    g.setColour(AppColours::panelBg);
+    g.fillRect(0, top, keyboardW, velocityH);
+    g.setColour(AppColours::separator);
+    g.drawVerticalLine(keyboardW - 1, (float) top, (float) getHeight());
+
+    // 値の目盛り (上端 / 中央 / 下端の値。数値の見える化)
+    const char* topLbl = "127";
+    const char* midLbl = nullptr;
+    const char* botLbl = "0";
+    switch (ctrlLane)
+    {
+        case CtrlLane::PitchBend: topLbl = "+8192"; midLbl = "0"; botLbl = "-8192"; break;
+        case CtrlLane::Pan:       topLbl = "R63";   midLbl = "C"; botLbl = "L64";   break;
+        case CtrlLane::Sustain:   topLbl = "ON";                  botLbl = "OFF";   break;
+        default: break;
+    }
+    g.setFont(juce::FontOptions(9.0f));
+    g.setColour(AppColours::textDim);
+    const int lw = keyboardW - 8;
+    g.drawText(topLbl, 2, top + 23, lw, 10, juce::Justification::centredRight);
+    if (midLbl != nullptr)
+        g.drawText(midLbl, 2, (top + 23 + cBottom - 12) / 2, lw, 10,
+                   juce::Justification::centredRight);
+    g.drawText(botLbl, 2, cBottom - 12, lw, 10, juce::Justification::centredRight);
+
+    // 上端の区切り線 (全幅・最後に引いて境界を明瞭に)
+    g.setColour(AppColours::separatorLight);
+    g.drawHorizontalLine(top, 0.0f, (float) getWidth());
+}
+
+void PianoRollEditor::drawVelocityArea(juce::Graphics& g) const
+{
+    drawLaneFrame(g);
+
     if (ctrlLane != CtrlLane::Velocity)
     {
         drawCtrlLane(g);
         return;
     }
+
+    // ベロシティバーはコンテンツ領域にクリップ (ヘッダセル / スクロールバー帯へはみ出さない)
+    const int top     = getHeight() - velocityH;
+    const int cBottom = getHeight() - kScrollBarH;
+    juce::Graphics::ScopedSaveState ss(g);
+    g.reduceClipRegion(keyboardW, top + 1,
+                       juce::jmax(0, getWidth() - keyboardW),
+                       juce::jmax(0, cBottom - top - 1));
 
     const auto baseColour = clip.getColour();
     for (int i = 0; i < (int) notes.size(); ++i)
@@ -1691,8 +1844,8 @@ void PianoRollEditor::drawVelocityArea(juce::Graphics& g) const
         // 長さを変えても頭がずれないよう、中央ではなく start に固定する。
         const int barX = timeToX(n.startSec) + 2;
         if (barX < keyboardW || barX > getWidth()) continue;
-        const int h = (int) (n.velocity * (velocityH - 8));
-        const int by = getHeight() - 4 - h;
+        const int h = (int) (n.velocity * (velocityH - kScrollBarH - 10));
+        const int by = cBottom - 4 - h;
         const auto col = selected.count(i) ? baseColour.brighter(0.4f) : baseColour;
         g.setColour(col);
         g.fillRect(barX - 2, by, 4, h);
@@ -1771,7 +1924,7 @@ juce::String PianoRollEditor::laneValueText(CtrlLane lane, int value)
 int PianoRollEditor::laneValueFromY(int y, CtrlLane lane) const
 {
     const int y0 = getHeight() - velocityH + 6;
-    const int y1 = getHeight() - 6;
+    const int y1 = getHeight() - kScrollBarH - 6;   // コンテンツ下端 (スクロールバー帯は除く)
     const float norm = 1.0f - juce::jlimit(0.0f, 1.0f,
         (float)(y - y0) / (float) juce::jmax(1, y1 - y0));
     switch (lane)
@@ -1785,7 +1938,7 @@ int PianoRollEditor::laneValueFromY(int y, CtrlLane lane) const
 int PianoRollEditor::laneValueToY(int value, CtrlLane lane) const
 {
     const int y0 = getHeight() - velocityH + 6;
-    const int y1 = getHeight() - 6;
+    const int y1 = getHeight() - kScrollBarH - 6;   // laneValueFromY と同じレンジ
     const float maxV = (lane == CtrlLane::PitchBend) ? 16383.0f : 127.0f;
     const float norm = juce::jlimit(0.0f, 1.0f, (float) value / maxV);
     return y1 - (int) std::lround(norm * (float)(y1 - y0));
@@ -1898,7 +2051,10 @@ void PianoRollEditor::beginCtrlValueEdit(juce::Point<int> pos)
     ctrlValueEditor = std::make_unique<juce::TextEditor>();
     const int w = 64, h = 18;
     const int x = juce::jlimit(keyboardW, juce::jmax(keyboardW, getWidth() - w - 2), pos.x - w / 2);
-    const int y = juce::jlimit(getHeight() - velocityH + 1, getHeight() - h - 1, pos.y - h / 2);
+    const int y = juce::jlimit(getHeight() - velocityH + 1,
+                               juce::jmax(getHeight() - velocityH + 1,
+                                          getHeight() - kScrollBarH - h - 1),
+                               pos.y - h / 2);
     ctrlValueEditor->setBounds(x, y, w, h);
     ctrlValueEditor->setFont(juce::FontOptions(12.0f));
     ctrlValueEditor->setColour(juce::TextEditor::backgroundColourId, juce::Colours::black.withAlpha(0.85f));
@@ -1941,11 +2097,14 @@ void PianoRollEditor::applyCtrlValueEdit(const juce::String& text)
 
 void PianoRollEditor::drawCtrlLane(juce::Graphics& g) const
 {
-    const int top    = getHeight() - velocityH;
-    const int bottom = getHeight();
+    const int top     = getHeight() - velocityH;
+    const int cBottom = getHeight() - kScrollBarH;
+    const int bottom  = getHeight();
 
     juce::Graphics::ScopedSaveState ss(g);
-    g.reduceClipRegion(keyboardW, top + 1, juce::jmax(0, getWidth() - keyboardW), velocityH - 1);
+    g.reduceClipRegion(keyboardW, top + 1,
+                       juce::jmax(0, getWidth() - keyboardW),
+                       juce::jmax(0, cBottom - top - 1));
 
     // 範囲選択のハイライト (Delete で範囲内のイベントを一括削除)
     if (ctrlSelActive)
@@ -1955,9 +2114,9 @@ void PianoRollEditor::drawCtrlLane(juce::Graphics& g) const
         if (x2 > x1)
         {
             g.setColour(AppColours::accent.withAlpha(0.15f));
-            g.fillRect(x1, top + 1, x2 - x1, velocityH - 2);
+            g.fillRect(x1, top + 1, x2 - x1, cBottom - top - 2);
             g.setColour(AppColours::accent.withAlpha(0.6f));
-            g.drawRect(x1, top + 1, x2 - x1, velocityH - 2, 1);
+            g.drawRect(x1, top + 1, x2 - x1, cBottom - top - 2, 1);
         }
     }
 
@@ -2037,7 +2196,8 @@ void PianoRollEditor::clearReadout()
 
 void PianoRollEditor::layoutLaneBox()
 {
-    laneBox.setBounds(4, getHeight() - velocityH + 3, 150, 18);
+    // 左ヘッダセル (鍵盤列と同じ幅) の上部に収める
+    laneBtn.setBounds(2, getHeight() - velocityH + 3, keyboardW - 5, 17);
 }
 
 void PianoRollEditor::resized()

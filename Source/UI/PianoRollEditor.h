@@ -109,6 +109,13 @@ public:
     // 内部 Note 配列を再構築する。MidiNotesAction から呼ばれる。
     void reloadNotesFromClip();
 
+    // ── テスト用シーム (UtawaveTests がレーン編集をヘッドレスで駆動する) ──
+    // sendNotificationSync で本物のボタン/コンボ経路 (onClick / onChange) を同期実行する
+    void setPenModeForTests(bool v)      { penBtn.setToggleState(v, juce::sendNotificationSync); }
+    bool getPenModeForTests() const      { return penMode; }
+    void setCtrlLaneForTests(int idx)    { selectCtrlLane((CtrlLane) idx); }
+    bool hasCtrlSelectionForTests() const { return ctrlSelActive; }
+
     // ── ステップ入力 (MIDI キーボードで順にノートを置く・I でトグル) ──
     // MainComponent が MIDI キーボードのノートを (message thread で) ここへ転送する。
     // 同時に押した鍵は同じ位置に和音として置き、全部離した時にカーソルが 1 ステップ進む。
@@ -187,9 +194,16 @@ private:
     // ノート以外のイベントは ctrlMsgs に保持し、writeNotesToClip がノートと一緒に書き戻す
     // (旧実装は書き戻しでノート以外を全て失っていた = SMF 由来の CC も編集で消えていた)。
     enum class CtrlLane { Velocity = 0, PitchBend, Modulation, Expression, Pan, Sustain };
-    CtrlLane       ctrlLane { CtrlLane::Velocity };
-    juce::ComboBox laneBox;                        // レーン種類の選択 (領域左上)
+    CtrlLane        ctrlLane { CtrlLane::Velocity };
+    // レーン選択: 左ヘッダセル (鍵盤列と同じ幅) に収まる小型ボタン (短縮名 + ▾)。
+    // クリックで正式名称のポップアップから選ぶ (幅 44px に正式名称は入らないため)
+    juce::TextButton laneBtn;
+    void selectCtrlLane(CtrlLane lane);            // 切替の実処理 (ボタンラベル/選択解除/repaint)
+    void showLaneMenu();
+    static const char* laneShortName(CtrlLane lane);
     void layoutLaneBox();                          // velocityH に追従して置き直す
+    // レーンの枠 (背景 / 左ヘッダセル / 目盛りラベル / 拍グリッド)。Velocity・コントロール共用
+    void drawLaneFrame(juce::Graphics&) const;
     std::vector<juce::MidiMessage> ctrlMsgs;       // ノート以外の全イベント (時刻順・クリップ相対秒)
 
     static bool msgMatchesLane(const juce::MidiMessage& m, CtrlLane lane);
@@ -260,7 +274,16 @@ private:
 
     // ドラッグ状態
     enum class DragMode { None, MoveNotes, ResizeLeft, ResizeRight, RubberBand, AdjustVelocity,
-                          CreateNote, ResizeVelocityArea, DrawCtrl, SelectCtrlRange };
+                          CreateNote, ResizeVelocityArea, DrawCtrl, SelectCtrlRange, RulerDrag };
+
+    // ルーラー (小節番号バー) のドラッグ: クリック = mouseUp で確定シーク / 縦ドラッグ = 横ズーム
+    // (メインタイムラインの TimelineRuler::beginSeekDrag と同じ操作感。ズーム中に再生バーが
+    // 飛ばないようシークは方向が確定するまで保留する)
+    bool   rulerSeekArmed      { false };
+    bool   rulerZooming        { false };
+    double rulerZoomStartPps   { 200.0 };
+    double rulerZoomAnchorTime { 0.0 };   // クリック位置の時刻 (ズームの支点・シーク先)
+    int    rulerZoomAnchorX    { 0 };
     DragMode          dragMode { DragMode::None };
     juce::Point<int>  dragStart;
     int               draggedIdx { -1 };

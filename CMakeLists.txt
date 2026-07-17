@@ -368,6 +368,8 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/FileStreamVoiceTests.cpp
         Tests/AudioWorkerPoolTests.cpp
         Tests/StreamMirrorTests.cpp
+        Tests/PianoRollLaneTests.cpp
+        Source/UI/PianoRollEditor.cpp
         Source/Audio/AudioFileImporter.cpp
         Source/Audio/FileStreamVoice.cpp
         Source/Audio/AudioWorkerPool.cpp
