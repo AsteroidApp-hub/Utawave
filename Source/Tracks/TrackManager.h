@@ -23,6 +23,7 @@ public:
     // フォルダトラック (グループバス) を追加。"Folder N" 採番・色サイクル消費。
     // setFolderTrack(true) を onChanged() の前に確定させる (midi と同じ作法)。
     Track* addFolderTrack(int insertAfter = -1);
+    Track* addAppCaptureTrack(int insertAfter = -1);   // アプリケーショントラック (アプリ音声取り込み)
     bool   hasFolderTrack() const;
     // folderIdx のフォルダの連続する子ラン (フォルダ直後に並ぶ子トラック群) の直後の
     // インデックスを返す (= フォルダ末尾への挿入位置)。フォルダでなければ folderIdx+1

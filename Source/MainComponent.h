@@ -275,9 +275,23 @@ private:
     // appPrefs.streamMirror* に応じて配信ミラー出力を開始 / 停止する (起動時と環境設定変更時)。
     // showErrors = 開始失敗時にダイアログで知らせるか (環境設定からの操作では true)
     void applyStreamMirrorFromPrefs(bool showErrors);
-    // appPrefs.appCapture* に応じてアプリ音声取り込み (ブラウザ等の音を出力へ混ぜる) を
-    // 開始 / 停止し、ゲインをエンジンへ反映する (起動時と環境設定変更時)。Windows 以外は no-op
-    void applyAppCaptureFromPrefs(bool showErrors);
+    // ── アプリケーショントラック (アプリ音声取り込み) ──
+    // トラック集合とキャプチャ実体 (AppAudioCapture) を突き合わせて開始/停止し、
+    // AppCaptureVoice のパラメータ (Vol×Pan/Mute/Solo/trackIdx) を更新してエンジンへ publish
+    // する。トラック追加/削除/exe 変更/Undo/プロジェクト遷移の全経路を個別フックせず
+    // timerCallback (20Hz) の毎 tick 呼び出しで吸収する (updateLiveMidiTarget と同じ作法。
+    // 構造が不変なら atomic 更新のみで publish しない)。voice は Track* を持たないため、
+    // トラック削除と audio thread の競合 (UAF) は構造的に無い
+    void syncAppCaptureTracks();
+    struct AppTrackCapture
+    {
+        Track* track { nullptr };                       // identity (参照は生存確認後のみ)
+        juce::String exe;
+        std::unique_ptr<class AppAudioCapture> capture;
+        std::shared_ptr<AudioEngine::AppCaptureVoice> voice;
+    };
+    std::vector<AppTrackCapture> appTrackCaptures;      // message thread のみ
+    void addAppCaptureTrack();                          // 「+ トラック追加」メニューから
 
     // ── MIDI キーボード入力 (appPrefs.midiInput*) ──
     // appPrefs.midiInput* に応じて MIDI 入力デバイスを開く / 閉じる (起動時・環境設定変更時・
@@ -528,10 +542,6 @@ private:
     // 配信ミラー出力 (最終ミックスを別デバイスへ複製)。audioEngine より後に宣言 = 先に破棄。
     // dtor 本体が streamMirror.stop(audioEngine) → audioEngine.shutdown() の順で明示的に止める。
     StreamMirrorOutput streamMirror;
-    // アプリ音声取り込み (ブラウザ等の音を出力へ混ぜる・Windows のみ実装)。streamMirror と
-    // 同じく audioEngine より後に宣言 = 先に破棄。dtor 本体が appCapture.stop() を明示的に呼ぶ
-    // (キャプチャスレッド join + エンジンからリング登録解除)。
-    AppAudioCapture   appCapture;
     TrackManager      trackManager  { audioEngine.getFormatManager() };
     RecordingManager  recordingMgr  { audioEngine, trackManager,
                                       audioEngine.getFormatManager() };

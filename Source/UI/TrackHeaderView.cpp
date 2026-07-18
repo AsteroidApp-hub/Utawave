@@ -7,6 +7,7 @@
 #include "Meter.h"
 #include "../VST/PluginChain.h"
 #include "../Audio/LufsMeter.h"
+#include "../Audio/AppAudioCapture.h"   // アプリケーショントラックのアプリ選択メニュー
 
 namespace {
 // プラグイン名を短くする（メーカー名や余計な情報を削る）
@@ -471,6 +472,24 @@ TrackHeaderView::TrackHeaderView(Track& t) : track(t)
         clickDoubleBtn.addMouseListener(this, false);
     }
 
+    // アプリケーショントラック: 録音 (R) / 入力モニター (I) / 入力ch / Rev (リバーブ送りは
+    // エンジンが経路を持たない) / TList (レーン無し) は使わないので非表示。In: 行の位置に
+    // アプリ選択ボタンを出す (resized() が毎回確定する)
+    if (track.isAppCaptureTrack())
+    {
+        recBtn.setVisible(false);
+        monBtn.setVisible(false);
+        stereoBadge.setVisible(false);
+        lanesBtn.setVisible(false);
+        revSlider.setVisible(false);
+
+        appSelectBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3a3a3a));
+        appSelectBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+        appSelectBtn.setTooltip(tr(u8"取り込むアプリを選びます (音を再生中のアプリが表示されます)"));
+        appSelectBtn.onClick = [this] { showAppSelectMenu(); };
+        addAndMakeVisible(appSelectBtn);
+    }
+
     // フォルダトラック (グループバス): 録音/モニター/入力は使わないので非表示
     // (In:/Pan/Rev/INS の表示は resized() が毎回確定する。Pan/Rev/INS はアプリ設定
     //  showFolderPanRevIns = folderExtrasOn() でユーザーが表示/非表示を選べる)。
@@ -640,6 +659,10 @@ void TrackHeaderView::refresh()
     }
     else
         lanesBtn.setToggleState(!track.isLanesCollapsed(), juce::dontSendNotification);
+    if (track.isAppCaptureTrack())
+        appSelectBtn.setButtonText(track.getAppCaptureExe().isNotEmpty()
+                                       ? track.getAppCaptureExe()
+                                       : tr(u8"アプリを選択…"));
     volSlider.setValue(track.getVolume(),     juce::dontSendNotification);
     panSlider.setValue(track.getPan(),        juce::dontSendNotification);
     revSlider.setValue(track.getReverbSend(), juce::dontSendNotification);
@@ -1118,8 +1141,17 @@ void TrackHeaderView::resized()
     inputChBox.setBounds(inStart + inLabelW, botY, w - inStart - inLabelW - 6, botH);
 
     // 底部行は音声トラックのみ (MIDI/Click はコンストラクタで非表示。ここで再表示しない)。
-    // フォルダは録音入力を持たないので In: は出さない (lanesBtn = Open/Close は出す)
-    if (!track.isMidiTrack() && !track.isClickTrack())
+    // フォルダは録音入力を持たないので In: は出さない (lanesBtn = Open/Close は出す)。
+    // アプリケーショントラックは In: の位置にアプリ選択ボタンを出す (TList/入力は無し)
+    if (track.isAppCaptureTrack())
+    {
+        lanesBtn.setVisible(false);
+        inputLabel.setVisible(false);
+        inputChBox.setVisible(false);
+        appSelectBtn.setBounds(inStart, botY, w - inStart - 6, botH);
+        appSelectBtn.setVisible(showBottomRow);
+    }
+    else if (!track.isMidiTrack() && !track.isClickTrack())
     {
         lanesBtn.setVisible(showBottomRow);
         inputLabel.setVisible(showBottomRow && !track.isFolderTrack());
@@ -1173,3 +1205,45 @@ void TrackHeaderView::resized()
     }
 }
 
+
+// アプリケーショントラックの取り込み対象アプリ選択メニュー。開くたびに listAudioApps() で
+// 「いま音を出しているアプリ」を列挙し直す (COM 列挙はクリック時のみ = 毎 refresh で払わない)。
+// 保存済みの対象が現在鳴っていない場合も選択を維持できるよう「(停止中)」として補完する。
+void TrackHeaderView::showAppSelectMenu()
+{
+    juce::PopupMenu m;
+    juce::StringArray exes;
+    const juce::String cur = track.getAppCaptureExe();
+    for (const auto& app : AppAudioCapture::listAudioApps())
+    {
+        exes.add(app.executable);
+        m.addItem(100 + exes.size() - 1, app.displayName, true,
+                  app.executable.equalsIgnoreCase(cur));
+    }
+    if (cur.isNotEmpty() && !exes.contains(cur, /*ignoreCase*/ true))
+    {
+        exes.add(cur);
+        m.addItem(100 + exes.size() - 1, cur + tr(u8" (停止中)"), true, true);
+    }
+    if (exes.isEmpty())
+        m.addItem(1, tr(u8"(音を再生中のアプリがありません)"), false);
+    m.addSeparator();
+    m.addItem(2, tr(u8"選択を解除"), cur.isNotEmpty());
+
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&appSelectBtn),
+        [safe = juce::Component::SafePointer<TrackHeaderView>(this), exes](int result)
+        {
+            if (safe == nullptr || result == 0) return;
+            auto* self = safe.getComponent();
+            if (result == 2)
+                self->track.setAppCaptureExe({});
+            else if (result >= 100 && result - 100 < exes.size())
+                self->track.setAppCaptureExe(exes[result - 100]);
+            else
+                return;
+            self->refresh();
+            // dirty 化 (onTrackChanged 経由)。キャプチャの起動/切替は syncAppCaptureTracks
+            // (20Hz) が exe 変化を検出して行う
+            if (self->onChanged) self->onChanged();
+        });
+}

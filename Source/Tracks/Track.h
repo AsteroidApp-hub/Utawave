@@ -88,6 +88,14 @@ public:
     // フォルダの開閉 (閉じると子トラックの行が非表示になる。ビュー状態・Undo 対象外)
     bool isFolderOpen()       const { return folderOpen; }
     void setFolderOpen(bool v)      { folderOpen = v; }
+    // アプリケーショントラック (アプリ音声取り込み・Windows のみ実動)。クリップ/録音は持たず、
+    // 指定アプリの音をライブで出力へ混ぜる。Vol/Pan/Mute/Solo は AppCaptureVoice へ 20Hz で
+    // コピーされる (audio thread はこの Track を参照しない)。書き出しには乗らない
+    bool isAppCaptureTrack()  const { return appCaptureTrack; }
+    void setAppCaptureTrack(bool b) { appCaptureTrack = b; }
+    // 取り込み対象の実行ファイル名 (空 = 未選択 = キャプチャしない)。message thread のみ
+    const juce::String& getAppCaptureExe() const { return appCaptureExe; }
+    void setAppCaptureExe(juce::String s)        { appCaptureExe = std::move(s); }
     // 所属フォルダ (nullptr = トップレベル)。UI/message thread のみが読み書きする。
     // audio thread はスナップショット経由 (preparePlayback で解決) でしか参照しない。
     Track* getFolderParent()  const { return folderParent; }
@@ -248,6 +256,8 @@ private:
     std::atomic<bool> clickTrack { false };
     bool   midiTrack      { false };  // MIDI トラック判定
     bool   folderTrack    { false };  // フォルダトラック (グループバス) 判定
+    bool   appCaptureTrack { false }; // アプリケーショントラック判定 (message thread のみ)
+    juce::String appCaptureExe;       // 取り込み対象 exe 名 (message thread のみ)
     bool   folderOpen     { true };   // フォルダの開閉 (閉じると子トラック行を隠す)
     Track* folderParent   { nullptr };// 所属フォルダ (非所有。TrackManager が整合を管理)
     bool   stereo         { false };  // false=mono, true=stereo

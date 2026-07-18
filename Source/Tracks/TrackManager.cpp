@@ -121,6 +121,36 @@ bool TrackManager::hasFolderTrack() const
     return false;
 }
 
+Track* TrackManager::addAppCaptureTrack(int insertAfter)
+{
+    // "App N" 採番 (addFolderTrack の "Folder N" と同じ方式)
+    int maxN = 0;
+    for (auto& t : tracks)
+    {
+        const auto& tn = t->getName();
+        if (tn.startsWith("App "))
+        {
+            const int v = tn.substring(4).getIntValue();
+            if (v > maxN) maxN = v;
+        }
+    }
+    auto track = std::make_unique<Track>("App " + juce::String(maxN + 1),
+                                         formatManager, thumbnailCache,
+                                         Track::paletteColour(nextColourIndex++));
+    track->setStereo(true);
+    Track* ptr = track.get();
+    // INS はアプリ音声に効かないため常に非表示 (toggleAllInsertSlots 側も対象外にする)。
+    // ヘッダビューは onChanged() で isAppCaptureTrack() を読んで作られるので先に確定させる
+    ptr->setInsertSlotsVisible(false);
+    ptr->setAppCaptureTrack(true);
+    if (insertAfter >= 0 && insertAfter < (int) tracks.size())
+        tracks.insert(tracks.begin() + insertAfter + 1, std::move(track));
+    else
+        tracks.push_back(std::move(track));
+    if (onChanged) onChanged();
+    return ptr;
+}
+
 int TrackManager::folderRunEnd(int folderIdx) const
 {
     if (folderIdx < 0 || folderIdx >= (int) tracks.size()) return folderIdx;
@@ -152,7 +182,7 @@ bool TrackManager::normalizeFolderContiguity()
         auto* p = t->getFolderParent();
         if (p == nullptr) continue;
         const bool parentAlive = indexOf(p) >= 0 && p->isFolderTrack();
-        if (!parentAlive || t->isFolderTrack() || t->isClickTrack())
+        if (!parentAlive || t->isFolderTrack() || t->isClickTrack() || t->isAppCaptureTrack())
         {
             t->setFolderParent(nullptr);
             changedParents = true;
@@ -254,6 +284,7 @@ Track* TrackManager::duplicateTrack(int sourceIdx, bool includeTakeLanes)
     auto* src = tracks[(size_t) sourceIdx].get();
     if (!src || src->isClickTrack()) return nullptr;   // Click は複製不可
     if (src->isFolderTrack())        return nullptr;   // フォルダは複製不可 (子は複製対象外のため)
+    if (src->isAppCaptureTrack())    return nullptr;   // アプリトラックは複製不可 (同一アプリの二重取り込みになる)
 
     // 名前: 末尾に連番 "(1)" "(2)" … を付与 (空きの最小番号)。
     // 既に "名前 (N)" 形式なら末尾の番号を剥がして基底名にし、番号だけ繰り上げる。

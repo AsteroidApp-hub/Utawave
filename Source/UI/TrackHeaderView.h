@@ -174,6 +174,12 @@ private:
     juce::Slider     panSlider;
     juce::Slider     revSlider;  // 簡易リバーブセンド (0..1)
     juce::Label      nameLabel;
+    // アプリケーショントラック専用: 取り込み対象アプリの選択 (In: 行の位置に出す)。
+    // クリックのたびに listAudioApps() で「いま音を出しているアプリ」を列挙した PopupMenu を
+    // 開く (ComboBox でなくボタン+メニューなのは、開く瞬間に列挙し直すため)
+    juce::TextButton appSelectBtn;
+    void showAppSelectMenu();
+
     // クリックトラック専用
     juce::ComboBox   clickSoundBox;
     juce::TextButton clickAccentBtn { "ACC" };

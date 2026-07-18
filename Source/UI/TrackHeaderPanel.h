@@ -56,8 +56,10 @@ public:
     std::function<void()>     onAddMidiTrack;      // 空の MIDI トラック（ハモリ/ガイド打ち込み用）
     std::function<void()>     onAddClickTrack;
     std::function<void()>     onAddFolderTrack;    // フォルダトラック (グループバス)
+    std::function<void()>     onAddAppTrack;       // アプリケーショントラック (アプリ音声取り込み)
     // フォルダトラックの追加メニューを出すか (AppPreferences::enableFolderTracks)。未設定は出さない
     std::function<bool()>     folderTracksEnabled;
+    std::function<bool()>     appTracksEnabled;    // アプリケーショントラックの追加を出すか (Win + 設定 ON)
     // フォルダトラックに Pan/Rev/INS スロットを表示するか (AppPreferences::showFolderPanRevIns)。
     // 未設定は表示。通常トラックには影響しない
     std::function<bool()>     folderExtrasEnabled;

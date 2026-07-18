@@ -240,76 +240,117 @@ void AudioEngine::setMirrorRing(std::shared_ptr<StreamMirrorRing> ring)
     publishMirrorRing(std::move(ring));
 }
 
-// ── アプリ音声取り込みリングの公開 (mirror と同じ作法・drain 無し) ──
-// リングは AppAudioCapture 側も shared_ptr で所有するため use_count で「audio だけが残り」を
-// 判定できない。退役リストが「audio thread が最後の所有者になって解放する」ことだけを防ぐ。
-void AudioEngine::publishAppCaptureRing(std::shared_ptr<StreamMirrorRing> next)
+// ── アプリ音声取り込み voice 集合の公開 (mirror と同じ作法・drain 無し) ──
+// voice (中のリング) は呼び出し側 (MainComponent) も shared_ptr で所有するため use_count で
+// 「audio だけが残り」を判定できない。退役リストが「audio thread が最後の所有者になって
+// 解放する」ことだけを防ぐ。voice は Track* を持たないのでトラック削除の drain は不要。
+void AudioEngine::publishAppCaptureVoices(std::shared_ptr<const AppCaptureVoices> next)
 {
-    std::shared_ptr<StreamMirrorRing> old;
+    std::shared_ptr<const AppCaptureVoices> old;
     {
         const juce::SpinLock::ScopedLockType l(appCaptureRingLock);
-        old = std::move(activeAppCaptureRing);
-        activeAppCaptureRing = std::move(next);
+        old = std::move(activeAppCapVoices);
+        activeAppCapVoices = std::move(next);
     }
     {
         const juce::ScopedLock r(reclaimLock);
-        if (old) retiredAppCaptureRings.push_back(std::move(old));
+        if (old) retiredAppCapVoices.push_back(std::move(old));
     }
-    sweepRetiredAppCaptureRings();
+    sweepRetiredAppCaptureVoices();
 }
 
-void AudioEngine::sweepRetiredAppCaptureRings()
+void AudioEngine::sweepRetiredAppCaptureVoices()
 {
     const juce::ScopedLock r(reclaimLock);
-    retiredAppCaptureRings.erase(
-        std::remove_if(retiredAppCaptureRings.begin(), retiredAppCaptureRings.end(),
-                       [](const std::shared_ptr<StreamMirrorRing>& c) { return c.use_count() == 1; }),
-        retiredAppCaptureRings.end());
+    retiredAppCapVoices.erase(
+        std::remove_if(retiredAppCapVoices.begin(), retiredAppCapVoices.end(),
+                       [](const std::shared_ptr<const AppCaptureVoices>& c) { return c.use_count() == 1; }),
+        retiredAppCapVoices.end());
 }
 
-void AudioEngine::setAppCaptureRing(std::shared_ptr<StreamMirrorRing> ring)
+void AudioEngine::setAppCaptureVoices(std::shared_ptr<const AppCaptureVoices> voices)
 {
-    // mirror と違い SR は触らない: ソース SR はキャプチャ側のもので、登録側が
-    // ring->reset(captureSR) してから渡す契約 (ヘッダのコメント参照)。
-    publishAppCaptureRing(std::move(ring));
+    publishAppCaptureVoices(std::move(voices));
 }
 
-// アプリ音声取り込み: キャプチャリングから読んで出力へ加算する (ライブ専用)。
+bool AudioEngine::hasAppCaptureVoices()
+{
+    const juce::SpinLock::ScopedLockType l(appCaptureRingLock);
+    return activeAppCapVoices != nullptr && !activeAppCapVoices->empty();
+}
+
+// アプリ音声取り込み (アプリケーショントラック): 各 voice のリングから読み、トラックの
+// Vol×Pan / Mute / Solo を適用して出力へ加算する (ライブ専用・録音/書き出しに乗らない)。
 // scratch はデバイスバッファ長で確保済みだが、numSamples がそれを超えるブロック
 // (デバイス再起動の不整合期間) はチャンク分割で境界内に収める (applyDelayLine と同じガード。
-// reader は逐次状態なので分割しても連続読みになる)。
-void AudioEngine::mixAppCapture(StreamMirrorRing& ring, float* const* outputChannelData,
-                                int numOutputChannels, int numSamples) noexcept
+// reader は逐次状態なので分割しても連続読みになる)。reader は voice 内 (audio thread 専用)。
+// 非可聴 (ミュート/ソロ外) でも読み進める = リング水位を保ち、解除で即・現在の音から復帰する。
+void AudioEngine::mixAppCapture(const AppCaptureVoices& voices, const PlaybackSnapshot& snap,
+                                float* const* outputChannelData, int numOutputChannels,
+                                int numSamples, float vuCoef) noexcept
 {
     if (numOutputChannels <= 0 || outputChannelData[0] == nullptr) return;
     const int cap = (int) appCapScratchL.size();
     if (cap <= 0) return;
 
-    // リング差し替え (取り込み対象の変更等) を検出したら reader を作り直す (溜め直しから開始)。
-    // reader の再プライミングは epoch 差分で判定するため、旧リングと新リングの epoch が偶然
-    // 一致すると (どちらも 1 セッション目 = 1 など) stale な readPos のまま読み出しかねない。
-    // StreamMirrorOutput::start の reader 再構築と対になるエンジン側のリセット。
-    // 比較はポインタ値のみ (旧リングは退役リストが新 publish まで延命するのでアドレス再利用も
-    // 起きない)。appCapLastRing は audio thread 専用・参照外ししない
-    if (&ring != appCapLastRing)
-    {
-        appCaptureReader = StreamMirrorReader();
-        appCapLastRing   = &ring;
-    }
+    // ソロ規則: 通常トラック / MIDI / CLICK / フォルダ / アプリ voice のどれかがソロ中なら、
+    // ソロでない voice は黙る (再生ブランチの anySolo 側にも voice のソロが合流するので、
+    // アプリケーショントラックをソロにすると他トラックも黙る。停止中は他トラックの停止中
+    // プレビューまでは黙らせない = 対象外の縁ケースとして許容)
+    bool anySolo = false;
+    for (const auto& tp : snap.clipTracks)
+        if (tp.second != nullptr && tp.second->isSoloed()) { anySolo = true; break; }
+    if (!anySolo)
+        for (const auto& mp : snap.midi)
+            if (mp.track != nullptr && mp.track->isSoloed()) { anySolo = true; break; }
+    if (!anySolo && snap.clickTrack != nullptr && snap.clickTrack->isSoloed())
+        anySolo = true;
+    if (!anySolo)
+        for (const auto& fb : snap.folderBuses)
+            if (fb.track != nullptr && fb.track->isSoloed()) { anySolo = true; break; }
+    if (!anySolo)
+        for (const auto& v : voices)
+            if (v != nullptr && v->solo.load(std::memory_order_relaxed)) { anySolo = true; break; }
 
-    const float g = appCaptureGainLinear.load(std::memory_order_relaxed);
     float* outL = outputChannelData[0];
     float* outR = (numOutputChannels > 1) ? outputChannelData[1] : nullptr;
 
-    int done = 0;
-    while (done < numSamples)
+    for (const auto& v : voices)
     {
-        const int m = juce::jmin(numSamples - done, cap);
-        appCaptureReader.pull(ring, appCapScratchL.data(), appCapScratchR.data(), m, currentSampleRate);
-        juce::FloatVectorOperations::addWithMultiply(outL + done, appCapScratchL.data(), g, m);
-        if (outR != nullptr)
-            juce::FloatVectorOperations::addWithMultiply(outR + done, appCapScratchR.data(), g, m);
-        done += m;
+        if (v == nullptr || v->ring == nullptr) continue;
+        const bool audible = !v->mute.load(std::memory_order_relaxed)
+                          && (!anySolo || v->solo.load(std::memory_order_relaxed));
+        const float gL = v->gainL.load(std::memory_order_relaxed);
+        const float gR = v->gainR.load(std::memory_order_relaxed);
+
+        int done = 0, lastM = 0;
+        while (done < numSamples)
+        {
+            const int m = juce::jmin(numSamples - done, cap);
+            v->reader.pull(*v->ring, appCapScratchL.data(), appCapScratchR.data(), m, currentSampleRate);
+            if (audible)
+            {
+                juce::FloatVectorOperations::addWithMultiply(outL + done, appCapScratchL.data(), gL, m);
+                if (outR != nullptr)
+                    juce::FloatVectorOperations::addWithMultiply(outR + done, appCapScratchR.data(), gR, m);
+            }
+            done += m;
+            lastM = m;
+        }
+
+        // トラック出力メータへ feed (ポストフェーダー・非可聴時はゼロ)。直前の decay と
+        // 重なっても store 上書きなので表示は正しい (チャンク分割時は最終チャンクのみ = 稀な
+        // 不整合期間の許容)。scratch を借用した非所有バッファで getMagnitude する
+        const int t = v->trackIdx.load(std::memory_order_relaxed);
+        if (t >= 0 && t < kMaxTracksMeters && lastM > 0)
+        {
+            float* chans[2] = { appCapScratchL.data(), appCapScratchR.data() };
+            juce::AudioBuffer<float> mb(chans, 2, lastM);
+            measureStereoBuf(mb, lastM, trackOutPeakL[t], trackOutPeakR[t],
+                             trackOutVUSmoothL[t], trackOutVUSmoothR[t],
+                             trackOutVUL[t], trackOutVUR[t], vuCoef,
+                             audible ? gL : 0.0f, audible ? gR : 0.0f);
+        }
     }
 }
 
@@ -2550,9 +2591,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     std::shared_ptr<StreamMirrorRing> mirror;
     { const juce::SpinLock::ScopedLockType l(mirrorRingLock); mirror = activeMirrorRing; }
 
-    // アプリ音声取り込みリング (非 null ならモニタ返し合算後・ミラー tap 前に出力へ加算する)。
-    std::shared_ptr<StreamMirrorRing> appCap;
-    { const juce::SpinLock::ScopedLockType l(appCaptureRingLock); appCap = activeAppCaptureRing; }
+    // アプリ音声取り込み voice 集合 (非空ならモニタ返し合算後・ミラー tap 前に出力へ加算する)。
+    std::shared_ptr<const AppCaptureVoices> appCap;
+    { const juce::SpinLock::ScopedLockType l(appCaptureRingLock); appCap = activeAppCapVoices; }
     PluginChain* const monChain    = (monCfg ? monCfg->chain : nullptr);
     const int          monInputCh  = (monCfg ? monCfg->inputCh : 0);
     const bool         monStereo   = (monCfg ? monCfg->stereo  : false);
@@ -2963,10 +3004,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                            outputChannelData, numOutputChannels, numSamples, monChain,
                            monInputCh, monStereo, monPan, monGain);
 
-        // アプリ音声取り込み (ブラウザ等): モニタ返し合算後・ミラー tap 前に加算する
-        // (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
-        if (appCap != nullptr)
-            mixAppCapture(*appCap, outputChannelData, numOutputChannels, numSamples);
+        // アプリ音声取り込み (アプリケーショントラック): モニタ返し合算後・ミラー tap 前に
+        // 加算する (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
+        if (appCap != nullptr && !appCap->empty())
+            mixAppCapture(*appCap, *snap, outputChannelData, numOutputChannels, numSamples, vuCoef);
 
         // 配信ミラー出力: 停止中の最終出力 (モニタ返し込み = 配信で喋っている声) も複製する
         if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)
@@ -3021,6 +3062,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         if (!anySolo)
             for (auto& fb : snap->folderBuses)
                 if (fb.track != nullptr && fb.track->isSoloed()) { anySolo = true; break; }
+        // アプリケーショントラック (voice) のソロも含める (スナップショット外のため明示チェック。
+        // アプリトラックをソロにすると通常トラック/クリックも黙る。mixAppCapture 側も同じ
+        // 集合から anySolo を再計算するので判定は一致する)
+        if (!anySolo && appCap != nullptr)
+            for (const auto& v : *appCap)
+                if (v != nullptr && v->solo.load(std::memory_order_relaxed)) { anySolo = true; break; }
 
         clickSoloBlocked = anySolo
                            && (snap->clickTrack == nullptr
@@ -3641,10 +3688,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                        outputChannelData, numOutputChannels, numSamples, monChain,
                        monInputCh, monStereo, monPan, monGain);
 
-    // アプリ音声取り込み (ブラウザ等): モニタ返し合算後・ミラー tap 前に加算する
+    // アプリ音声取り込み (アプリケーショントラック): モニタ返し合算後・ミラー tap 前に加算する
     // (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
-    if (appCap != nullptr)
-        mixAppCapture(*appCap, outputChannelData, numOutputChannels, numSamples);
+    if (appCap != nullptr && !appCap->empty())
+        mixAppCapture(*appCap, *snap, outputChannelData, numOutputChannels, numSamples, vuCoef);
 
     // 配信ミラー出力: 最終出力が確定した時点 (モニタ返し合算後・以降は録音/計測のみ) で複製する
     if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)

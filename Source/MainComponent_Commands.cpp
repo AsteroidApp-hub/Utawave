@@ -282,8 +282,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
             Track* t = (selectedTrackIndex >= 0
                         && selectedTrackIndex < trackManager.getTrackCount())
                        ? trackManager.getTrack(selectedTrackIndex) : nullptr;
-            if (t != nullptr && t->isFolderTrack())
-                t = nullptr;   // フォルダにはクリップを置けない → 既定の貼り付け先解決へ
+            if (t != nullptr && (t->isFolderTrack() || t->isAppCaptureTrack()))
+                t = nullptr;   // フォルダ/アプリトラックにはクリップを置けない → 既定の貼り付け先解決へ
             timelineView.pasteAtPlayhead(t);
             return true;
         }
@@ -318,7 +318,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
             int kc = key.getKeyCode();
             if (kc == 'r' || kc == 'R')
             {
-                if (t->isFolderTrack() || t->isMidiTrack() || t->isClickTrack())
+                if (t->isFolderTrack() || t->isMidiTrack() || t->isClickTrack()
+                    || t->isAppCaptureTrack())
                     return true;   // 録音アーム対象外
                 t->setRecArmed(!t->isRecArmed());
                 trackHeaderPanel.refresh();
@@ -345,7 +346,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
             }
             if (kc == 'i' || kc == 'I')
             {
-                if (t->isFolderTrack()) return true;   // フォルダは入力を持たない
+                if (t->isFolderTrack() || t->isAppCaptureTrack())
+                    return true;   // フォルダ/アプリトラックは入力を持たない
                 t->setInputMonitor(!t->isInputMonitor());
                 syncInputMonitorStateToEngine();
                 trackHeaderPanel.refresh();

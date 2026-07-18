@@ -127,6 +127,9 @@ MainComponent::MainComponent()
     trackHeaderPanel.onAddMidiTrack        = [this] { addMidiTrack(); };
     // フォルダトラック: 環境設定「フォルダトラックを追加できるようにする」ON の時だけメニューに出る
     trackHeaderPanel.folderTracksEnabled   = [this] { return appPrefs.enableFolderTracks; };
+    trackHeaderPanel.onAddAppTrack         = [this] { addAppCaptureTrack(); };
+    trackHeaderPanel.appTracksEnabled      = [this]
+        { return AppAudioCapture::isSupported() && appPrefs.enableAppCaptureTracks; };
     // フォルダトラックの Pan/Rev 表示 (環境設定「Pan・Rev をフォルダトラックに表示する」)
     trackHeaderPanel.folderExtrasEnabled   = [this] { return appPrefs.showFolderPanRev; };
     trackHeaderPanel.onAddFolderTrack      = [this] { addFolderTrack(); };
@@ -1000,9 +1003,6 @@ MainComponent::MainComponent()
     // 配信ミラー出力 (最終ミックスを別デバイスへ複製) を設定に応じて開始。起動時の失敗
     // (デバイス取り外し等) は稀だが配信前に気付けるようダイアログで知らせる
     applyStreamMirrorFromPrefs(/*showErrors*/ true);
-    // アプリ音声取り込み (ブラウザ等の音を出力へ混ぜる) を設定に応じて開始。対象アプリの
-    // 未起動は「待機」で正常 (キャプチャスレッドが自動で拾う) なので起動時エラーは出さない
-    applyAppCaptureFromPrefs(/*showErrors*/ false);
 
     // MIDI キーボード入力を設定に応じて開く。起動時はキーボードの電源が入っていないのが普通
     // なのでエラーは出さない (抜き差しリスナーが後から繋がったデバイスを自動で開き直す)
@@ -1094,12 +1094,17 @@ void MainComponent::timerCallback()
     // 選択変更・追加/削除/並べ替え・プロジェクト遷移の全経路を個別フックせずここで吸収)
     updateLiveMidiTarget();
 
+    // アプリケーショントラック ↔ キャプチャ実体の同期 (同じく毎 tick で全経路を吸収。
+    // 構造が不変なら voice の atomic 更新のみで軽量)
+    syncAppCaptureTracks();
+
     // Metering: アイドル時 (再生/録音/入力モニターのいずれも無し) はメーター計算を省く。
     // 直後の数 tick は猶予として計算を続け、メーターが無音まで滑らかに減衰してから止める。
     // MIDI キーボードのライブ演奏 (停止中) でも Peak/VU が動くよう、ライブ MIDI の
     // ターゲットが有効な間 (= キーボード接続中で MIDI トラックがある) はメータを止めない
     bool meterActive = isPlaying || isRecording
-                       || audioEngine.getLiveMidiTargetTrack() >= 0;
+                       || audioEngine.getLiveMidiTargetTrack() >= 0
+                       || audioEngine.hasAppCaptureVoices();   // アプリ取り込み中もメータを動かす
     if (!meterActive)
     {
         for (int i = 0; i < trackManager.getTrackCount(); ++i)
@@ -1448,6 +1453,102 @@ void MainComponent::addFolderTrack()
     markProjectDirty();
 }
 
+void MainComponent::addAppCaptureTrack()
+{
+    auto* t = trackManager.addAppCaptureTrack(newTrackInsertAfter());
+    if (!t) return;
+    pushTrackAddUndo(t);
+    markProjectDirty();
+    // キャプチャの起動と voice の publish は timerCallback の syncAppCaptureTracks が拾う
+    // (exe 未選択の間は待機。ヘッダの「アプリを選択…」で対象を選ぶと鳴り始める)
+}
+
+// アプリケーショントラック集合とキャプチャ実体/エンジン voice の同期 (20Hz・宣言部コメント参照)。
+// 構造 (トラック集合・exe) が変わった時だけキャプチャを起動/停止して publish し、
+// 不変の tick は voice の atomic (Vol×Pan/Mute/Solo/trackIdx) を更新するだけ。
+void MainComponent::syncAppCaptureTracks()
+{
+    // 現在のアプリケーショントラック集合 (message thread なので Track* は安定)
+    struct Cur { Track* track; int idx; };
+    std::vector<Cur> cur;
+    for (int i = 0; i < trackManager.getTrackCount(); ++i)
+        if (auto* t = trackManager.getTrack(i))
+            if (t->isAppCaptureTrack())
+                cur.push_back({ t, i });
+
+    // 構造変化の検出: 本数 / トラック identity / exe のいずれかが変わったら再構築。
+    // (appTrackCaptures の Track* は削除済みの可能性があるため参照せず、現集合側から照合する)
+    bool changed = (cur.size() != appTrackCaptures.size());
+    if (!changed)
+        for (size_t i = 0; i < cur.size(); ++i)
+        {
+            bool found = false;
+            for (const auto& e : appTrackCaptures)
+                if (e.track == cur[i].track && e.exe == cur[i].track->getAppCaptureExe())
+                    { found = true; break; }
+            if (!found) { changed = true; break; }
+        }
+
+    if (changed)
+    {
+        // 再構築: 生き残るエントリ (同 Track + 同 exe) のキャプチャ/voice は持ち回して
+        // 音を途切れさせない。消えた/変わったものは stop (スレッド join)、新規は start
+        std::vector<AppTrackCapture> next;
+        for (const auto& c : cur)
+        {
+            const juce::String exe = c.track->getAppCaptureExe();
+            AppTrackCapture entry;
+            for (auto& e : appTrackCaptures)
+                if (e.track == c.track && e.exe == exe && e.capture != nullptr)
+                    { entry = std::move(e); e.track = nullptr; break; }
+            if (entry.track == nullptr)
+            {
+                entry.track = c.track;
+                entry.exe   = exe;
+                if (exe.isNotEmpty())
+                {
+                    entry.capture = std::make_unique<AppAudioCapture>();
+                    if (entry.capture->start(exe, audioEngine.getSampleRate()).isEmpty())
+                    {
+                        entry.voice = std::make_shared<AudioEngine::AppCaptureVoice>();
+                        entry.voice->ring = entry.capture->getRing();
+                    }
+                    else
+                        entry.capture.reset();   // 失敗 (非対応環境等) は voice 無しで保持
+                }
+            }
+            next.push_back(std::move(entry));
+        }
+        appTrackCaptures = std::move(next);   // 消えたエントリはここで dtor → キャプチャ join
+
+        auto voices = std::make_shared<AudioEngine::AppCaptureVoices>();
+        for (const auto& e : appTrackCaptures)
+            if (e.voice != nullptr && e.voice->ring != nullptr)
+                voices->push_back(e.voice);
+        audioEngine.setAppCaptureVoices(voices->empty() ? nullptr
+                                                        : std::shared_ptr<const AudioEngine::AppCaptureVoices>(voices));
+    }
+
+    // パラメータ同期 (毎 tick): トラックの Vol(dB)×Pan/Mute/Solo → voice の atomic。
+    // 再生と同じリニアバランス則 (center 減衰なし)。voice は Track* を持たないので、
+    // ここが唯一の橋渡し (audio thread はトラック削除の影響を受けない)
+    for (const auto& c : cur)
+        for (auto& e : appTrackCaptures)
+            if (e.track == c.track && e.voice != nullptr)
+            {
+                const float vol  = juce::Decibels::decibelsToGain(c.track->getVolume(), -60.0f);
+                const float pan  = c.track->getPan();
+                const float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
+                const float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
+                e.voice->gainL.store(vol * panL, std::memory_order_relaxed);
+                e.voice->gainR.store(vol * panR, std::memory_order_relaxed);
+                e.voice->mute.store(c.track->isMuted(), std::memory_order_relaxed);
+                e.voice->solo.store(c.track->isSoloed(), std::memory_order_relaxed);
+                e.voice->trackIdx.store(c.idx, std::memory_order_relaxed);
+                break;
+            }
+}
+
 void MainComponent::moveTracksToFolder(std::vector<int> trackIdxs, int folderIdx)
 {
     Track* folder = nullptr;
@@ -1694,7 +1795,8 @@ int MainComponent::countRecArmedTracks() const
 Track* MainComponent::findEmptyRecordTrack()
 {
     auto recordable = [](const Track* t)
-    { return t != nullptr && !t->isMidiTrack() && !t->isClickTrack() && !t->isFolderTrack(); };
+    { return t != nullptr && !t->isMidiTrack() && !t->isClickTrack() && !t->isFolderTrack()
+               && !t->isAppCaptureTrack(); };   // アプリケーショントラックは録音先にしない
     auto isEmpty = [](const Track* t)
     {
         if (t->getMidiClipCount() > 0) return false;

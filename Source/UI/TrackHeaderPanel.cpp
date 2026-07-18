@@ -98,6 +98,9 @@ void TrackHeaderPanel::showAddTrackMenu()
     // フォルダトラックは環境設定「フォルダトラックを追加できるようにする」ON の時だけ出す
     if (folderTracksEnabled && folderTracksEnabled())
         m.addItem(5, tr(u8"フォルダトラックを追加"));
+    // アプリケーショントラックは対応環境 (Windows) + 環境設定 ON の時だけ出す
+    if (appTracksEnabled && appTracksEnabled())
+        m.addItem(6, tr(u8"アプリケーショントラックを追加"));
     m.addSeparator();
     m.addItem(3, tr(u8"クリックトラックを追加"),
               !trackManager.hasClickTrack());
@@ -107,6 +110,7 @@ void TrackHeaderPanel::showAddTrackMenu()
             else if (result == 2 && onAddTrackWithMode) onAddTrackWithMode(true, /*appendAtBottom=*/false);
             else if (result == 4 && onAddMidiTrack) onAddMidiTrack();
             else if (result == 5 && onAddFolderTrack) onAddFolderTrack();
+            else if (result == 6 && onAddAppTrack) onAddAppTrack();
             else if (result == 3 && onAddClickTrack) onAddClickTrack();
         });
 }
@@ -201,7 +205,8 @@ void TrackHeaderPanel::mouseDown(const juce::MouseEvent& e)
                     const bool show = (result == 1);
                     for (int i = 0; i < trackManager.getTrackCount(); ++i)
                         if (auto* t = trackManager.getTrack(i))
-                            t->setInsertSlotsVisible(show);
+                            if (!t->isAppCaptureTrack())   // アプリトラックは INS 非対応 (常に非表示)
+                                t->setInsertSlotsVisible(show);
                     if (onTrackChanged) onTrackChanged();
                     resized();
                     repaint();
@@ -962,7 +967,8 @@ void TrackHeaderPanel::toggleAllInsertSlots()
     pendingInsApply = false;
     for (int i = 0; i < n; ++i)
         if (auto* t = trackManager.getTrack(i))
-            t->setInsertSlotsVisible(show);
+            if (!t->isAppCaptureTrack())   // アプリトラックは INS 非対応 (常に非表示)
+                t->setInsertSlotsVisible(show);
 
     // ヘッダ幅の再計算 + 全体レイアウト更新 (MainComponent::resized 経由)
     if (onTrackChanged) onTrackChanged();

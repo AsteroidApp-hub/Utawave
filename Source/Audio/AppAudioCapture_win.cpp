@@ -23,7 +23,7 @@
 
 #if JUCE_WINDOWS
 
-#include "AudioEngine.h"
+#include "StreamMirrorRing.h"
 #include "../Localisation.h"
 
 #include <windows.h>
@@ -484,11 +484,6 @@ struct AppAudioCapture::Impl
 
 //==============================================================================
 AppAudioCapture::AppAudioCapture() : impl(std::make_unique<Impl>()) {}
-
-// dtor はキャプチャスレッドの join のみ (エンジンからの解除は呼び出し側が stop(engine) で行う
-// 契約 = StreamMirrorOutput と同じ)。解除し忘れてもリングは shared_ptr 所有なので UAF には
-// ならない (writer 不在の枯渇無音になるだけ)。AudioEngine* を保持しないことで、メンバ宣言順
-// (破棄順) への暗黙依存を排除している (レビュー #3)
 AppAudioCapture::~AppAudioCapture() { impl->stopThread(); }
 
 bool AppAudioCapture::isSupported() { return true; }   // 本アプリの対応 OS (Win11+) は常に可
@@ -526,19 +521,18 @@ std::vector<AppAudioCapture::AppInfo> AppAudioCapture::listAudioApps()
     return result;
 }
 
-juce::String AppAudioCapture::start(const juce::String& executable, AudioEngine& engine)
+juce::String AppAudioCapture::start(const juce::String& executable, double preferredSampleRate)
 {
-    stop(engine);
+    stop();
     const juce::String exe = executable.trim();
     if (exe.isEmpty())
         return tr(u8"取り込むアプリを選択してください");
 
     impl->exe = exe;
-    impl->preferredRate = engine.getSampleRate();
+    impl->preferredRate = preferredSampleRate;
     impl->ring = std::make_shared<StreamMirrorRing>();
     // ソース SR はセッション確立時にキャプチャスレッドが reset(実フォーマット SR) で設定する。
     // それまで srcRate = 0 で reader は無音 (= 「待機」状態が構造的に安全)
-    engine.setAppCaptureRing(impl->ring);
 
     impl->stopRequested.store(false);
     impl->lastPacketMs.store(0);
@@ -547,16 +541,16 @@ juce::String AppAudioCapture::start(const juce::String& executable, AudioEngine&
     return {};
 }
 
-void AppAudioCapture::stop(AudioEngine& engine)
+void AppAudioCapture::stop()
 {
     impl->stopThread();
-    // リングの解放順 (レビュー #7): 自分の所有を先に手放してから解除を publish する。
-    // publish 直後の sweep で use_count==1 になり通常は即回収される (逆順だと次の publish
-    // まで ~1MB のリングが退役リストに残留する)。join 済みなので writer はもういない
+    // リングは reader 側 (AppCaptureVoice) が shared_ptr で共同所有するため、ここで手放しても
+    // 安全 (writer 不在の枯渇無音になるだけ)。join 済みなので writer はもういない
     impl->ring.reset();
-    engine.setAppCaptureRing(nullptr);
     impl->lastPacketMs.store(0);
 }
+
+std::shared_ptr<StreamMirrorRing> AppAudioCapture::getRing() const { return impl->ring; }
 
 bool AppAudioCapture::isRunning() const { return impl->th.joinable(); }
 
@@ -576,11 +570,12 @@ AppAudioCapture::AppAudioCapture() : impl(std::make_unique<Impl>()) {}
 AppAudioCapture::~AppAudioCapture() = default;
 bool AppAudioCapture::isSupported() { return false; }
 std::vector<AppAudioCapture::AppInfo> AppAudioCapture::listAudioApps() { return {}; }
-juce::String AppAudioCapture::start(const juce::String&, AudioEngine&)
+juce::String AppAudioCapture::start(const juce::String&, double)
 {
     return tr(u8"この環境ではアプリ音声の取り込みに対応していません");
 }
-void AppAudioCapture::stop(AudioEngine&) {}
+void AppAudioCapture::stop() {}
+std::shared_ptr<StreamMirrorRing> AppAudioCapture::getRing() const { return nullptr; }
 bool AppAudioCapture::isRunning() const   { return false; }
 bool AppAudioCapture::isReceiving() const { return false; }
 juce::String AppAudioCapture::getTargetExecutable() const { return {}; }

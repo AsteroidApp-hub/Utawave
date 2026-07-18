@@ -1310,9 +1310,9 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             auto* track = trackManager.getTrack(ti);
             int trackTop2 = area2.getY() + trackManager.getTrackY(ti) - scrollY;
             int trackH    = track->getTotalHeight();
-            // フォルダトラック行 (グループバス) へは波形クリップを置けない。
+            // フォルダ/アプリケーショントラック行へは波形クリップを置けない。
             // 非表示行 (高さ 0) は範囲に入らないので自然にスキップされる。
-            if (track->isFolderTrack()) continue;
+            if (track->isFolderTrack() || track->isAppCaptureTrack()) continue;
             if (mouseY >= trackTop2 && mouseY < trackTop2 + trackH)
             {
                 destTrack    = track;

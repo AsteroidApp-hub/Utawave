@@ -142,30 +142,15 @@ public:
                    "velocity area height round trips (140)");
         }
 
-        beginTest("app capture settings: defaults, gain clamp and round trip");
+        beginTest("application tracks toggle: default and round trip");
         {
-            // 既定: OFF / 対象未選択 (空) / ゲイン 0 dB
-            expect(AppPreferences{}.appCaptureEnabled == false, "default is disabled");
-            expect(AppPreferences{}.appCaptureApp.isEmpty(), "default app is unselected (empty)");
-            expect(approxEq(AppPreferences{}.appCaptureGainDb, 0.0), "default gain 0 dB");
-
-            // ゲインは load 時に [-60, +12] へクランプ
-            writeStore("appCaptureGainDb=\"40\"");
-            expect(approxEq(AppPreferences::load().appCaptureGainDb, 12.0),
-                   "over-range +40 clamps to +12");
-            writeStore("appCaptureGainDb=\"-90\"");
-            expect(approxEq(AppPreferences::load().appCaptureGainDb, -60.0),
-                   "under-range -90 clamps to -60");
-
+            // 既定 OFF (追加メニューを出さない)。ON を保存 → load で保たれる
+            expect(AppPreferences{}.enableAppCaptureTracks == false, "default is disabled");
             AppPreferences p;
-            p.appCaptureEnabled = true;
-            p.appCaptureApp     = "chrome.exe";
-            p.appCaptureGainDb  = -6.5;
+            p.enableAppCaptureTracks = true;
             expect(p.save(), "save succeeds");
-            const auto q = AppPreferences::load();
-            expect(q.appCaptureEnabled == true, "enabled round trips");
-            expect(q.appCaptureApp == juce::String("chrome.exe"), "target app round trips");
-            expect(approxEq(q.appCaptureGainDb, -6.5), "gain round trips (-6.5 dB)");
+            expect(AppPreferences::load().enableAppCaptureTracks == true,
+                   "enableAppCaptureTracks round trips true");
         }
 
         beginTest("save/load round trip for last-used project SR / bit depth");

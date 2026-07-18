@@ -122,6 +122,12 @@ public:
         auto* t3 = tmA.addTrack("Chorus", false);
         t3->setFolderParent(t2);
 
+        // アプリケーショントラック (アプリ音声取り込み) — フラグ + 対象 exe の往復
+        auto* t4 = tmA.addAppCaptureTrack();
+        t4->setName("Browser");
+        t4->setAppCaptureExe("chrome.exe");
+        t4->setVolume(-6.0f);
+
         AppSettings setA;
         setA.initialBpm = 100.0;
         setA.meterNumerator = 3; setA.meterDenominator = 4;
@@ -184,7 +190,7 @@ public:
         expect(ProjectManager::load(projFile, sB), "load succeeds");
 
         // トラック数 (Stale が消えて 4)
-        expect(tmB.getTrackCount() == 4, "load cleared the stale track and restored 4");
+        expect(tmB.getTrackCount() == 5, "load cleared the stale track and restored 5");
 
         // Track 0 属性
         auto* r0 = tmB.getTrack(0);
@@ -276,6 +282,16 @@ public:
             expect(r3->getFolderParent() == r2, "child folder membership resolved to instance");
             expect(r2->getFolderParent() == nullptr, "folder itself is top-level");
         }
+
+        // Track 4 (アプリケーショントラック)
+        auto* r4 = tmB.getTrack(4);
+        expect(r4 != nullptr && r4->isAppCaptureTrack(), "track 4 restored as application track");
+        if (r4)
+        {
+            expect(r4->getAppCaptureExe() == juce::String("chrome.exe"), "app capture exe restored");
+            expect(approxEq(r4->getVolume(), -6.0, 1e-5), "app track volume restored");
+        }
+        expect(r3 != nullptr && !r3->isAppCaptureTrack(), "normal track is not an app track");
 
         // Settings
         expect(approxEq(setB.initialBpm, 100.0, 1e-9), "initialBpm");

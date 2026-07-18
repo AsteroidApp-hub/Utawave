@@ -614,23 +614,35 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         expectEquals(out.getNumSamples(),  0, "empty range yields 0 samples");
     }
 
-    // アプリ音声取り込み (ブラウザ等の音を出力へ混ぜるライブ専用入力) の統合テスト。
-    // writer (キャプチャスレッド) の代わりにテストが ring へ push し、reader (audio thread) 側の
-    // 経路 = 「モニタ返し合算後・ミラー tap 前の加算」を停止/再生ブランチの両方で固定する。
+    // アプリ音声取り込み (アプリケーショントラック) の統合テスト。writer (キャプチャスレッド)
+    // の代わりにテストが ring へ push し、reader (audio thread) 側の経路 = 「モニタ返し合算後・
+    // ミラー tap 前の voice 加算」を停止/再生ブランチの両方で固定する。
     // 録音に乗らないことは経路が構造的に別 (録音は inputChannelData を writer へ書く・
     // 取り込みは outputChannelData にしか触れない) なので個別検証しない。
     void testAppCaptureMix()
     {
-        beginTest("app capture: ring mixes into output + mirror, honours gain, detaches");
+        using Voice = AudioEngine::AppCaptureVoice;
+        auto makeVoices = [](std::initializer_list<std::shared_ptr<Voice>> vs)
+        {
+            auto out = std::make_shared<AudioEngine::AppCaptureVoices>();
+            for (auto& v : vs) out->push_back(v);
+            return std::shared_ptr<const AudioEngine::AppCaptureVoices>(out);
+        };
+
+        beginTest("app capture: voice mixes into output + mirror, honours gain, detaches");
         {
             AudioEngine engine;
             FakeAudioIODevice device;
             engine.audioDeviceAboutToStart(&device);
 
             auto ring = std::make_shared<StreamMirrorRing>();
-            ring->reset(kSR);                    // キャプチャ側 SR = エンジン SR (ratio 1・契約どおり登録前に reset)
-            engine.setAppCaptureRing(ring);
-            engine.setAppCaptureGain(0.5f);
+            ring->reset(kSR);                    // キャプチャ側 SR = エンジン SR (ratio 1)
+            auto voice = std::make_shared<Voice>();
+            voice->ring = ring;
+            voice->gainL.store(0.5f);
+            voice->gainR.store(0.5f);
+            engine.setAppCaptureVoices(makeVoices({ voice }));
+            expect(engine.hasAppCaptureVoices(), "hasAppCaptureVoices true after publish");
 
             auto mirror = std::make_shared<StreamMirrorRing>();
             engine.setMirrorRing(mirror);
@@ -654,8 +666,8 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             const int target = (int) (kSR * 0.05);   // reader の既定目標水位 = 2400 @48k
             pushConst(target);
             runBlock();
-            expect(std::abs(outL[0] - 0.8f * 0.5f) < 1.0e-4f, "L = capture * gain (stopped branch)");
-            expect(std::abs(outR[0] - 0.4f * 0.5f) < 1.0e-4f, "R = capture * gain (stopped branch)");
+            expect(std::abs(outL[0] - 0.8f * 0.5f) < 1.0e-4f, "L = capture * gainL (stopped branch)");
+            expect(std::abs(outR[0] - 0.4f * 0.5f) < 1.0e-4f, "R = capture * gainR (stopped branch)");
 
             // (2) ミラー (→OBS) にも乗る: ミラーの内容 = 最終出力 (取り込み音込み)
             {
@@ -669,62 +681,100 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
                 expect(match, "mirror receives final output including capture audio");
             }
 
-            // (3) ゲイン変更の即時反映 (push/pull を釣り合わせて水位を保つ)
-            engine.setAppCaptureGain(1.0f);
+            // (3) ゲイン (トラック Vol 相当) の即時反映 (push/pull を釣り合わせて水位を保つ)
+            voice->gainL.store(1.0f);
+            voice->gainR.store(1.0f);
             pushConst(kBlock);
             runBlock();
             expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "gain change applies immediately");
 
-            // (4) 枯渇 (ブラウザ一時停止相当): push 無しで水位が尽きると無音へ落ちる
+            // (4) ミュート: 出力には乗らないがリングは読み進める (解除で現在の音から即復帰)
+            voice->mute.store(true);
+            pushConst(kBlock);
+            runBlock();
+            expect(std::abs(outL[0]) < 1.0e-6f, "muted voice is silent");
+            voice->mute.store(false);
+            pushConst(kBlock);
+            runBlock();
+            expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "unmute resumes at the current audio (ring kept flowing)");
+
+            // (5) 枯渇 (ブラウザ一時停止相当): push 無しで水位が尽きると無音へ落ちる → 溜め直しで復帰
             for (int b = 0; b < 8; ++b) runBlock();
             expect(std::abs(outL[0]) < 1.0e-6f, "starved ring yields silence");
-
-            // (5) 復帰: 目標水位まで溜め直せば再び鳴る (re-prime)
             pushConst(target);
             runBlock();
             expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "resumes after re-priming");
 
             // (6) 解除後は混ざらない
-            engine.setAppCaptureRing(nullptr);
+            engine.setAppCaptureVoices(nullptr);
+            expect(!engine.hasAppCaptureVoices(), "hasAppCaptureVoices false after detach");
             pushConst(kBlock);
             runBlock();
-            expect(std::abs(outL[0]) < 1.0e-6f, "detached ring no longer mixes");
+            expect(std::abs(outL[0]) < 1.0e-6f, "detached voices no longer mix");
 
-            // (7) リング差し替え (取り込み対象アプリの変更相当): 旧リングと同じ epoch (=1) の
-            //     新リングを事前充填付きで登録しても、reader がポインタ変化検出で作り直され
-            //     必ず溜め直し (priming) から始まる。リセットが無いと epoch 一致で再プライミングが
-            //     飛び、stale readPos との差分だけ溜まっていれば即読みされて 0.8 が漏れる (回帰)
+            // (7) voice 差し替え (取り込み対象アプリの変更相当): 旧リングと同じ epoch (=1) の
+            //     新リングを事前充填付きで登録しても、新 voice = 新 reader なので必ず溜め直し
+            //     (priming) から始まる (stale readPos の持ち越しが構造的に無い)
             auto ring2 = std::make_shared<StreamMirrorRing>();
             ring2->reset(kSR);   // epoch 1 = 旧リングと同値 (衝突ケースを意図的に作る)
             {
                 std::vector<float> l((size_t) 8000, 0.8f), r((size_t) 8000, 0.8f);
                 ring2->push(l.data(), r.data(), 8000);
             }
-            engine.setAppCaptureRing(ring2);
+            auto voice2 = std::make_shared<Voice>();
+            voice2->ring = ring2;
+            engine.setAppCaptureVoices(makeVoices({ voice2 }));
             runBlock();
             expect(std::abs(outL[0]) < 1.0e-6f,
-                   "fresh ring re-primes (no stale reader state carryover)");
+                   "fresh voice re-primes (no stale reader state carryover)");
             {
                 std::vector<float> l((size_t) target, 0.8f), r((size_t) target, 0.8f);
                 ring2->push(l.data(), r.data(), target);
             }
             runBlock();
-            expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "fresh ring plays after re-priming");
+            expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "fresh voice plays after re-priming");
+
+            // (8) 複数 voice の合算とソロ規則 (voice 間): solo した voice だけが鳴る
+            auto ring3 = std::make_shared<StreamMirrorRing>();
+            ring3->reset(kSR);
+            auto voice3 = std::make_shared<Voice>();
+            voice3->ring = ring3;
+            engine.setAppCaptureVoices(makeVoices({ voice2, voice3 }));
+            auto push3 = [&ring3](int n)
+            {
+                std::vector<float> l((size_t) n, 0.2f), r((size_t) n, 0.2f);
+                ring3->push(l.data(), r.data(), n);
+            };
+            runBlock();                          // 両 voice の primeFrom 確定 (voice2 は継続 primed)
+            push3(target);
+            {
+                std::vector<float> l((size_t) target + kBlock, 0.8f), r((size_t) target + kBlock, 0.8f);
+                ring2->push(l.data(), r.data(), target + kBlock);
+            }
+            runBlock();
+            expect(std::abs(outL[0] - 1.0f) < 1.0e-3f, "two voices sum (0.8 + 0.2)");
+            voice3->solo.store(true);
+            push3(kBlock);
+            { std::vector<float> l((size_t) kBlock, 0.8f); ring2->push(l.data(), l.data(), kBlock); }
+            runBlock();
+            expect(std::abs(outL[0] - 0.2f) < 1.0e-3f, "soloed voice plays alone (other voice silenced)");
+            engine.setAppCaptureVoices(nullptr);
         }
 
-        beginTest("app capture: mixes on top of playback (playing branch)");
+        beginTest("app capture: mixes on top of playback and follows track solo rules");
         {
             auto wav = tempDir.getChildFile("appcap_c05.wav");
-            expect(writeMonoConstWav(wav, (int) kSR * 2, 0.5f), "source write");
+            expect(writeMonoConstWav(wav, (int) kSR * 4, 0.5f), "source write");
 
             Scene s;
-            s.addConstTrack(wav, 2.0);
+            auto* clipTrack = s.addConstTrack(wav, 4.0);
             s.start();
 
             auto ring = std::make_shared<StreamMirrorRing>();
             ring->reset(kSR);
-            s.engine.setAppCaptureRing(ring);
-            s.engine.setAppCaptureGain(1.0f);
+            auto voice = std::make_shared<AudioEngine::AppCaptureVoice>();
+            voice->ring = ring;
+            s.engine.setAppCaptureVoices(makeVoices({ voice }));
 
             std::vector<float> inSilence((size_t) kBlock, 0.0f);
             const float* ins[2] = { inSilence.data(), inSilence.data() };
@@ -747,7 +797,18 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             expect(std::abs(outL[0] - 1.3f) < 0.01f, "L = clip + capture while playing");
             expect(std::abs(outR[0] - 1.3f) < 0.01f, "R = clip + capture while playing");
 
-            s.engine.setAppCaptureRing(nullptr);
+            // 通常トラックのソロ → ソロでない voice は黙る (クリップだけが鳴る)
+            clipTrack->setSoloed(true);
+            for (int b = 0; b < 10; ++b) { pushConst(kBlock); runBlock(); }
+            expect(std::abs(outL[0] - 0.5f) < 0.01f, "track solo silences the app voice");
+
+            // アプリ voice のソロ → 通常トラックが黙り voice だけが鳴る
+            clipTrack->setSoloed(false);
+            voice->solo.store(true);
+            for (int b = 0; b < 12; ++b) { pushConst(kBlock); runBlock(); }
+            expect(std::abs(outL[0] - 0.8f) < 0.01f, "app voice solo silences normal tracks");
+
+            s.engine.setAppCaptureVoices(nullptr);
         }
     }
 

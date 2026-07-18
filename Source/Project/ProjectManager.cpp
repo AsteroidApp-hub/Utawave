@@ -201,6 +201,9 @@ bool ProjectManager::save(const juce::File& projectFile, const State& s)
         trackEl->setAttribute("isFolderTrack",   tr->isFolderTrack() ? 1 : 0);
         if (tr->isFolderTrack())
             trackEl->setAttribute("folderOpen",  tr->isFolderOpen() ? 1 : 0);
+        trackEl->setAttribute("isAppTrack",      tr->isAppCaptureTrack() ? 1 : 0);
+        if (tr->isAppCaptureTrack())
+            trackEl->setAttribute("appCaptureExe", tr->getAppCaptureExe());
         // 所属フォルダは保存順 (= 読み込み後の index) で参照する (-1 = トップレベル)
         {
             const int parentIdx = (tr->getFolderParent() != nullptr)
@@ -541,6 +544,9 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
             tr->setFolderTrack(trackEl->getIntAttribute("isFolderTrack", 0) != 0);
             if (tr->isFolderTrack())
                 tr->setFolderOpen(trackEl->getIntAttribute("folderOpen", 1) != 0);
+            tr->setAppCaptureTrack(trackEl->getIntAttribute("isAppTrack", 0) != 0);
+            if (tr->isAppCaptureTrack())
+                tr->setAppCaptureExe(trackEl->getStringAttribute("appCaptureExe"));
             {
                 const int parentIdx = trackEl->getIntAttribute("folderParent", -1);
                 if (parentIdx >= 0)

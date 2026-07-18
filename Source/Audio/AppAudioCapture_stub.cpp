@@ -18,12 +18,14 @@ bool AppAudioCapture::isSupported() { return false; }
 
 std::vector<AppAudioCapture::AppInfo> AppAudioCapture::listAudioApps() { return {}; }
 
-juce::String AppAudioCapture::start(const juce::String&, AudioEngine&)
+juce::String AppAudioCapture::start(const juce::String&, double)
 {
     return tr(u8"この環境ではアプリ音声の取り込みに対応していません");
 }
 
-void AppAudioCapture::stop(AudioEngine&) {}
+void AppAudioCapture::stop() {}
+
+std::shared_ptr<StreamMirrorRing> AppAudioCapture::getRing() const { return nullptr; }
 
 bool AppAudioCapture::isRunning() const   { return false; }
 bool AppAudioCapture::isReceiving() const { return false; }

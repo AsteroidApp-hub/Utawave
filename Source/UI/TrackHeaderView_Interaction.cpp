@@ -145,7 +145,8 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
                               + tr(u8" LUFS に合わせる"));
         }
         // ── フォルダ所属 (フォルダトラック以外・Click 以外) ──
-        if (!track.isFolderTrack() && !track.isClickTrack() && getFolderTargets)
+        if (!track.isFolderTrack() && !track.isClickTrack() && !track.isAppCaptureTrack()
+            && getFolderTargets)
         {
             const auto folders = getFolderTargets();
             if (!folders.empty() || track.getFolderParent() != nullptr)
@@ -175,7 +176,7 @@ void TrackHeaderView::mouseDown(const juce::MouseEvent& e)
         m.addSeparator();
         // 通常複製はテイクリストごと複製。Option (Win は Alt) 押下時は Lane 0 のみ複製する。
         // フォルダトラックは複製不可 (子は複製対象外のため項目を出さない)
-        if (!track.isFolderTrack())
+        if (!track.isFolderTrack() && !track.isAppCaptureTrack())
             m.addItem(201, tr(u8"トラックを複製")
                               + platformShortcutText(tr(u8" (Option: TList を除く)")));
         // 複数選択中はまとめて削除できることを示す (選択中の N 本)

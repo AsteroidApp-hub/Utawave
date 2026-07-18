@@ -603,7 +603,8 @@ void MainComponent::showExportDialog()
     for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
     {
         auto* track = trackManager.getTrack(ti);
-        if (!track || track->isClickTrack() || track->isFolderTrack()) continue;
+        if (!track || track->isClickTrack() || track->isFolderTrack()
+            || track->isAppCaptureTrack()) continue;   // アプリトラックは書き出しに乗らない
         ExportDialog::TrackInfo ti2;
         ti2.index             = ti;
         ti2.name              = track->getName();
@@ -810,6 +811,9 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
                     // 子側の setMuted だけで対象を制御できる (含まれない子はミュート =
                     // フォルダバスに何も入らない)。復元は restoreTrackStates が担う
                     if (t->isFolderTrack()) { t->setMuted(false); continue; }
+                    // アプリケーショントラックは書き出しに乗らない (ライブ専用)。ユーザーの
+                    // ミュート状態を書き出し準備で触らない (触ると書き出し中の実聴が変わる)
+                    if (t->isAppCaptureTrack()) continue;
                     const bool include = std::find(inc.begin(), inc.end(), i) != inc.end()
                                             || inc.empty();
                     t->setMuted(!include);

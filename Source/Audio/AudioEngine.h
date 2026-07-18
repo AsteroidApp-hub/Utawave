@@ -293,18 +293,32 @@ public:
     // 回収まで保持し、audio thread が最後の所有者になって解放することはない)。
     void setMirrorRing(std::shared_ptr<StreamMirrorRing> ring);
 
-    // ── アプリ音声取り込み (ブラウザ等の音を出力へ混ぜるライブ専用入力) ──
-    // 非 null を渡すと、毎ブロックのモニタ返し合算後 (= ミラー tap の直前) に ring から
-    // ドリフト補正付きで読み出して出力へ加算する。ヘッドホン (メイン出力) と配信ミラーの
-    // 両方に乗り、録音 (生入力の別経路) と書き出し (コールバックを通らない) には構造的に
-    // 乗らない。mirror と方向が逆 (writer = キャプチャスレッド / reader = この audio thread)
-    // のため、ring のソース SR は登録側が ring->reset(captureSR) してから渡す契約
-    // (エンジンのデバイス再起動でソース SR は変わらないので aboutToStart では触らない。
-    // reader の SR 変換は毎ブロック srcRate/dstRate を読むので勝手に追従する)。
-    // nullptr で解除。リング寿命の作法は setMirrorRing と同じ (退役リスト保持・drain 無し)。
-    void setAppCaptureRing(std::shared_ptr<StreamMirrorRing> ring);
-    // 取り込み音の出力ゲイン (linear)。UI の dB スライダーから即時反映。
-    void setAppCaptureGain(float linearGain) { appCaptureGainLinear.store(linearGain); }
+    // ── アプリ音声取り込み (アプリケーショントラック・ブラウザ等の音を出力へ混ぜるライブ専用入力) ──
+    // アプリケーショントラック 1 本 = 1 voice。毎ブロックのモニタ返し合算後 (= ミラー tap の
+    // 直前) に各 voice の ring からドリフト補正付きで読み出し、トラックの Vol×Pan/Mute/Solo を
+    // 適用して出力へ加算する。ヘッドホン (メイン出力) と配信ミラーの両方に乗り、録音 (生入力の
+    // 別経路) と書き出し (コールバックを通らない) には構造的に乗らない。
+    // voice は Track* を持たない (パラメータは atomic のコピーを message thread が 20Hz で
+    // 更新する = トラック削除時の audio thread UAF が構造的に無い)。reader は voice 内に持ち
+    // audio thread 専用 (公開後は他スレッドから触らない。voice はリングと同時に作られるため
+    // リング差し替え = 新 voice = 新 reader で必ず溜め直しから始まる)。
+    // ring のソース SR はキャプチャ側 (AppAudioCapture) が reset(captureSR) で設定する契約
+    // (エンジンのデバイス再起動でソース SR は変わらないので aboutToStart では触らない)。
+    struct AppCaptureVoice
+    {
+        std::shared_ptr<StreamMirrorRing> ring;      // writer = キャプチャスレッド
+        StreamMirrorReader reader;                    // audio thread 専用
+        std::atomic<float> gainL { 1.0f };            // トラック Vol(dB→linear) × Pan 済み
+        std::atomic<float> gainR { 1.0f };
+        std::atomic<bool>  mute  { false };
+        std::atomic<bool>  solo  { false };
+        std::atomic<int>   trackIdx { -1 };           // トラック出力メータの feed 先 (-1 = 無し)
+    };
+    using AppCaptureVoices = std::vector<std::shared_ptr<AppCaptureVoice>>;
+    // 現在のアプリケーショントラック集合を publish する (nullptr / 空 = 無効)。
+    // 寿命の作法は setMirrorRing と同じ (SpinLock 差し替え + 退役リスト保持・drain 無し)。
+    void setAppCaptureVoices(std::shared_ptr<const AppCaptureVoices> voices);
+    bool hasAppCaptureVoices();   // UI のメータアイドルゲート用 (20Hz・SpinLock 下のポインタ読みのみ)
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -666,20 +680,18 @@ private:
     void publishMirrorRing(std::shared_ptr<StreamMirrorRing> next);
     void sweepRetiredMirrorRings();
 
-    // ── アプリ音声取り込み (setAppCaptureRing 参照・mirror と同じ公開作法・方向が逆) ──
-    // writer = キャプチャスレッド (AppAudioCapture) / reader = この audio thread。
-    // reader / scratch は audio thread 専用 (他スレッドから触らない)。
-    std::shared_ptr<StreamMirrorRing>              activeAppCaptureRing;
-    juce::SpinLock                                 appCaptureRingLock;
-    std::vector<std::shared_ptr<StreamMirrorRing>> retiredAppCaptureRings;
-    void publishAppCaptureRing(std::shared_ptr<StreamMirrorRing> next);
-    void sweepRetiredAppCaptureRings();
-    StreamMirrorReader appCaptureReader;
-    StreamMirrorRing*  appCapLastRing { nullptr };   // reader 再構築の差し替え検出用 (audio thread 専用・参照外ししない)
-    std::atomic<float> appCaptureGainLinear { 1.0f };
+    // ── アプリ音声取り込み (setAppCaptureVoices 参照・mirror と同じ公開作法・方向が逆) ──
+    // writer = キャプチャスレッド (AppAudioCapture) / reader = この audio thread (voice 内)。
+    // scratch は audio thread 専用 (他スレッドから触らない)。
+    std::shared_ptr<const AppCaptureVoices>              activeAppCapVoices;
+    juce::SpinLock                                       appCaptureRingLock;
+    std::vector<std::shared_ptr<const AppCaptureVoices>> retiredAppCapVoices;
+    void publishAppCaptureVoices(std::shared_ptr<const AppCaptureVoices> next);
+    void sweepRetiredAppCaptureVoices();
     std::vector<float> appCapScratchL, appCapScratchR;   // aboutToStart で確保
-    void mixAppCapture(StreamMirrorRing& ring, float* const* outputChannelData,
-                       int numOutputChannels, int numSamples) noexcept;
+    void mixAppCapture(const AppCaptureVoices& voices, const PlaybackSnapshot& snap,
+                       float* const* outputChannelData, int numOutputChannels,
+                       int numSamples, float vuCoef) noexcept;
 
     // モニター FX 経由用スクラッチ (audioDeviceAboutToStart で確保・audio thread 専用)。
     juce::AudioBuffer<float> monitorChainBuf;
