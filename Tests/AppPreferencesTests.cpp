@@ -142,6 +142,32 @@ public:
                    "velocity area height round trips (140)");
         }
 
+        beginTest("app capture settings: defaults, gain clamp and round trip");
+        {
+            // 既定: OFF / 対象未選択 (空) / ゲイン 0 dB
+            expect(AppPreferences{}.appCaptureEnabled == false, "default is disabled");
+            expect(AppPreferences{}.appCaptureApp.isEmpty(), "default app is unselected (empty)");
+            expect(approxEq(AppPreferences{}.appCaptureGainDb, 0.0), "default gain 0 dB");
+
+            // ゲインは load 時に [-60, +12] へクランプ
+            writeStore("appCaptureGainDb=\"40\"");
+            expect(approxEq(AppPreferences::load().appCaptureGainDb, 12.0),
+                   "over-range +40 clamps to +12");
+            writeStore("appCaptureGainDb=\"-90\"");
+            expect(approxEq(AppPreferences::load().appCaptureGainDb, -60.0),
+                   "under-range -90 clamps to -60");
+
+            AppPreferences p;
+            p.appCaptureEnabled = true;
+            p.appCaptureApp     = "chrome.exe";
+            p.appCaptureGainDb  = -6.5;
+            expect(p.save(), "save succeeds");
+            const auto q = AppPreferences::load();
+            expect(q.appCaptureEnabled == true, "enabled round trips");
+            expect(q.appCaptureApp == juce::String("chrome.exe"), "target app round trips");
+            expect(approxEq(q.appCaptureGainDb, -6.5), "gain round trips (-6.5 dB)");
+        }
+
         beginTest("save/load round trip for last-used project SR / bit depth");
         {
             // 既定: SR 未設定 (0) / ビット深度 32。作成後の値を保存 → load で引き継がれる

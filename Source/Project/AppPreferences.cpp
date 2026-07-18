@@ -76,6 +76,10 @@ AppPreferences AppPreferences::load()
         p.multicoreAudio     = xml->getBoolAttribute("multicoreAudio", p.multicoreAudio);
         p.streamMirrorEnabled  = xml->getBoolAttribute("streamMirrorEnabled", p.streamMirrorEnabled);
         p.streamMirrorDevice   = xml->getStringAttribute("streamMirrorDevice", p.streamMirrorDevice);
+        p.appCaptureEnabled    = xml->getBoolAttribute("appCaptureEnabled", p.appCaptureEnabled);
+        p.appCaptureApp        = xml->getStringAttribute("appCaptureApp", p.appCaptureApp);
+        p.appCaptureGainDb     = juce::jlimit(-60.0, 12.0,
+            xml->getDoubleAttribute("appCaptureGainDb", p.appCaptureGainDb));
         p.midiInputEnabled     = xml->getBoolAttribute("midiInputEnabled", p.midiInputEnabled);
         p.midiInputDevice      = xml->getStringAttribute("midiInputDevice", p.midiInputDevice);
         // 範囲は LyricsView::kMinFont/kMaxFont と一致させる (UI へ依存させないため数値で持つ)
@@ -110,6 +114,9 @@ bool AppPreferences::save() const
     xml.setAttribute("multicoreAudio", multicoreAudio);
     xml.setAttribute("streamMirrorEnabled", streamMirrorEnabled);
     xml.setAttribute("streamMirrorDevice", streamMirrorDevice);
+    xml.setAttribute("appCaptureEnabled", appCaptureEnabled);
+    xml.setAttribute("appCaptureApp", appCaptureApp);
+    xml.setAttribute("appCaptureGainDb", appCaptureGainDb);
     xml.setAttribute("midiInputEnabled", midiInputEnabled);
     xml.setAttribute("midiInputDevice", midiInputDevice);
     xml.setAttribute("lyricsFontSize", lyricsFontSize);

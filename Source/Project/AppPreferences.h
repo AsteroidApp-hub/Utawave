@@ -97,6 +97,18 @@ public:
     // 環境が大半で、黙って同じデバイスへミラーすると二重聞こえ事故になるため。
     juce::String streamMirrorDevice;
 
+    // ── アプリ音声取り込み (歌枠向け・Windows のみ実装) ──
+    // 指定アプリ (ブラウザ / カラオケアプリ等) の音を OS からキャプチャして最終出力へ混ぜるか
+    // (既定: OFF)。ASIO 出力 (ヘッドホン) に乗るので歌い手本人が聞け、配信ミラー経由で OBS 等
+    // にも乗る。録音・書き出しには乗らない。詳細は Source/Audio/AppAudioCapture.h。
+    bool appCaptureEnabled { false };
+    // 取り込み対象の実行ファイル名 (例 "chrome.exe")。空 = 未選択 = 開始しない
+    // (streamMirrorDevice と同じ「未選択は開始しない」作法)。
+    juce::String appCaptureApp;
+    // 取り込み音の出力ゲイン (dB)。歌とオケ (ブラウザ音) のバランス調整用。
+    // load 時に [-60, +12] へクランプ。
+    double appCaptureGainDb { 0.0 };
+
     // ── MIDI 入力 (MIDI キーボード・ハードウェア依存のためアプリ全体設定) ──
     // 接続した MIDI キーボードで、選択中の MIDI トラックの音源 (内蔵シンセ / INS の
     // プラグイン音源) をライブ演奏できるようにするか (既定: OFF)。

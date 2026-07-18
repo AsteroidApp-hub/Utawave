@@ -55,8 +55,16 @@ void MainComponent::showPreferences()
             void mouseDoubleClick (const juce::MouseEvent&) override { showTextBox(); }
         };
         TypeInSlider       recCompOffsetSlider;
+        // アプリ音声取り込み (Windows のみ表示。初期状態と候補投入は showPreferences 側)
+        juce::ToggleButton appCapBtn;
+        juce::Label        appCapAppLabel;
+        juce::ComboBox     appCapAppCombo;      // 取り込み対象アプリ (100+i = appCapAppExes の exe 名)
+        juce::StringArray  appCapAppExes;       // combo の 100+i に対応する実行ファイル名
+        juce::Label        appCapGainLabel;
+        TypeInSlider       appCapGainSlider;    // 取り込み音量 (dB)
         juce::Label        exportLabel, startupLabel, streamLabel, midiInLabel;
         const bool         adsUi { AppPreferences::adsCompiledIn() };  // 広告がコンパイル時有効な時だけ UI を出す
+        const bool         appCapUi { AppAudioCapture::isSupported() }; // アプリ音声取り込みは対応環境 (Windows) だけ UI を出す
         juce::TextButton closeBtn, resetBtn;
         // 設定項目は縦に長いので Viewport でスクロールさせる (ウィンドウは従来の約半分の高さ)。
         // resetBtn / closeBtn だけはダイアログ下部に固定し、スクロールしなくても押せるようにする
@@ -89,6 +97,9 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onMulticoreChanged;
         std::function<void(bool)>          onMirrorChanged;
         std::function<void(juce::String)>  onMirrorDeviceChanged;   // 空 = OS 既定
+        std::function<void(bool)>          onAppCapChanged;
+        std::function<void(juce::String)>  onAppCapAppChanged;      // 空 = 未選択
+        std::function<void(double)>        onAppCapGainChanged;     // dB
         std::function<void(bool)>          onMidiInChanged;
         std::function<void(juce::String)>  onMidiInDeviceChanged;   // 空 = 未選択
         std::function<void()>      onResetDefaults;
@@ -372,6 +383,54 @@ void MainComponent::showPreferences()
                 }
             };
             addAndMakeVisible(mirrorDevCombo);
+
+            // アプリ音声取り込み (Windows のみ・アプリ全体設定。初期状態と候補投入は
+            // showPreferences 側)。指定アプリ (ブラウザ / カラオケアプリ) の音を OS から
+            // キャプチャして出力へ混ぜる (仮想ケーブル不要。ASIO 等でブラウザの音を
+            // ヘッドホンで聞けない環境向け・配信ミラーにも乗る)
+            if (appCapUi)
+            {
+                appCapBtn.setButtonText(
+                    tr(u8"アプリの音を取り込む (ブラウザ等の音をヘッドホンと配信に混ぜる)"));
+                appCapBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+                appCapBtn.setTooltip(
+                    tr(u8"選んだアプリ (ブラウザやカラオケアプリ) の音を取り込んで、いま聞こえている音に混ぜます。仮想ケーブルは不要です。録音や書き出しには入りません。"));
+                appCapBtn.onClick = [this] {
+                    if (onAppCapChanged) onAppCapChanged(appCapBtn.getToggleState());
+                };
+                addAndMakeVisible(appCapBtn);
+
+                setupLabel(appCapAppLabel,
+                           tr(u8"取り込むアプリ (音を再生中のアプリが表示されます)"),
+                           13.0f, juce::Colours::white);
+                appCapAppCombo.setTextWhenNothingSelected(tr(u8"アプリを選択…"));
+                appCapAppCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff3a3a3a));
+                appCapAppCombo.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+                appCapAppCombo.setColour(juce::ComboBox::arrowColourId, juce::Colours::white);
+                appCapAppCombo.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff555555));
+                appCapAppCombo.onChange = [this] {
+                    if (onAppCapAppChanged)
+                    {
+                        const int id = appCapAppCombo.getSelectedId();
+                        onAppCapAppChanged(id >= 100 ? appCapAppExes[id - 100] : juce::String());
+                    }
+                };
+                addAndMakeVisible(appCapAppCombo);
+
+                setupLabel(appCapGainLabel, tr(u8"取り込み音量"), 13.0f, juce::Colours::white);
+                appCapGainSlider.setSliderStyle(juce::Slider::LinearBar);
+                appCapGainSlider.setRange(-60.0, 12.0, 0.5);
+                appCapGainSlider.setTextValueSuffix(" dB");
+                appCapGainSlider.setScrollWheelEnabled(false);   // Viewport スクロールとの誤操作防止
+                appCapGainSlider.setTooltip(tr(u8"ダブルクリックで数値を入力"));
+                appCapGainSlider.setColour(juce::Slider::trackColourId, juce::Colour(0xff3a5a3a));
+                appCapGainSlider.setColour(juce::Slider::backgroundColourId, juce::Colour(0xff3a3a3a));
+                appCapGainSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
+                appCapGainSlider.onValueChange = [this] {
+                    if (onAppCapGainChanged) onAppCapGainChanged(appCapGainSlider.getValue());
+                };
+                addAndMakeVisible(appCapGainSlider);
+            }
 
             // MIDI 入力 (アプリ全体設定。初期状態と候補投入は showPreferences 側)。
             // 接続した MIDI キーボードで選択中の MIDI トラックの音源を弾けるようにする。
@@ -661,6 +720,14 @@ void MainComponent::showPreferences()
             y = check(mirrorBtn, y);
             y = label(mirrorDevLabel, y);
             y = combo(mirrorDevCombo, y);
+            if (appCapUi)   // アプリ音声取り込み (Windows のみ)
+            {
+                y = check(appCapBtn, y);
+                y = label(appCapAppLabel, y);
+                y = combo(appCapAppCombo, y);
+                appCapGainLabel.setBounds(mx, y, 250, 24);
+                appCapGainSlider.setBounds(mx + 256, y, cw - 256, 24); y += 24 + gRow;
+            }
 
             // ── MIDI入力 ──
             y += gSec; y = label(midiInLabel, y);
@@ -1033,6 +1100,60 @@ void MainComponent::showPreferences()
                 applyStreamMirrorFromPrefs(/*showErrors*/ true);   // デバイス変更を即反映
         };
     }
+    // アプリ音声取り込み (Windows のみ・アプリ全体設定)。即時保存 + 開始/停止/ゲインを即反映。
+    if (dlg->appCapUi)
+    {
+        // 候補 = ダイアログを開いた時点で音声セッションを持つアプリ。保存済みの対象が
+        // 今回の列挙に無い (未起動等) 場合も選択を維持できるよう末尾に足す
+        for (const auto& app : AppAudioCapture::listAudioApps())
+        {
+            dlg->appCapAppExes.add(app.executable);
+            dlg->appCapAppCombo.addItem(app.displayName, 100 + dlg->appCapAppExes.size() - 1);
+        }
+        if (appPrefs.appCaptureApp.isNotEmpty()
+            && !dlg->appCapAppExes.contains(appPrefs.appCaptureApp, /*ignoreCase*/ true))
+        {
+            dlg->appCapAppExes.add(appPrefs.appCaptureApp);
+            dlg->appCapAppCombo.addItem(appPrefs.appCaptureApp, 100 + dlg->appCapAppExes.size() - 1);
+        }
+
+        dlg->appCapBtn.setToggleState(appPrefs.appCaptureEnabled, juce::dontSendNotification);
+        dlg->appCapAppCombo.setEnabled(appPrefs.appCaptureEnabled);
+        dlg->appCapGainSlider.setValue(appPrefs.appCaptureGainDb, juce::dontSendNotification);
+        {
+            int selId = 0;   // 0 = 未選択 (「アプリを選択…」表示・取り込みは開始しない)
+            if (appPrefs.appCaptureApp.isNotEmpty())
+            {
+                const int idx = dlg->appCapAppExes.indexOf(appPrefs.appCaptureApp, /*ignoreCase*/ true);
+                if (idx >= 0) selId = 100 + idx;
+            }
+            dlg->appCapAppCombo.setSelectedId(selId, juce::dontSendNotification);
+        }
+        dlg->onAppCapChanged = [this, dlg](bool v) {
+            appPrefs.appCaptureEnabled = v;
+            appPrefs.save();
+            dlg->appCapAppCombo.setEnabled(v);
+            // ON にしたのに対象が未選択なら、コンボを開いて選択を促す (選んだ瞬間に開始される)
+            if (v && dlg->appCapAppCombo.getSelectedId() == 0)
+            {
+                dlg->appCapAppCombo.showPopup();
+                return;
+            }
+            applyAppCaptureFromPrefs(/*showErrors*/ true);
+        };
+        dlg->onAppCapAppChanged = [this](juce::String exe) {
+            appPrefs.appCaptureApp = exe;
+            appPrefs.save();
+            if (appPrefs.appCaptureEnabled)
+                applyAppCaptureFromPrefs(/*showErrors*/ true);   // 対象変更を即反映
+        };
+        dlg->onAppCapGainChanged = [this](double db) {
+            appPrefs.appCaptureGainDb = juce::jlimit(-60.0, 12.0, db);
+            appPrefs.save();
+            audioEngine.setAppCaptureGain(
+                juce::Decibels::decibelsToGain((float) appPrefs.appCaptureGainDb));
+        };
+    }
     // MIDI 入力 (アプリ全体設定)。即時保存 + デバイスの開閉を即反映。
     {
         for (const auto& d : juce::MidiInput::getAvailableDevices())
@@ -1111,6 +1232,9 @@ void MainComponent::showPreferences()
         appPrefs.multicoreAudio     = defPrefs.multicoreAudio;
         appPrefs.streamMirrorEnabled = defPrefs.streamMirrorEnabled;
         appPrefs.streamMirrorDevice  = defPrefs.streamMirrorDevice;
+        appPrefs.appCaptureEnabled   = defPrefs.appCaptureEnabled;
+        appPrefs.appCaptureApp       = defPrefs.appCaptureApp;
+        appPrefs.appCaptureGainDb    = defPrefs.appCaptureGainDb;
         appPrefs.midiInputEnabled    = defPrefs.midiInputEnabled;
         appPrefs.midiInputDevice     = defPrefs.midiInputDevice;
         appPrefs.uiScale            = defPrefs.uiScale;
@@ -1124,6 +1248,7 @@ void MainComponent::showPreferences()
         audioEngine.setDiskStreamingEnabled(appPrefs.diskStreaming);
         audioEngine.setMulticoreAudioEnabled(appPrefs.multicoreAudio);
         applyStreamMirrorFromPrefs(/*showErrors*/ false);   // 既定 OFF へ (ミラー停止)
+        applyAppCaptureFromPrefs(/*showErrors*/ false);     // 既定 OFF へ (取り込み停止)
         applyMidiInputFromPrefs(/*showErrors*/ false);      // 既定 OFF へ (MIDI 入力を閉じる)
         syncInputMonitorStateToEngine();   // モニタ FX 経路を既定 (ON) に戻す
         dlg->showMidiExportBtn.setToggleState(appPrefs.showMidiExportMenu, juce::dontSendNotification);
@@ -1140,6 +1265,13 @@ void MainComponent::showPreferences()
         dlg->mirrorBtn.setToggleState(appPrefs.streamMirrorEnabled, juce::dontSendNotification);
         dlg->mirrorDevCombo.setSelectedId(0, juce::dontSendNotification);   // 未選択へ戻す
         dlg->mirrorDevCombo.setEnabled(appPrefs.streamMirrorEnabled);
+        if (dlg->appCapUi)
+        {
+            dlg->appCapBtn.setToggleState(appPrefs.appCaptureEnabled, juce::dontSendNotification);
+            dlg->appCapAppCombo.setSelectedId(0, juce::dontSendNotification);   // 未選択へ戻す
+            dlg->appCapAppCombo.setEnabled(appPrefs.appCaptureEnabled);
+            dlg->appCapGainSlider.setValue(appPrefs.appCaptureGainDb, juce::dontSendNotification);
+        }
         dlg->midiInBtn.setToggleState(appPrefs.midiInputEnabled, juce::dontSendNotification);
         dlg->midiInDevCombo.setSelectedId(0, juce::dontSendNotification);   // 未選択へ戻す
         dlg->midiInDevCombo.setEnabled(appPrefs.midiInputEnabled);
@@ -1192,6 +1324,36 @@ void MainComponent::applyStreamMirrorFromPrefs(bool showErrors)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"配信ミラー出力"))
                 .withMessage(tr(u8"配信ミラー出力を開始できませんでした。") + "\n" + err)
+                .withButton("OK"), nullptr);
+    }
+}
+
+// アプリ音声取り込みの開始/停止/ゲインを appPrefs に同期させる (起動時と環境設定変更時に呼ぶ)。
+// 非対応環境 (macOS 等) では isSupported()=false + start がエラーを返すため実質 no-op。
+// 対象アプリの未起動はエラーにならない (キャプチャスレッドが待機し、起動したら自動で拾う)
+void MainComponent::applyAppCaptureFromPrefs(bool showErrors)
+{
+    // ゲインは取り込みの ON/OFF に依らず常にエンジンへ反映 (次に開始した時から効く)
+    audioEngine.setAppCaptureGain(
+        juce::Decibels::decibelsToGain((float) appPrefs.appCaptureGainDb));
+
+    // 対象未選択の間は開始しない (streamMirror の「未選択は開始しない」と同じ作法)
+    if (!AppAudioCapture::isSupported()
+        || !appPrefs.appCaptureEnabled || appPrefs.appCaptureApp.isEmpty())
+    {
+        appCapture.stop();
+        return;
+    }
+
+    const juce::String err = appCapture.start(appPrefs.appCaptureApp, audioEngine);
+    if (err.isNotEmpty())
+    {
+        DBG("AppAudioCapture start failed: " << err);
+        if (showErrors)
+            juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle(tr(u8"アプリ音声の取り込み"))
+                .withMessage(tr(u8"アプリ音声の取り込みを開始できませんでした。") + "\n" + err)
                 .withButton("OK"), nullptr);
     }
 }
