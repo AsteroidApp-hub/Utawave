@@ -240,6 +240,67 @@ void AudioEngine::setMirrorRing(std::shared_ptr<StreamMirrorRing> ring)
     publishMirrorRing(std::move(ring));
 }
 
+// ── アプリ音声取り込みリングの公開 (mirror と同じ作法・drain 無し) ──
+// リングは AppAudioCapture 側も shared_ptr で所有するため use_count で「audio だけが残り」を
+// 判定できない。退役リストが「audio thread が最後の所有者になって解放する」ことだけを防ぐ。
+void AudioEngine::publishAppCaptureRing(std::shared_ptr<StreamMirrorRing> next)
+{
+    std::shared_ptr<StreamMirrorRing> old;
+    {
+        const juce::SpinLock::ScopedLockType l(appCaptureRingLock);
+        old = std::move(activeAppCaptureRing);
+        activeAppCaptureRing = std::move(next);
+    }
+    {
+        const juce::ScopedLock r(reclaimLock);
+        if (old) retiredAppCaptureRings.push_back(std::move(old));
+    }
+    sweepRetiredAppCaptureRings();
+}
+
+void AudioEngine::sweepRetiredAppCaptureRings()
+{
+    const juce::ScopedLock r(reclaimLock);
+    retiredAppCaptureRings.erase(
+        std::remove_if(retiredAppCaptureRings.begin(), retiredAppCaptureRings.end(),
+                       [](const std::shared_ptr<StreamMirrorRing>& c) { return c.use_count() == 1; }),
+        retiredAppCaptureRings.end());
+}
+
+void AudioEngine::setAppCaptureRing(std::shared_ptr<StreamMirrorRing> ring)
+{
+    // mirror と違い SR は触らない: ソース SR はキャプチャ側のもので、登録側が
+    // ring->reset(captureSR) してから渡す契約 (ヘッダのコメント参照)。
+    publishAppCaptureRing(std::move(ring));
+}
+
+// アプリ音声取り込み: キャプチャリングから読んで出力へ加算する (ライブ専用)。
+// scratch はデバイスバッファ長で確保済みだが、numSamples がそれを超えるブロック
+// (デバイス再起動の不整合期間) はチャンク分割で境界内に収める (applyDelayLine と同じガード。
+// reader は逐次状態なので分割しても連続読みになる)。
+void AudioEngine::mixAppCapture(StreamMirrorRing& ring, float* const* outputChannelData,
+                                int numOutputChannels, int numSamples) noexcept
+{
+    if (numOutputChannels <= 0 || outputChannelData[0] == nullptr) return;
+    const int cap = (int) appCapScratchL.size();
+    if (cap <= 0) return;
+
+    const float g = appCaptureGainLinear.load(std::memory_order_relaxed);
+    float* outL = outputChannelData[0];
+    float* outR = (numOutputChannels > 1) ? outputChannelData[1] : nullptr;
+
+    int done = 0;
+    while (done < numSamples)
+    {
+        const int m = juce::jmin(numSamples - done, cap);
+        appCaptureReader.pull(ring, appCapScratchL.data(), appCapScratchR.data(), m, currentSampleRate);
+        juce::FloatVectorOperations::addWithMultiply(outL + done, appCapScratchL.data(), g, m);
+        if (outR != nullptr)
+            juce::FloatVectorOperations::addWithMultiply(outR + done, appCapScratchR.data(), g, m);
+        done += m;
+    }
+}
+
 void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo, float pan, float volumeDb)
 {
     // 停止中モニタでも audio thread が processBlock できるよう、現 SR/blockSize で prepare しておく
@@ -1411,6 +1472,12 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
             activeMirrorRing->reset(currentSampleRate);
     }
 
+    // アプリ音声取り込み用スクラッチ (audio thread でのヒープ確保回避)。リング自体は触らない
+    // (ソース SR はキャプチャ側のもので、エンジンのデバイス再起動では変わらない。reader の
+    // SR 変換は毎ブロック dstRate = currentSampleRate を読むので勝手に追従する)。
+    appCapScratchL.assign((size_t) currentBufferSize, 0.0f);
+    appCapScratchR.assign((size_t) currentBufferSize, 0.0f);
+
     // audio callback のアクティブトラック収集スクラッチを事前確保 (毎ブロックの再確保回避)。
     // clear() で長さ 0 に戻しても容量は保たれるため、以後 push_back で再確保が起きない。
     activeTrackIdxScratch.reserve(64);
@@ -2470,6 +2537,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // shared_ptr を grab している間はリングが破棄されない (解除後も退役リストが回収まで保持)。
     std::shared_ptr<StreamMirrorRing> mirror;
     { const juce::SpinLock::ScopedLockType l(mirrorRingLock); mirror = activeMirrorRing; }
+
+    // アプリ音声取り込みリング (非 null ならモニタ返し合算後・ミラー tap 前に出力へ加算する)。
+    std::shared_ptr<StreamMirrorRing> appCap;
+    { const juce::SpinLock::ScopedLockType l(appCaptureRingLock); appCap = activeAppCaptureRing; }
     PluginChain* const monChain    = (monCfg ? monCfg->chain : nullptr);
     const int          monInputCh  = (monCfg ? monCfg->inputCh : 0);
     const bool         monStereo   = (monCfg ? monCfg->stereo  : false);
@@ -2879,6 +2950,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         mixInputMonitoring(inputChannelData, numInputChannels,
                            outputChannelData, numOutputChannels, numSamples, monChain,
                            monInputCh, monStereo, monPan, monGain);
+
+        // アプリ音声取り込み (ブラウザ等): モニタ返し合算後・ミラー tap 前に加算する
+        // (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
+        if (appCap != nullptr)
+            mixAppCapture(*appCap, outputChannelData, numOutputChannels, numSamples);
 
         // 配信ミラー出力: 停止中の最終出力 (モニタ返し込み = 配信で喋っている声) も複製する
         if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)
@@ -3552,6 +3628,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     mixInputMonitoring(inputChannelData, numInputChannels,
                        outputChannelData, numOutputChannels, numSamples, monChain,
                        monInputCh, monStereo, monPan, monGain);
+
+    // アプリ音声取り込み (ブラウザ等): モニタ返し合算後・ミラー tap 前に加算する
+    // (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
+    if (appCap != nullptr)
+        mixAppCapture(*appCap, outputChannelData, numOutputChannels, numSamples);
 
     // 配信ミラー出力: 最終出力が確定した時点 (モニタ返し合算後・以降は録音/計測のみ) で複製する
     if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)

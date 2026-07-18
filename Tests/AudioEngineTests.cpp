@@ -413,6 +413,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testMonitorThroughInserts();
         testStoppedPluginPreview();
         testLiveMidiInput();
+        testAppCaptureMix();
         testDiskStreamingDeterminism();
         testMulticoreDeterminism();
         testEmptyRangeOfflineRender();
@@ -611,6 +612,122 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         s.engine.renderOfflineRange(0.0, 1.0e-6, out);
         expectEquals(out.getNumChannels(), 2, "empty range yields a 2-channel buffer");
         expectEquals(out.getNumSamples(),  0, "empty range yields 0 samples");
+    }
+
+    // アプリ音声取り込み (ブラウザ等の音を出力へ混ぜるライブ専用入力) の統合テスト。
+    // writer (キャプチャスレッド) の代わりにテストが ring へ push し、reader (audio thread) 側の
+    // 経路 = 「モニタ返し合算後・ミラー tap 前の加算」を停止/再生ブランチの両方で固定する。
+    // 録音に乗らないことは経路が構造的に別 (録音は inputChannelData を writer へ書く・
+    // 取り込みは outputChannelData にしか触れない) なので個別検証しない。
+    void testAppCaptureMix()
+    {
+        beginTest("app capture: ring mixes into output + mirror, honours gain, detaches");
+        {
+            AudioEngine engine;
+            FakeAudioIODevice device;
+            engine.audioDeviceAboutToStart(&device);
+
+            auto ring = std::make_shared<StreamMirrorRing>();
+            ring->reset(kSR);                    // キャプチャ側 SR = エンジン SR (ratio 1・契約どおり登録前に reset)
+            engine.setAppCaptureRing(ring);
+            engine.setAppCaptureGain(0.5f);
+
+            auto mirror = std::make_shared<StreamMirrorRing>();
+            engine.setMirrorRing(mirror);
+
+            std::vector<float> inSilence((size_t) kBlock, 0.0f);
+            const float* ins[2] = { inSilence.data(), inSilence.data() };
+            std::vector<float> outL((size_t) kBlock), outR((size_t) kBlock);
+            float* outs[2] = { outL.data(), outR.data() };
+
+            auto pushConst = [&ring](int n)
+            {
+                std::vector<float> l((size_t) n, 0.8f), r((size_t) n, 0.4f);
+                ring->push(l.data(), r.data(), n);
+            };
+            auto runBlock = [&] { engine.audioDeviceIOCallbackWithContext(ins, 2, outs, 2, kBlock, {}); };
+
+            // (1) priming: 目標水位 (50ms) に達するまでは無音。最初の pull で primeFrom = 0 が確定する
+            runBlock();
+            expect(std::abs(outL[0]) < 1.0e-6f, "silent before any capture data");
+
+            const int target = (int) (kSR * 0.05);   // reader の既定目標水位 = 2400 @48k
+            pushConst(target);
+            runBlock();
+            expect(std::abs(outL[0] - 0.8f * 0.5f) < 1.0e-4f, "L = capture * gain (stopped branch)");
+            expect(std::abs(outR[0] - 0.4f * 0.5f) < 1.0e-4f, "R = capture * gain (stopped branch)");
+
+            // (2) ミラー (→OBS) にも乗る: ミラーの内容 = 最終出力 (取り込み音込み)
+            {
+                bool match = true;
+                const juce::uint64 w = mirror->getWritePos();
+                for (int i = 0; i < kBlock; ++i)
+                {
+                    if (mirror->sampleL(w - (juce::uint64) kBlock + (juce::uint64) i) != outL[(size_t) i]) match = false;
+                    if (mirror->sampleR(w - (juce::uint64) kBlock + (juce::uint64) i) != outR[(size_t) i]) match = false;
+                }
+                expect(match, "mirror receives final output including capture audio");
+            }
+
+            // (3) ゲイン変更の即時反映 (push/pull を釣り合わせて水位を保つ)
+            engine.setAppCaptureGain(1.0f);
+            pushConst(kBlock);
+            runBlock();
+            expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "gain change applies immediately");
+
+            // (4) 枯渇 (ブラウザ一時停止相当): push 無しで水位が尽きると無音へ落ちる
+            for (int b = 0; b < 8; ++b) runBlock();
+            expect(std::abs(outL[0]) < 1.0e-6f, "starved ring yields silence");
+
+            // (5) 復帰: 目標水位まで溜め直せば再び鳴る (re-prime)
+            pushConst(target);
+            runBlock();
+            expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "resumes after re-priming");
+
+            // (6) 解除後は混ざらない
+            engine.setAppCaptureRing(nullptr);
+            pushConst(kBlock);
+            runBlock();
+            expect(std::abs(outL[0]) < 1.0e-6f, "detached ring no longer mixes");
+        }
+
+        beginTest("app capture: mixes on top of playback (playing branch)");
+        {
+            auto wav = tempDir.getChildFile("appcap_c05.wav");
+            expect(writeMonoConstWav(wav, (int) kSR * 2, 0.5f), "source write");
+
+            Scene s;
+            s.addConstTrack(wav, 2.0);
+            s.start();
+
+            auto ring = std::make_shared<StreamMirrorRing>();
+            ring->reset(kSR);
+            s.engine.setAppCaptureRing(ring);
+            s.engine.setAppCaptureGain(1.0f);
+
+            std::vector<float> inSilence((size_t) kBlock, 0.0f);
+            const float* ins[2] = { inSilence.data(), inSilence.data() };
+            std::vector<float> outL((size_t) kBlock), outR((size_t) kBlock);
+            float* outs[2] = { outL.data(), outR.data() };
+            auto runBlock = [&] { s.engine.audioDeviceIOCallbackWithContext(ins, 2, outs, 2, kBlock, {}); };
+            auto pushConst = [&ring](int n)
+            {
+                std::vector<float> l((size_t) n, 0.8f), r((size_t) n, 0.8f);
+                ring->push(l.data(), r.data(), n);
+            };
+
+            s.engine.play();
+            runBlock();                              // primeFrom 確定
+            pushConst((int) (kSR * 0.05));           // 目標水位ちょうどでプライム
+            // デクリック過渡を流しつつ push/pull を釣り合わせる
+            for (int b = 0; b < 10; ++b) { runBlock(); pushConst(kBlock); }
+            runBlock();
+            // クリップ 0.5 (mono→L/R 複製・center 減衰なし) + 取り込み 0.8 = 1.3
+            expect(std::abs(outL[0] - 1.3f) < 0.01f, "L = clip + capture while playing");
+            expect(std::abs(outR[0] - 1.3f) < 0.01f, "R = clip + capture while playing");
+
+            s.engine.setAppCaptureRing(nullptr);
+        }
     }
 
     void testDiskStreamingDeterminism()
