@@ -1511,7 +1511,9 @@ void MainComponent::syncAppCaptureTracks()
                     if (entry.capture->start(exe, audioEngine.getSampleRate()).isEmpty())
                     {
                         entry.voice = std::make_shared<AudioEngine::AppCaptureVoice>();
-                        entry.voice->ring = entry.capture->getRing();
+                        entry.voice->ring  = entry.capture->getRing();
+                        // INS チェーン (Track 所有・寿命は clearPlayback の drain バリア契約)
+                        entry.voice->chain = &c.track->getPluginChain();
                     }
                     else
                         entry.capture.reset();   // 失敗 (非対応環境等) は voice 無しで保持
@@ -1536,6 +1538,9 @@ void MainComponent::syncAppCaptureTracks()
         for (auto& e : appTrackCaptures)
             if (e.track == c.track && e.voice != nullptr)
             {
+                // INS チェーンの prepare 保証 (プラグイン追加/デバイス再起動に毎 tick 追従。
+                // prepare 済みならチェック 1 回で抜ける = 軽量)
+                audioEngine.ensureLiveChainPrepared(c.track->getPluginChain());
                 const float vol  = juce::Decibels::decibelsToGain(c.track->getVolume(), -60.0f);
                 const float pan  = c.track->getPan();
                 const float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);

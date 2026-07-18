@@ -279,6 +279,34 @@ bool AudioEngine::hasAppCaptureVoices()
     return activeAppCapVoices != nullptr && !activeAppCapVoices->empty();
 }
 
+// clearPlayback 用: 退役した voice config を audio thread が手放すまで待つ (500ms 上限)。
+// config vector は engine (active/retired) と audio の一時 grab しか持たないため必ず収束する
+// (MainComponent が持つのは個々の voice で、この vector ではない)
+void AudioEngine::drainRetiredAppCapVoices()
+{
+    const auto deadline = juce::Time::getMillisecondCounter() + 500;
+    for (;;)
+    {
+        {
+            const juce::ScopedLock r(reclaimLock);
+            bool busy = false;
+            for (auto& c : retiredAppCapVoices)
+                if (c.use_count() > 1) { busy = true; break; }
+            if (!busy) { retiredAppCapVoices.clear(); return; }
+        }
+        if (juce::Time::getMillisecondCounter() > deadline) { jassertfalse; return; }
+        juce::Thread::sleep(1);
+    }
+}
+
+void AudioEngine::ensureLiveChainPrepared(PluginChain& chain)
+{
+    if (chain.getActivePluginCountAtomic() > 0
+        && currentSampleRate > 0.0 && currentBufferSize > 0
+        && !chain.isPreparedFor(currentSampleRate, currentBufferSize))
+        chain.prepareToPlay(currentSampleRate, currentBufferSize);
+}
+
 // アプリ音声取り込み (アプリケーショントラック): 各 voice のリングから読み、トラックの
 // Vol×Pan / Mute / Solo を適用して出力へ加算する (ライブ専用・録音/書き出しに乗らない)。
 // scratch はデバイスバッファ長で確保済みだが、numSamples がそれを超えるブロック
@@ -328,6 +356,16 @@ void AudioEngine::mixAppCapture(const AppCaptureVoices& voices, const PlaybackSn
         {
             const int m = juce::jmin(numSamples - done, cap);
             v->reader.pull(*v->ring, appCapScratchL.data(), appCapScratchR.data(), m, currentSampleRate);
+            // INS チェーン (トラックの FX) を vol/pan の前に掛ける。空チェーンはロックも取らず
+            // 素通り (getActivePluginCountAtomic)。ライブ経路なので PDC はかけない (モニタと同じ)。
+            // chain の生存は clearPlayback の drain バリア契約 (voice 宣言部コメント参照)
+            if (v->chain != nullptr && v->chain->getActivePluginCountAtomic() > 0)
+            {
+                float* chans[2] = { appCapScratchL.data(), appCapScratchR.data() };
+                juce::AudioBuffer<float> cb(chans, 2, m);
+                appCapMidiScratch.clear();
+                v->chain->processBlock(cb, appCapMidiScratch, &playHead);
+            }
             if (audible)
             {
                 juce::FloatVectorOperations::addWithMultiply(outL + done, appCapScratchL.data(), gL, m);
@@ -350,6 +388,7 @@ void AudioEngine::mixAppCapture(const AppCaptureVoices& voices, const PlaybackSn
                              trackOutVUSmoothL[t], trackOutVUSmoothR[t],
                              trackOutVUL[t], trackOutVUR[t], vuCoef,
                              audible ? gL : 0.0f, audible ? gR : 0.0f);
+            trackMeterFed[t] = 1;   // 後段の未測定トラック減衰ループに消させない
         }
     }
 }
@@ -1282,6 +1321,12 @@ void AudioEngine::clearPlayback()
     // モニター FX チェーンも空にして drain する。この後に呼び出し側が Track (= その PluginChain) を
     // 破棄しても、audio thread が旧 config 経由でチェーンを叩かないことを保証する (UAF バリア)。
     publishMonConfig(std::make_shared<MonitorConfig>(), /*drain=*/ true);
+
+    // アプリケーショントラックの voice 集合も空にして drain する (voice の chain = Track 所有の
+    // UAF バリア)。voice/リング自体は MainComponent が所有し続け、次の syncAppCaptureTracks
+    // tick が現存トラックから再公開する (その間の取り込み音は ~50ms 途切れるだけ)
+    publishAppCaptureVoices(nullptr);
+    drainRetiredAppCapVoices();
 
     // allNotesOff は audio thread が processBlock で Voice 集合を触っている最中に
     // UI thread から直接呼ぶと未定義動作になりうるため、stop()/rewind() と同じく
@@ -2939,6 +2984,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
             }
         }
 
+        // アプリケーショントラック (アプリ音声取り込み): マスターメータ測定の前に出力へ加算する
+        // (メータに取り込み音が乗る = トータルレベルを管理できる。モニタ返しは従来どおり測定外)。
+        // 録音の生入力経路には乗らない。ミラーは末尾 tap なので同様に乗る
+        if (appCap != nullptr && !appCap->empty())
+            mixAppCapture(*appCap, *snap, outputChannelData, numOutputChannels, numSamples, vuCoef);
+
         // ── 停止時のマスターメータ ──
         // プレビュー / ライブ MIDI の音が出ているブロックはその出力を測定して反映し
         // (弾いた音で Peak・VU が動くように)、無音なら従来どおり徐々に減衰させて 0 に落とす。
@@ -3003,11 +3054,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         mixInputMonitoring(inputChannelData, numInputChannels,
                            outputChannelData, numOutputChannels, numSamples, monChain,
                            monInputCh, monStereo, monPan, monGain);
-
-        // アプリ音声取り込み (アプリケーショントラック): モニタ返し合算後・ミラー tap 前に
-        // 加算する (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
-        if (appCap != nullptr && !appCap->empty())
-            mixAppCapture(*appCap, *snap, outputChannelData, numOutputChannels, numSamples, vuCoef);
 
         // 配信ミラー出力: 停止中の最終出力 (モニタ返し込み = 配信で喋っている声) も複製する
         if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)
@@ -3506,6 +3552,18 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     }
     workBuffer.applyGain(masterGain.load());
 
+    // アプリケーショントラック (アプリ音声取り込み): マスターチェーン/ゲインの後・出力コピーの
+    // 前に workBuffer へ加算する (post-master 扱いは従来どおり)。これで出力 (ヘッドホン)・
+    // 配信ミラー・マスターメータ (metering は workBuffer を測る) の全てに取り込み音が乗り、
+    // 録音 (生入力別経路) と書き出し (コールバック外) には乗らない
+    if (appCap != nullptr && !appCap->empty())
+    {
+        float* wb[2] = { workBuffer.getWritePointer(0),
+                         workBuffer.getNumChannels() >= 2 ? workBuffer.getWritePointer(1) : nullptr };
+        mixAppCapture(*appCap, *snap, wb, workBuffer.getNumChannels() >= 2 ? 2 : 1,
+                      numSamples, vuCoef);
+    }
+
     // 出力へコピー
     const int outCh = juce::jmin(numOutputChannels, workBuffer.getNumChannels());
     for (int ch = 0; ch < outCh; ++ch)
@@ -3687,11 +3745,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     mixInputMonitoring(inputChannelData, numInputChannels,
                        outputChannelData, numOutputChannels, numSamples, monChain,
                        monInputCh, monStereo, monPan, monGain);
-
-    // アプリ音声取り込み (アプリケーショントラック): モニタ返し合算後・ミラー tap 前に加算する
-    // (ヘッドホンと配信ミラーの両方に乗り、録音の生入力経路には乗らない)
-    if (appCap != nullptr && !appCap->empty())
-        mixAppCapture(*appCap, *snap, outputChannelData, numOutputChannels, numSamples, vuCoef);
 
     // 配信ミラー出力: 最終出力が確定した時点 (モニタ返し合算後・以降は録音/計測のみ) で複製する
     if (mirror != nullptr && numOutputChannels > 0 && outputChannelData[0] != nullptr)

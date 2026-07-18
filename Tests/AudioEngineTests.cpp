@@ -758,6 +758,21 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             { std::vector<float> l((size_t) kBlock, 0.8f); ring2->push(l.data(), l.data(), kBlock); }
             runBlock();
             expect(std::abs(outL[0] - 0.2f) < 1.0e-3f, "soloed voice plays alone (other voice silenced)");
+
+            // (9) INS チェーン: 取り込み音がトラックの FX (×2 ゲイン) を通り、
+            //     マスターメータ (Peak) にも取り込み音が乗る (トータルレベル管理)
+            voice3->solo.store(false);
+            PluginChain chain;
+            chain.addPlugin(std::make_unique<GainFakePlugin>(2.0f));
+            chain.prepareToPlay(kSR, kBlock);
+            voice2->chain = &chain;
+            engine.setAppCaptureVoices(makeVoices({ voice2 }));
+            // リングには 0.8 の在庫 (目標水位分) が残っているので、読まれるのは 0.8 → ×2 = 1.6
+            { std::vector<float> l((size_t) kBlock, 0.8f); ring2->push(l.data(), l.data(), kBlock); }
+            runBlock();
+            expect(std::abs(outL[0] - 1.6f) < 1.0e-3f, "INS chain applies to captured audio (0.8 x2)");
+            expect(engine.getPeakL() > 3.0f,
+                   "master peak meter reflects captured audio (~+4 dBFS)");
             engine.setAppCaptureVoices(nullptr);
         }
 

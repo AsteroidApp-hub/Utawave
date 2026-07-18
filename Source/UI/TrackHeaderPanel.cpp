@@ -205,8 +205,7 @@ void TrackHeaderPanel::mouseDown(const juce::MouseEvent& e)
                     const bool show = (result == 1);
                     for (int i = 0; i < trackManager.getTrackCount(); ++i)
                         if (auto* t = trackManager.getTrack(i))
-                            if (!t->isAppCaptureTrack())   // アプリトラックは INS 非対応 (常に非表示)
-                                t->setInsertSlotsVisible(show);
+                            t->setInsertSlotsVisible(show);
                     if (onTrackChanged) onTrackChanged();
                     resized();
                     repaint();
@@ -967,8 +966,7 @@ void TrackHeaderPanel::toggleAllInsertSlots()
     pendingInsApply = false;
     for (int i = 0; i < n; ++i)
         if (auto* t = trackManager.getTrack(i))
-            if (!t->isAppCaptureTrack())   // アプリトラックは INS 非対応 (常に非表示)
-                t->setInsertSlotsVisible(show);
+            t->setInsertSlotsVisible(show);
 
     // ヘッダ幅の再計算 + 全体レイアウト更新 (MainComponent::resized 経由)
     if (onTrackChanged) onTrackChanged();

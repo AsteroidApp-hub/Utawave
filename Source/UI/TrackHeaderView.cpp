@@ -882,7 +882,8 @@ void TrackHeaderView::paint(juce::Graphics& g)
         const int wLbl = juce::jmin(getWidth(), controlsWidth);
         const int panW = (wLbl - 34) / 2;
         const int revLblX = 30 + panW + 6;
-        g.drawText("Rev", revLblX, 44, 22, 12, juce::Justification::centredLeft);
+        if (!track.isAppCaptureTrack())   // アプリトラックは Rev 非対応 (スライダーも非表示)
+            g.drawText("Rev", revLblX, 44, 22, 12, juce::Justification::centredLeft);
     }
 
     // 入力レベルメータ（Peak + VU）-- クリックトラックや、縮めて収まらない時は表示しない
@@ -1095,7 +1096,8 @@ void TrackHeaderView::resized()
     volSlider.setVisible(showVolRow);
     // フォルダトラックは表示設定 (showFolderPanRevIns) で Pan/Rev を隠せる
     panSlider.setVisible(showPanRevRow && folderExtrasOn());
-    revSlider.setVisible(showPanRevRow && folderExtrasOn());
+    // アプリケーショントラックは Rev 非対応 (エンジンにリバーブ送り経路が無い) → 常に非表示
+    revSlider.setVisible(showPanRevRow && folderExtrasOn() && !track.isAppCaptureTrack());
 
     // INS スロット枠 (paint() で描いた外枠の内側にチップを敷く)
     if (slotsVisible && insAreaW > 0)

@@ -313,12 +313,20 @@ public:
         std::atomic<bool>  mute  { false };
         std::atomic<bool>  solo  { false };
         std::atomic<int>   trackIdx { -1 };           // トラック出力メータの feed 先 (-1 = 無し)
+        // トラックの INS チェーン (非所有・Track が所有)。取り込み音に vol/pan の前で掛かる。
+        // Track 破棄の単一経路 clearPlayback() が空 voice 集合を drain 付きで公開するため、
+        // audio thread が破棄済みチェーンを叩くことはない (monitor chain と同じ UAF バリア契約)。
+        // prepare は syncAppCaptureTracks が毎 tick ensureLiveChainPrepared で保証する
+        class PluginChain* chain { nullptr };
     };
     using AppCaptureVoices = std::vector<std::shared_ptr<AppCaptureVoice>>;
     // 現在のアプリケーショントラック集合を publish する (nullptr / 空 = 無効)。
     // 寿命の作法は setMirrorRing と同じ (SpinLock 差し替え + 退役リスト保持・drain 無し)。
     void setAppCaptureVoices(std::shared_ptr<const AppCaptureVoices> voices);
     bool hasAppCaptureVoices();   // UI のメータアイドルゲート用 (20Hz・SpinLock 下のポインタ読みのみ)
+    // ライブ経路のチェーン (アプリケーショントラックの INS 等) を現 SR/blockSize で prepare する
+    // (setMonitorChain の「停止中 prepare (肝)」と同じ作法・message thread から呼ぶ)
+    void ensureLiveChainPrepared(class PluginChain& chain);
 
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
@@ -688,7 +696,9 @@ private:
     std::vector<std::shared_ptr<const AppCaptureVoices>> retiredAppCapVoices;
     void publishAppCaptureVoices(std::shared_ptr<const AppCaptureVoices> next);
     void sweepRetiredAppCaptureVoices();
+    void drainRetiredAppCapVoices();   // clearPlayback 用: audio が旧 config を手放すまで待つ (chain UAF バリア)
     std::vector<float> appCapScratchL, appCapScratchR;   // aboutToStart で確保
+    juce::MidiBuffer   appCapMidiScratch;                // voice の chain 処理用 (audio thread 専用・常に空で渡す)
     void mixAppCapture(const AppCaptureVoices& voices, const PlaybackSnapshot& snap,
                        float* const* outputChannelData, int numOutputChannels,
                        int numSamples, float vuCoef) noexcept;

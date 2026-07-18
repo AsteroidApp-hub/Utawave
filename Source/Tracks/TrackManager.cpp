@@ -138,10 +138,12 @@ Track* TrackManager::addAppCaptureTrack(int insertAfter)
                                          formatManager, thumbnailCache,
                                          Track::paletteColour(nextColourIndex++));
     track->setStereo(true);
+    bool insVisible = false;
+    for (auto& t : tracks)
+        if (t->isInsertSlotsVisible()) { insVisible = true; break; }
+    track->setInsertSlotsVisible(insVisible);
     Track* ptr = track.get();
-    // INS はアプリ音声に効かないため常に非表示 (toggleAllInsertSlots 側も対象外にする)。
     // ヘッダビューは onChanged() で isAppCaptureTrack() を読んで作られるので先に確定させる
-    ptr->setInsertSlotsVisible(false);
     ptr->setAppCaptureTrack(true);
     if (insertAfter >= 0 && insertAfter < (int) tracks.size())
         tracks.insert(tracks.begin() + insertAfter + 1, std::move(track));
