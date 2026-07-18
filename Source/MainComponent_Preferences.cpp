@@ -59,7 +59,8 @@ void MainComponent::showPreferences()
         juce::ToggleButton appTracksBtn;
         juce::Label        exportLabel, startupLabel, streamLabel, midiInLabel;
         const bool         adsUi { AppPreferences::adsCompiledIn() };  // 広告がコンパイル時有効な時だけ UI を出す
-        const bool         appCapUi { AppAudioCapture::isSupported() }; // アプリケーショントラックは対応環境 (Windows) だけ UI を出す
+        // アプリケーショントラックは対応環境 (Windows) かつリリースゲート解放後だけ UI を出す
+        const bool         appCapUi { AppAudioCapture::releaseUnlocked && AppAudioCapture::isSupported() };
         juce::TextButton closeBtn, resetBtn;
         // 設定項目は縦に長いので Viewport でスクロールさせる (ウィンドウは従来の約半分の高さ)。
         // resetBtn / closeBtn だけはダイアログ下部に固定し、スクロールしなくても押せるようにする

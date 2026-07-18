@@ -129,7 +129,8 @@ MainComponent::MainComponent()
     trackHeaderPanel.folderTracksEnabled   = [this] { return appPrefs.enableFolderTracks; };
     trackHeaderPanel.onAddAppTrack         = [this] { addAppCaptureTrack(); };
     trackHeaderPanel.appTracksEnabled      = [this]
-        { return AppAudioCapture::isSupported() && appPrefs.enableAppCaptureTracks; };
+        { return AppAudioCapture::releaseUnlocked && AppAudioCapture::isSupported()
+              && appPrefs.enableAppCaptureTracks; };
     // フォルダトラックの Pan/Rev 表示 (環境設定「Pan・Rev をフォルダトラックに表示する」)
     trackHeaderPanel.folderExtrasEnabled   = [this] { return appPrefs.showFolderPanRev; };
     trackHeaderPanel.onAddFolderTrack      = [this] { addFolderTrack(); };
