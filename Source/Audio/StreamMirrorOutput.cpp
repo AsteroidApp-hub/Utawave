@@ -103,9 +103,11 @@ void StreamMirrorOutput::stop(AudioEngine& engine)
     }
     if (ring != nullptr)
     {
-        // 解除後もエンジンの退役リストが回収まで保持するので、ここで手放しても UAF にならない
-        engine.setMirrorRing(nullptr);
+        // 解除後もエンジンの退役リストが回収まで保持するので、ここで手放しても UAF にならない。
+        // 自分の所有を先に手放してから解除を publish する: publish 直後の sweep で use_count==1
+        // になり通常は即回収される (逆順だと次の publish まで ~1MB のリングが残留していた)
         ring.reset();
+        engine.setMirrorRing(nullptr);
     }
 }
 

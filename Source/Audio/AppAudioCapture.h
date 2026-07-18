@@ -31,7 +31,10 @@ class AppAudioCapture
 {
 public:
     AppAudioCapture();
-    ~AppAudioCapture();   // stop() を呼ぶ (AudioEngine より先に破棄されるようメンバ宣言順に注意)
+    // dtor はキャプチャスレッドの join のみ。エンジンからの解除は呼び出し側が破棄前に
+    // stop(engine) で行う契約 (StreamMirrorOutput と同じ。AudioEngine* を保持しないので
+    // メンバ宣言順への暗黙依存が無い。解除し忘れてもリングは shared_ptr 所有で UAF にならない)
+    ~AppAudioCapture();
 
     struct AppInfo
     {
@@ -56,7 +59,7 @@ public:
 
     // 停止 + エンジンから登録解除。リングは shared_ptr 所有 + エンジン側退役リスト保持なので
     // ここで手放しても安全 (StreamMirrorOutput::stop と同じ作法)。未開始なら no-op。
-    void stop();
+    void stop(AudioEngine& engine);
 
     bool isRunning() const;                 // start 済みか (待機中も true)
     bool isReceiving() const;               // 直近 ~1 秒にキャプチャパケットを受信したか (状態表示用)

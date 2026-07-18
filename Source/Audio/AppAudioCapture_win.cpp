@@ -47,6 +47,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <set>
 #include <thread>
 #include <unordered_map>
 
@@ -110,20 +111,75 @@ DWORD rootSameNameAncestor(DWORD pid, const std::unordered_map<DWORD, ProcInfo>&
     return cur;
 }
 
+// 音声セッションを持つプロセスの PID を全レンダーデバイス横断で集める (システム音・
+// 終了済みセッション・自プロセスは除外。Active/Inactive = 一時停止中は含める)。
+// COM 初期化済みスレッドで呼ぶ (message thread = JUCE が初期化済み /
+// キャプチャスレッド = threadMain の MTA)。listAudioApps と resolveTargetPidByName が共用。
+std::vector<DWORD> collectAudioSessionPids()
+{
+    std::vector<DWORD> pids;
+    const DWORD selfPid = GetCurrentProcessId();
+    ComPtr<IMMDeviceEnumerator> devEnum;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                __uuidof(IMMDeviceEnumerator), (void**) devEnum.reset())))
+        return pids;
+    ComPtr<IMMDeviceCollection> devices;
+    if (FAILED(devEnum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, devices.reset())))
+        return pids;
+    UINT devCount = 0;
+    devices->GetCount(&devCount);
+    for (UINT d = 0; d < devCount; ++d)
+    {
+        ComPtr<IMMDevice> dev;
+        if (FAILED(devices->Item(d, dev.reset()))) continue;
+        ComPtr<IAudioSessionManager2> mgr;
+        if (FAILED(dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+                                 (void**) mgr.reset())))
+            continue;
+        ComPtr<IAudioSessionEnumerator> sessions;
+        if (FAILED(mgr->GetSessionEnumerator(sessions.reset()))) continue;
+        int n = 0;
+        sessions->GetCount(&n);
+        for (int i = 0; i < n; ++i)
+        {
+            ComPtr<IAudioSessionControl> ctrl;
+            if (FAILED(sessions->GetSession(i, ctrl.reset()))) continue;
+            ComPtr<IAudioSessionControl2> c2;
+            if (FAILED(ctrl->QueryInterface(__uuidof(IAudioSessionControl2), (void**) c2.reset())))
+                continue;
+            if (c2->IsSystemSoundsSession() == S_OK) continue;
+            AudioSessionState st = AudioSessionStateInactive;
+            if (SUCCEEDED(ctrl->GetState(&st)) && st == AudioSessionStateExpired)
+                continue;
+            DWORD pid = 0;
+            if (FAILED(c2->GetProcessId(&pid)) || pid == 0 || pid == selfPid) continue;
+            pids.push_back(pid);
+        }
+    }
+    return pids;
+}
+
 // exe 名から対象 PID (同名最上位祖先) を解決する。見つからなければ 0。
 // 音声セッションの有無は問わない (ブラウザを開いただけ = まだ鳴っていない状態でも
 // アタッチしておき、鳴り始めたらパケットが流れる)。
+// 同名ルートが複数あるとき (別プロファイルの多重起動 / 親が終了して分断された孤児ツリー等) は
+// **実際に音声セッションを持っているルートを優先**する。最小 PID は起動順と無関係なので、
+// 名前だけで選ぶと無音側のツリーへアタッチする「有効なのに鳴らない」事故になる (レビュー #1)。
 DWORD resolveTargetPidByName(const juce::String& exe)
 {
     const auto map = snapshotProcesses();
-    DWORD best = 0;
+    std::set<DWORD> roots;
     for (const auto& kv : map)
         if (kv.second.exe.equalsIgnoreCase(exe))
+            roots.insert(rootSameNameAncestor(kv.first, map));
+    if (roots.empty()) return 0;
+    if (roots.size() > 1)
+        for (const DWORD spid : collectAudioSessionPids())
         {
-            const DWORD root = rootSameNameAncestor(kv.first, map);
-            if (best == 0 || root < best) best = root;
+            const DWORD r = rootSameNameAncestor(spid, map);
+            if (roots.count(r) > 0) return r;
         }
-    return best;
+    return *roots.begin();   // 単一ルート / どれも未再生なら決定論的に最小 PID
 }
 
 // exe の VersionInfo FileDescription (例 "Google Chrome")。取れなければ空 (best effort)。
@@ -168,11 +224,16 @@ class ActivationWaiter final : public IActivateAudioInterfaceCompletionHandler,
 public:
     ActivationWaiter() : done(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
 
-    // 完了を待って IAudioClient の所有権を取り出す (失敗/タイムアウトは nullptr)
-    IAudioClient* waitAndTake(DWORD timeoutMs)
+    // 完了を待って IAudioClient の所有権を取り出す (失敗/タイムアウト/中断は nullptr)。
+    // abortEvent (stop 用) が先に立ったら待ちを打ち切る — これが無いとオーディオサービスが
+    // 応答しない環境で stop() の join が最大 timeoutMs ブロックし UI が固まる (レビュー #5)
+    IAudioClient* waitAndTake(DWORD timeoutMs, HANDLE abortEvent)
     {
-        if (done == nullptr || WaitForSingleObject(done, timeoutMs) != WAIT_OBJECT_0)
-            return nullptr;
+        if (done == nullptr) return nullptr;
+        HANDLE handles[2] = { done, abortEvent };
+        const DWORD n = (abortEvent != nullptr) ? 2u : 1u;
+        if (WaitForMultipleObjects(n, handles, FALSE, timeoutMs) != WAIT_OBJECT_0)
+            return nullptr;   // 遅れて完了した client は dtor が解放する
         return client.exchange(nullptr);
     }
 
@@ -230,7 +291,8 @@ private:
 };
 
 // 指定 PID (プロセスツリー) のループバッククライアントをアクティベートする。
-IAudioClient* activateProcessLoopback(DWORD pid)
+// abortEvent = 停止要求で待ちを打ち切るイベント (Impl::hStop)。
+IAudioClient* activateProcessLoopback(DWORD pid, HANDLE abortEvent)
 {
     AUDIOCLIENT_ACTIVATION_PARAMS params = {};
     params.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
@@ -247,7 +309,7 @@ IAudioClient* activateProcessLoopback(DWORD pid)
     IAudioClient* client = nullptr;
     if (SUCCEEDED(ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
                                               __uuidof(IAudioClient), &pv, waiter, op.reset())))
-        client = waiter->waitAndTake(5000);
+        client = waiter->waitAndTake(5000, abortEvent);
     waiter->Release();
     return client;
 }
@@ -270,7 +332,6 @@ void makeFormat(WAVEFORMATEX& f, DWORD rate, bool isFloat)
 struct AppAudioCapture::Impl
 {
     juce::String exe;                              // 対象実行ファイル名
-    AudioEngine* engine = nullptr;
     std::shared_ptr<StreamMirrorRing> ring;
     std::thread th;
     std::atomic<bool> stopRequested { false };
@@ -286,6 +347,15 @@ struct AppAudioCapture::Impl
     }
 
     void waitRetry() { WaitForSingleObject(hStop, 2000); }
+
+    // キャプチャスレッドの停止 + join (エンジンからの解除は含まない)。未起動なら no-op
+    void stopThread()
+    {
+        if (!th.joinable()) return;
+        stopRequested.store(true);
+        if (hStop != nullptr) SetEvent(hStop);
+        th.join();
+    }
 
     void threadMain()
     {
@@ -315,8 +385,12 @@ struct AppAudioCapture::Impl
             { { wanted, true }, { 48000, true }, { 44100, true }, { 44100, false } };
         for (const auto& cand : candidates)
         {
+            // 先頭 (wanted) と同一の候補は再試行しない (48k エンジンでは第 2 候補が重複し、
+            // 失敗時のアクティベーション往復を無駄に倍払いするため・レビュー #6)
+            if (&cand != &candidates[0] && cand.rate == wanted && cand.isFloat)
+                continue;
             makeFormat(fmt, cand.rate, cand.isFloat);
-            IAudioClient* c = activateProcessLoopback(pid);
+            IAudioClient* c = activateProcessLoopback(pid, hStop);
             if (c == nullptr) break;               // アクティベーション不可 (OS 非対応等) → 再試行へ
             const HRESULT hr = c->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                              AUDCLNT_STREAMFLAGS_LOOPBACK
@@ -410,7 +484,12 @@ struct AppAudioCapture::Impl
 
 //==============================================================================
 AppAudioCapture::AppAudioCapture() : impl(std::make_unique<Impl>()) {}
-AppAudioCapture::~AppAudioCapture() { stop(); }
+
+// dtor はキャプチャスレッドの join のみ (エンジンからの解除は呼び出し側が stop(engine) で行う
+// 契約 = StreamMirrorOutput と同じ)。解除し忘れてもリングは shared_ptr 所有なので UAF には
+// ならない (writer 不在の枯渇無音になるだけ)。AudioEngine* を保持しないことで、メンバ宣言順
+// (破棄順) への暗黙依存を排除している (レビュー #3)
+AppAudioCapture::~AppAudioCapture() { impl->stopThread(); }
 
 bool AppAudioCapture::isSupported() { return true; }   // 本アプリの対応 OS (Win11+) は常に可
 
@@ -420,59 +499,25 @@ std::vector<AppAudioCapture::AppInfo> AppAudioCapture::listAudioApps()
     const DWORD selfPid = GetCurrentProcessId();
     const auto procs = snapshotProcesses();
 
-    ComPtr<IMMDeviceEnumerator> devEnum;
-    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                                __uuidof(IMMDeviceEnumerator), (void**) devEnum.reset())))
-        return result;
-    ComPtr<IMMDeviceCollection> devices;
-    if (FAILED(devEnum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, devices.reset())))
-        return result;
-    UINT devCount = 0;
-    devices->GetCount(&devCount);
-
-    // 全レンダーデバイス横断で音声セッションを集め、同名 exe (最上位祖先) に dedupe する
+    // 音声セッションを持つプロセスを集め (collectAudioSessionPids)、
+    // 同名 exe (最上位祖先) に dedupe する
     juce::StringArray seenExes;
-    for (UINT d = 0; d < devCount; ++d)
+    for (const DWORD pid : collectAudioSessionPids())
     {
-        ComPtr<IMMDevice> dev;
-        if (FAILED(devices->Item(d, dev.reset()))) continue;
-        ComPtr<IAudioSessionManager2> mgr;
-        if (FAILED(dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
-                                 (void**) mgr.reset())))
-            continue;
-        ComPtr<IAudioSessionEnumerator> sessions;
-        if (FAILED(mgr->GetSessionEnumerator(sessions.reset()))) continue;
-        int n = 0;
-        sessions->GetCount(&n);
-        for (int i = 0; i < n; ++i)
-        {
-            ComPtr<IAudioSessionControl> ctrl;
-            if (FAILED(sessions->GetSession(i, ctrl.reset()))) continue;
-            ComPtr<IAudioSessionControl2> c2;
-            if (FAILED(ctrl->QueryInterface(__uuidof(IAudioSessionControl2), (void**) c2.reset())))
-                continue;
-            if (c2->IsSystemSoundsSession() == S_OK) continue;
-            AudioSessionState st = AudioSessionStateInactive;
-            if (SUCCEEDED(ctrl->GetState(&st)) && st == AudioSessionStateExpired)
-                continue;   // 終了済みセッションは除外 (Active/Inactive = 一時停止中は含める)
-            DWORD pid = 0;
-            if (FAILED(c2->GetProcessId(&pid)) || pid == 0 || pid == selfPid) continue;
+        const DWORD root = rootSameNameAncestor(pid, procs);
+        if (root == selfPid) continue;
+        const auto it = procs.find(root);
+        if (it == procs.end() || it->second.exe.isEmpty()) continue;
+        const juce::String exe = it->second.exe;
+        if (seenExes.contains(exe, true)) continue;
+        seenExes.add(exe);
 
-            const DWORD root = rootSameNameAncestor(pid, procs);
-            if (root == selfPid) continue;
-            const auto it = procs.find(root);
-            if (it == procs.end() || it->second.exe.isEmpty()) continue;
-            const juce::String exe = it->second.exe;
-            if (seenExes.contains(exe, true)) continue;
-            seenExes.add(exe);
-
-            AppInfo info;
-            info.executable = exe;
-            info.pid = (juce::uint32) root;
-            const juce::String desc = fileDescriptionForProcess(root);
-            info.displayName = desc.isNotEmpty() ? desc + " (" + exe + ")" : exe;
-            result.push_back(std::move(info));
-        }
+        AppInfo info;
+        info.executable = exe;
+        info.pid = (juce::uint32) root;
+        const juce::String desc = fileDescriptionForProcess(root);
+        info.displayName = desc.isNotEmpty() ? desc + " (" + exe + ")" : exe;
+        result.push_back(std::move(info));
     }
 
     std::sort(result.begin(), result.end(),
@@ -483,13 +528,12 @@ std::vector<AppAudioCapture::AppInfo> AppAudioCapture::listAudioApps()
 
 juce::String AppAudioCapture::start(const juce::String& executable, AudioEngine& engine)
 {
-    stop();
+    stop(engine);
     const juce::String exe = executable.trim();
     if (exe.isEmpty())
         return tr(u8"取り込むアプリを選択してください");
 
     impl->exe = exe;
-    impl->engine = &engine;
     impl->preferredRate = engine.getSampleRate();
     impl->ring = std::make_shared<StreamMirrorRing>();
     // ソース SR はセッション確立時にキャプチャスレッドが reset(実フォーマット SR) で設定する。
@@ -503,19 +547,14 @@ juce::String AppAudioCapture::start(const juce::String& executable, AudioEngine&
     return {};
 }
 
-void AppAudioCapture::stop()
+void AppAudioCapture::stop(AudioEngine& engine)
 {
-    if (impl->th.joinable())
-    {
-        impl->stopRequested.store(true);
-        if (impl->hStop != nullptr) SetEvent(impl->hStop);
-        impl->th.join();
-        impl->th = {};
-    }
-    if (impl->engine != nullptr)
-        impl->engine->setAppCaptureRing(nullptr);
-    impl->engine = nullptr;
+    impl->stopThread();
+    // リングの解放順 (レビュー #7): 自分の所有を先に手放してから解除を publish する。
+    // publish 直後の sweep で use_count==1 になり通常は即回収される (逆順だと次の publish
+    // まで ~1MB のリングが退役リストに残留する)。join 済みなので writer はもういない
     impl->ring.reset();
+    engine.setAppCaptureRing(nullptr);
     impl->lastPacketMs.store(0);
 }
 
@@ -541,7 +580,7 @@ juce::String AppAudioCapture::start(const juce::String&, AudioEngine&)
 {
     return tr(u8"この環境ではアプリ音声の取り込みに対応していません");
 }
-void AppAudioCapture::stop() {}
+void AppAudioCapture::stop(AudioEngine&) {}
 bool AppAudioCapture::isRunning() const   { return false; }
 bool AppAudioCapture::isReceiving() const { return false; }
 juce::String AppAudioCapture::getTargetExecutable() const { return {}; }

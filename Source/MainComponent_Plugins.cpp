@@ -38,7 +38,7 @@ MainComponent::~MainComponent()
     removeKeyListener(this);
     if (isRecording) stopRecording();
     // アプリ音声取り込みを先に止める (キャプチャスレッド join + エンジンからリング登録解除)
-    appCapture.stop();
+    appCapture.stop(audioEngine);
     // 配信ミラーを先に止める (ミラーデバイス停止 + エンジンからリング登録解除の drain)
     streamMirror.stop(audioEngine);
     audioEngine.shutdown();

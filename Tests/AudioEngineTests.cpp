@@ -689,6 +689,27 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             pushConst(kBlock);
             runBlock();
             expect(std::abs(outL[0]) < 1.0e-6f, "detached ring no longer mixes");
+
+            // (7) リング差し替え (取り込み対象アプリの変更相当): 旧リングと同じ epoch (=1) の
+            //     新リングを事前充填付きで登録しても、reader がポインタ変化検出で作り直され
+            //     必ず溜め直し (priming) から始まる。リセットが無いと epoch 一致で再プライミングが
+            //     飛び、stale readPos との差分だけ溜まっていれば即読みされて 0.8 が漏れる (回帰)
+            auto ring2 = std::make_shared<StreamMirrorRing>();
+            ring2->reset(kSR);   // epoch 1 = 旧リングと同値 (衝突ケースを意図的に作る)
+            {
+                std::vector<float> l((size_t) 8000, 0.8f), r((size_t) 8000, 0.8f);
+                ring2->push(l.data(), r.data(), 8000);
+            }
+            engine.setAppCaptureRing(ring2);
+            runBlock();
+            expect(std::abs(outL[0]) < 1.0e-6f,
+                   "fresh ring re-primes (no stale reader state carryover)");
+            {
+                std::vector<float> l((size_t) target, 0.8f), r((size_t) target, 0.8f);
+                ring2->push(l.data(), r.data(), target);
+            }
+            runBlock();
+            expect(std::abs(outL[0] - 0.8f) < 1.0e-4f, "fresh ring plays after re-priming");
         }
 
         beginTest("app capture: mixes on top of playback (playing branch)");

@@ -285,6 +285,18 @@ void AudioEngine::mixAppCapture(StreamMirrorRing& ring, float* const* outputChan
     const int cap = (int) appCapScratchL.size();
     if (cap <= 0) return;
 
+    // リング差し替え (取り込み対象の変更等) を検出したら reader を作り直す (溜め直しから開始)。
+    // reader の再プライミングは epoch 差分で判定するため、旧リングと新リングの epoch が偶然
+    // 一致すると (どちらも 1 セッション目 = 1 など) stale な readPos のまま読み出しかねない。
+    // StreamMirrorOutput::start の reader 再構築と対になるエンジン側のリセット。
+    // 比較はポインタ値のみ (旧リングは退役リストが新 publish まで延命するのでアドレス再利用も
+    // 起きない)。appCapLastRing は audio thread 専用・参照外ししない
+    if (&ring != appCapLastRing)
+    {
+        appCaptureReader = StreamMirrorReader();
+        appCapLastRing   = &ring;
+    }
+
     const float g = appCaptureGainLinear.load(std::memory_order_relaxed);
     float* outL = outputChannelData[0];
     float* outR = (numOutputChannels > 1) ? outputChannelData[1] : nullptr;

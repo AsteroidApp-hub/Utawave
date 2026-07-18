@@ -675,6 +675,7 @@ private:
     void publishAppCaptureRing(std::shared_ptr<StreamMirrorRing> next);
     void sweepRetiredAppCaptureRings();
     StreamMirrorReader appCaptureReader;
+    StreamMirrorRing*  appCapLastRing { nullptr };   // reader 再構築の差し替え検出用 (audio thread 専用・参照外ししない)
     std::atomic<float> appCaptureGainLinear { 1.0f };
     std::vector<float> appCapScratchL, appCapScratchR;   // aboutToStart で確保
     void mixAppCapture(StreamMirrorRing& ring, float* const* outputChannelData,

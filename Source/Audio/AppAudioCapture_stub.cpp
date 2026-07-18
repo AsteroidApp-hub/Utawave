@@ -23,7 +23,7 @@ juce::String AppAudioCapture::start(const juce::String&, AudioEngine&)
     return tr(u8"この環境ではアプリ音声の取り込みに対応していません");
 }
 
-void AppAudioCapture::stop() {}
+void AppAudioCapture::stop(AudioEngine&) {}
 
 bool AppAudioCapture::isRunning() const   { return false; }
 bool AppAudioCapture::isReceiving() const { return false; }

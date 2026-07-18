@@ -1341,7 +1341,7 @@ void MainComponent::applyAppCaptureFromPrefs(bool showErrors)
     if (!AppAudioCapture::isSupported()
         || !appPrefs.appCaptureEnabled || appPrefs.appCaptureApp.isEmpty())
     {
-        appCapture.stop();
+        appCapture.stop(audioEngine);
         return;
     }
 
