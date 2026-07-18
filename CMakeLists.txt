@@ -70,6 +70,8 @@ target_sources(Utawave PRIVATE
     Source/Audio/FileStreamVoice.cpp
     Source/Audio/AudioWorkerPool.cpp
     Source/Audio/StreamMirrorOutput.cpp
+    $<$<PLATFORM_ID:Windows>:Source/Audio/AppAudioCapture_win.cpp>
+    $<$<NOT:$<PLATFORM_ID:Windows>>:Source/Audio/AppAudioCapture_stub.cpp>
     Source/Audio/PitchEngine.cpp
     Source/Audio/pitchcore/PitchShiftEngine.cpp
     Source/Audio/builtin/BuiltInEQ.cpp
