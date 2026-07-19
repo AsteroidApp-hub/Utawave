@@ -387,6 +387,17 @@
     <div class="tip"><b>If the mirror device makes sound:</b> in Windows, open "Settings &rarr; System &rarr; Sound &rarr; Output," select the mirror device, and lower its volume. Because streaming software captures Utawave's audio directly, in most setups only the speakers go quiet while the streamed audio stays (check the meter in your streaming software just in case). If you pick an output that produces no sound — an unused HDMI port, for example — this step is unnecessary.</div>
     <div class="tip"><b>If video and audio drift apart:</b> adjust Utawave's sync offset in the streaming software's advanced audio properties. The mirror's delay is constant, so you only need to set it once.</div>
     <p>The mirror is a copy of the output, so recording and export are unaffected. On macOS, the system's app audio capture (macOS 13 or later, with support in your streaming software) works directly, so the mirror output is usually unnecessary.</p>
+  
+    <h3>Application tracks (mix a browser or karaoke app into your stream — Windows)</h3>
+    <p><b>Capture the audio of a browser or karaoke app as a track</b> and mix it into your headphones and your stream along with your voice. No virtual cable needed. Captured audio is <b>never recorded or exported</b> (it is live-only, for streaming and practice).</p>
+    <ol class="step">
+      <li>Open Preferences → "Streaming" → turn on <b>"Enable application tracks"</b>.</li>
+      <li>Click "+" in the track list → <b>"Add application track"</b>.</li>
+      <li>Use the track's <b>"Select an app…"</b> button to pick an app that is currently playing audio (e.g. your browser).</li>
+      <li>Balance it against your voice with the track's volume and pan (M mutes it; you can also add effects to its INS slots).</li>
+    </ol>
+    <div class="tip"><b>Setup:</b> Point the Windows default output device (where apps play their audio) at <b>something other than your main audio interface</b> (e.g. the built-in speakers) and turn its volume down. As long as the app can play to some device, its audio can be captured.</div>
+    <div class="note">To mix several apps, add one application track per app. If the app restarts, the capture reconnects automatically. On macOS this feature is not needed — browser audio can play through the same device as Utawave.</div>
   </section>
 
   <section id="gestures">
