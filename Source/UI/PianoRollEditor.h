@@ -109,12 +109,25 @@ public:
     // 内部 Note 配列を再構築する。MidiNotesAction から呼ばれる。
     void reloadNotesFromClip();
 
+    // ── ノート編集コマンド (右クリックメニュー / ショートカット。テストからも直接呼ぶ) ──
+    void duplicateSelected();   // Cmd+D: 選択ノートを選択スパン分だけ後ろへ複製 (GRID 倍数へ切上げ)
+    void quantizeNoteEnds();    // 終端を GRID の最寄りへ (長さ側のクォンタイズ。選択 / 無選択は全ノート)
+    void equalizeLengths();     // 選択ノートの長さを「最も早いノート」の長さに揃える
+    void resolveOverlaps();     // 同一ピッチの重なりをトリム (内包は後発を削除。選択 / 無選択は全ノート)
+
     // ── テスト用シーム (UtawaveTests がレーン編集をヘッドレスで駆動する) ──
     // sendNotificationSync で本物のボタン/コンボ経路 (onClick / onChange) を同期実行する
     void setPenModeForTests(bool v)      { penBtn.setToggleState(v, juce::sendNotificationSync); }
     bool getPenModeForTests() const      { return penMode; }
     void setCtrlLaneForTests(int idx)    { selectCtrlLane((CtrlLane) idx); }
     bool hasCtrlSelectionForTests() const { return ctrlSelActive; }
+    int  getSelectedCountForTests() const { return (int) selected.size(); }
+    void setStepModeForTests(bool v)
+    {
+        setMidiInputAvailable(true);   // ボタンは MIDI 接続中のみ有効なので先に開放
+        stepBtn.setToggleState(v, juce::sendNotificationSync);
+    }
+    double getStepPosForTests() const { return stepPosSec; }
 
     // ── ステップ入力 (MIDI キーボードで順にノートを置く・I でトグル) ──
     // MainComponent が MIDI キーボードのノートを (message thread で) ここへ転送する。
@@ -179,6 +192,9 @@ private:
     void nudgeSelected(double secs, int semis);
     void legatoSelected();  // L: 選択ノートを次のノートの開始位置まで伸ばす (レガート)
     void quantizeSelected(); // Q: 選択ノート (未選択なら全ノート) の開始を GRID にスナップ
+    void showNoteContextMenu();  // ノート/選択の右クリックメニュー (終端クォンタイズ・重なり解消等)
+    // ノート名 ("C4" 等)。鍵盤ラベルと同じ表記 (オクターブ = pitch/12 - 1)
+    static juce::String noteNameFor(int pitch);
     void snapshotForUndo();  // 状態を内部 Undo スタックへ保存
 
     // ─ 描画ヘルパー ─
@@ -214,12 +230,17 @@ private:
     int  laneValueToY(int value, CtrlLane lane) const;
     int  laneEffectiveValueAt(double t, CtrlLane lane) const;  // t 時点の実効値 (直前イベント / 既定値)
     void removeLaneEventsBetween(double t1, double t2, CtrlLane lane);
-    void insertLaneEvent(const juce::MidiMessage& m);  // 時刻順を保って挿入
+    int  insertLaneEvent(const juce::MidiMessage& m);  // 時刻順を保って挿入 (挿入 index を返す)
+    // 既存イベント点の掴み調整 (素のクリックで点を掴んで値/時刻をドラッグ)。-1 = 非ヒット
+    int  hitTestCtrlPoint(juce::Point<int> p) const;
+    int  ctrlPointIdx { -1 };                          // ドラッグ中の ctrlMsgs index
+    static constexpr int kCtrlPointHitPx { 6 };
     // ドラッグ 1 点を適用 (前回点から線形補間で埋める)。erase=true は範囲の消去のみ
     void applyCtrlDragPoint(juce::Point<int> pos, bool erase);
     double ctrlDragLastT { -1.0 };
     int    ctrlDragLastV { 0 };
     bool   ctrlErasing   { false };
+    bool   ctrlFreeDraw  { false };   // Cmd+Option: GRID を一時解除して可変 (フリー) 描画
     static constexpr double kCtrlStepSec { 0.01 };  // GRID:Off 時の補間の最小間隔 (10ms)
 
     // レーンの時間範囲選択 (通常ドラッグ)。Delete で範囲内のレーンイベントを一括削除する
@@ -274,7 +295,22 @@ private:
 
     // ドラッグ状態
     enum class DragMode { None, MoveNotes, ResizeLeft, ResizeRight, RubberBand, AdjustVelocity,
-                          CreateNote, ResizeVelocityArea, DrawCtrl, SelectCtrlRange, RulerDrag };
+                          CreateNote, ResizeVelocityArea, DrawCtrl, SelectCtrlRange, RulerDrag,
+                          AuditionKey, VelocityRamp, MoveCtrlPoint };
+
+    // 左鍵盤クリックの試聴 (押している間鳴らす・縦ドラッグでグリッサンド)。-1 = 非試聴
+    int auditionPitch { -1 };
+
+    // ベロシティ一括編集: バードラッグ開始時の (index, 元 velocity)。ドラッグしたバーが
+    // 複数選択に含まれていれば選択全体へ同じ増減を適用する
+    std::vector<std::pair<int, float>> velDragOrig;
+    // ノートグリッド上の Cmd+Shift+ドラッグでのベロシティ調整 (和音でバーが重なっていても
+    // ノート自体を掴めば個別に調整できる)。true の間は絶対 y でなく相対 dy で増減する
+    bool velDragFromGrid { false };
+    // ベロシティのランプ描画 (バーの無い空きをドラッグ → 範囲内のノートに直線の値を適用)
+    double rampT0 { 0.0 }, rampT1 { 0.0 };
+    float  rampV0 { 0.0f }, rampV1 { 0.0f };
+    void   applyVelocityRamp();   // [rampT0..T1] のノートへ線形補間値を適用 (ドラッグ中毎回)
 
     // ルーラー (小節番号バー) のドラッグ: クリック = mouseUp で確定シーク / 縦ドラッグ = 横ズーム
     // (メインタイムラインの TimelineRuler::beginSeekDrag と同じ操作感。ズーム中に再生バーが
@@ -314,6 +350,7 @@ private:
     // snapshotForUndo() で保存した「編集前のシーケンス」。
     // 編集が完了したタイミング (callAsync) で MidiNotesAction として確定する。
     juce::MidiMessageSequence pendingBeforeSeq;
+    double                     pendingBeforeDur { 0.0 };   // Cmd+D のクリップ自動延長を undo で戻すため
     bool                       pendingCommit { false };
     // ドラッグ (ジェスチャ) 中は true。commit を mouseUp まで保留してドラッグ全体を
     // 1 つの Undo アクションにまとめる (callAsync 頼みだとドラッグイベントの合間に

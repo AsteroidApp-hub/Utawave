@@ -364,6 +364,7 @@ public:
     void setSelectionRange(double s, double e, bool active)
     {
         loopStartTV = s; loopEndTV = e; loopActiveTV = active;
+        syncMidiSelectionToRange();  // 範囲内の MIDI クリップも選択される (2026-07 要望)
         repaint();
         notifySelectionChanged();  // 範囲変化 → ヘッダの採用ボタン活性表示を更新
     }
@@ -527,11 +528,15 @@ private:
     // 構造編集 (分割/削除/Undo) 後、selectedMidiClip が実在しなくなっていたら選択を解除する
     // (作り直しや破棄で生ポインタがダングリングするのを防ぐ)
     void   clearMidiSelectionIfStale();
+    // 範囲選択の対象行にある MIDI クリップを選択へ同期する (範囲ドラッグで MIDI も選ばれる)
+    void   syncMidiSelectionToRange();
     // MIDI クリップの差し替え (分割/削除/作成) を Undo 対応で実行する。
     // toRemove を取り除き toAdd を生成。undo/redo で同一インスタンス復元 + ピアノロール整合。
+    // newTransaction=false で直前のトランザクションへ合流 (複数トラックの一括削除を 1 Undo に)
     void   pushMidiReplaceAction(Track* track,
                                  std::vector<MidiClip*> toRemove,
-                                 std::vector<EditActions::MidiClipReplaceAction::NewMidiClip> toAdd);
+                                 std::vector<EditActions::MidiClipReplaceAction::NewMidiClip> toAdd,
+                                 bool newTransaction = true);
     enum class DragMode { None, Move, FadeIn, FadeOut, ResizeLeft, ResizeRight, CrossfadeLeft, CrossfadeRight, CrossfadeCenter, Gain, GainPoint, Selection };
     DragMode getDragMode(const ClipRef& ref, int mouseX, int mouseY) const;
     juce::Rectangle<int> getContentArea() const;
@@ -613,9 +618,25 @@ private:
     // カーソルが当たっているフェードハンドル (FadeIn / FadeOut / None)。
     // その三角だけを強くハイライトして「掴める」ことを示す。
     DragMode   hoveredHandle { DragMode::None };
-    // MIDI クリップ選択 (AudioClip とは別系統)
+    // MIDI クリップ選択 (AudioClip とは別系統)。Shift/Cmd+クリックで複数選択できる
+    // (extraMidiSelections = プライマリ以外。トラックをまたいでもよい)
     MidiClip*  selectedMidiClip  { nullptr };
     Track*     selectedMidiTrack { nullptr };
+    std::vector<std::pair<MidiClip*, Track*>> extraMidiSelections;
+    bool isMidiClipSelected(const MidiClip* c) const
+    {
+        if (c == nullptr) return false;
+        if (c == selectedMidiClip) return true;
+        for (const auto& p : extraMidiSelections)
+            if (p.first == c) return true;
+        return false;
+    }
+    int selectedMidiClipCount() const
+    {
+        return (selectedMidiClip != nullptr ? 1 : 0) + (int) extraMidiSelections.size();
+    }
+    // 選択中の MIDI クリップのうち track 上のものを結合して 1 クリップにする (右クリックメニュー)
+    void mergeSelectedMidiClips(Track* track);
     DragMode   dragMode        { DragMode::None };
     double     dragStartSecs   { 0.0 };
     double     clipOrigStart   { 0.0 };

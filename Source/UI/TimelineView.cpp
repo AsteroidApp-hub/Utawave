@@ -1145,6 +1145,7 @@ void TimelineView::clearAllSelections()
     crossfadeNeighbor = nullptr;  // クロスフェードドラッグ相手の stale ポインタも防止
     selectedMidiClip  = nullptr;
     selectedMidiTrack = nullptr;
+    extraMidiSelections.clear();
     hoveredClip       = nullptr;  // 破棄系編集後の stale ポインタを防止 (次の mouseMove で再設定)
     hoveredHandle     = DragMode::None;
     notifySelectionChanged();     // 選択クリア → ヘッダの採用ボタンを dim に

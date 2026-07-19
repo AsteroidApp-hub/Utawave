@@ -1027,7 +1027,7 @@ void TimelineView::drawMidiClip(juce::Graphics& g, MidiClip& clip,
     // 背景: トラック色を薄く重ねる
     g.setColour(trackColour.withAlpha(0.25f));
     g.fillRoundedRectangle(r.toFloat(), 2.0f);
-    const bool isSelected = (&clip == selectedMidiClip);
+    const bool isSelected = isMidiClipSelected(&clip);
     if (isSelected)
     {
         // 選択中: 明るい縁取り + 内側ハイライト

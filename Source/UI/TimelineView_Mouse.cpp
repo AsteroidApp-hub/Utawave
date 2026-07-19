@@ -176,6 +176,31 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         }
     }
 
+    // ── MIDI クリップの Shift/Cmd+クリック = 複数選択トグル (トラックまたぎ可) ──
+    if (e.mods.isLeftButtonDown() && (e.mods.isCommandDown() || e.mods.isShiftDown())
+        && !e.mods.isAltDown())
+    {
+        if (auto mh = getMidiClipAt(e.x, e.y); mh.clip != nullptr)
+        {
+            if (selectedMidiClip == nullptr)
+            {
+                clearAllSelections();   // Audio 側の選択は混在させない
+                selectedMidiClip  = mh.clip;
+                selectedMidiTrack = mh.track;
+            }
+            else if (mh.clip != selectedMidiClip)
+            {
+                bool found = false;
+                for (auto it = extraMidiSelections.begin(); it != extraMidiSelections.end(); ++it)
+                    if (it->first == mh.clip) { extraMidiSelections.erase(it); found = true; break; }
+                if (!found) extraMidiSelections.emplace_back(mh.clip, mh.track);
+            }
+            notifySelectionChanged();
+            repaint();
+            return;
+        }
+    }
+
     // ── MIDI トラック上の左ボタン操作 (選択 / リサイズ / 移動 / 作成) ──
     if (e.mods.isLeftButtonDown() && !e.mods.isCommandDown() && !e.mods.isShiftDown())
     {
@@ -233,25 +258,42 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         }
     }
 
-    // 右クリック on MIDI クリップ → コンテキストメニュー (削除 / ピアノロール)
+    // 右クリック on MIDI クリップ → コンテキストメニュー (削除 / ピアノロール / 結合)
     if (e.mods.isRightButtonDown())
     {
         auto mh = getMidiClipAt(e.x, e.y);
         if (mh.clip != nullptr)
         {
             grabKeyboardFocus();
-            clearAllSelections();
-            selectedMidiClip  = mh.clip;
-            selectedMidiTrack = mh.track;
+            // 複数選択に含まれるクリップの右クリックは選択を保つ (トラックのまとめ削除と同じ作法)。
+            // 選択外のクリップならそれ単体の選択に切り替える
+            if (!isMidiClipSelected(mh.clip))
+            {
+                clearAllSelections();
+                selectedMidiClip  = mh.clip;
+                selectedMidiTrack = mh.track;
+            }
             repaint();
+
+            // 結合対象 = 選択中クリップのうち右クリックしたトラック上のもの (2 つ以上で活性)
+            int mergeCount = 0;
+            {
+                if (selectedMidiTrack == mh.track && selectedMidiClip != nullptr) ++mergeCount;
+                for (const auto& p : extraMidiSelections)
+                    if (p.second == mh.track) ++mergeCount;
+            }
+            const int selCount = selectedMidiClipCount();
 
             juce::PopupMenu m;
             m.addItem(1, tr(u8"ピアノロールを開く"));
             // ノートの開始位置を GRID にスナップ (GRID:Off の間は選べない)
             m.addItem(3, tr(u8"クォンタイズ (GRID)"),
                       snapModeUnitSecs(appSettings.snapMode, bpm) > 0.0);
+            if (mergeCount >= 2)
+                m.addItem(4, tr(u8"選択したMIDIクリップを結合") + " (" + juce::String(mergeCount) + ")");
             m.addSeparator();
-            m.addItem(2, tr(u8"削除"));
+            m.addItem(2, selCount >= 2 ? tr(u8"削除") + " (" + juce::String(selCount) + ")"
+                                       : tr(u8"削除"));
             // メニュー表示中にプロジェクトを閉じる / クリップが消えることがあるため、
             // this は SafePointer・clip/track は実行時に生存確認してから触る (UAF 防止)
             m.showMenuAsync(juce::PopupMenu::Options(),
@@ -266,14 +308,16 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                     }
                     else if (result == 2)
                     {
-                        // 念のため選択を当該クリップに合わせてから削除
-                        tv->selectedMidiClip  = clip;
-                        tv->selectedMidiTrack = track;
+                        // 選択全体 (右クリックしたクリップを含む) を一括削除
                         tv->deleteSelectedMidiClip();
                     }
                     else if (result == 3)
                     {
                         tv->quantizeMidiClip(track, clip);
+                    }
+                    else if (result == 4)
+                    {
+                        tv->mergeSelectedMidiClips(track);
                     }
                 });
             return;

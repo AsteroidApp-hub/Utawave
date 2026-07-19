@@ -176,11 +176,27 @@ void TimelineView::deleteSelectionRange()
 void TimelineView::deleteSelectedMidiClip()
 {
     if (!selectedMidiClip || !selectedMidiTrack) return;
-    auto* clip  = selectedMidiClip;
-    auto* track = selectedMidiTrack;
+    // 複数選択 (トラックまたぎ可) をトラック単位にまとめ、全体を 1 トランザクションで削除
+    std::vector<std::pair<Track*, std::vector<MidiClip*>>> byTrack;
+    auto addTo = [&](Track* t, MidiClip* c)
+    {
+        for (auto& p : byTrack)
+            if (p.first == t) { p.second.push_back(c); return; }
+        byTrack.push_back({ t, { c } });
+    };
+    addTo(selectedMidiTrack, selectedMidiClip);
+    for (const auto& p : extraMidiSelections)
+        if (p.first != nullptr && p.second != nullptr)
+            addTo(p.second, p.first);
     clearAllSelections();  // 削除されるクリップを指す選択を先に解除
-    // Undo 対応で削除 (内部で onMidiClipWillBeRemoved でピアノロールを閉じる)
-    pushMidiReplaceAction(track, { clip }, {});
+    // Undo 対応で削除 (内部で onMidiClipWillBeRemoved でピアノロールを閉じる)。
+    // 2 トラック目以降は同一トランザクションへ合流 = Cmd+Z 1 回で全部戻る
+    bool first = true;
+    for (auto& p : byTrack)
+    {
+        pushMidiReplaceAction(p.first, std::move(p.second), {}, first);
+        first = false;
+    }
 }
 
 
@@ -726,6 +742,10 @@ std::vector<int> TimelineView::getInvolvedTrackIndices() const
     if (selectedMidiClip != nullptr && selectedMidiTrack != nullptr)
         for (int i = 0; i < trackManager.getTrackCount(); ++i)
             if (trackManager.getTrack(i) == selectedMidiTrack) { s.insert(i); break; }
+    for (const auto& p : extraMidiSelections)
+        if (p.second != nullptr)
+            for (int i = 0; i < trackManager.getTrackCount(); ++i)
+                if (trackManager.getTrack(i) == p.second) { s.insert(i); break; }
     if (hasSelectionRange())
     {
         int lo = 0, hi = 0;

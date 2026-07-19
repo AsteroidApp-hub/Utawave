@@ -91,21 +91,88 @@ double TimelineView::gridUnitSecs() const
 
 void TimelineView::clearMidiSelectionIfStale()
 {
-    if (selectedMidiClip == nullptr) return;
-    for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+    auto stillExists = [this](MidiClip* c) -> bool
+    {
+        if (c == nullptr) return false;
+        for (int ti = 0; ti < trackManager.getTrackCount(); ++ti)
+        {
+            auto* tr = trackManager.getTrack(ti);
+            if (!tr || !tr->isMidiTrack()) continue;
+            for (int ci = 0; ci < tr->getMidiClipCount(); ++ci)
+                if (tr->getMidiClip(ci) == c) return true;
+        }
+        return false;
+    };
+    // 追加選択のうち破棄されたものを間引く
+    extraMidiSelections.erase(
+        std::remove_if(extraMidiSelections.begin(), extraMidiSelections.end(),
+                       [&](const auto& p) { return !stillExists(p.first); }),
+        extraMidiSelections.end());
+    if (selectedMidiClip != nullptr && !stillExists(selectedMidiClip))
+    {
+        // プライマリが消えたら生存している追加選択を昇格 (無ければ解除)
+        if (!extraMidiSelections.empty())
+        {
+            selectedMidiClip  = extraMidiSelections.front().first;
+            selectedMidiTrack = extraMidiSelections.front().second;
+            extraMidiSelections.erase(extraMidiSelections.begin());
+        }
+        else
+        {
+            selectedMidiClip  = nullptr;
+            selectedMidiTrack = nullptr;
+        }
+    }
+}
+
+// 範囲選択 (setSelectionRange) のたびに呼ばれ、対象行にある MIDI クリップを
+// MIDI 選択 (primary + extraMidiSelections) へ同期する。範囲と重なるクリップが対象
+// (完全内包は要求しない = 掴み損ねに寛容)。範囲が有効な間は MIDI 選択を毎回置き換えるので、
+// ドラッグで範囲を縮めれば外れたクリップの選択も解除される。範囲が無効なら何もしない
+// (Cmd/Shift+クリックで作った選択を壊さない)
+void TimelineView::syncMidiSelectionToRange()
+{
+    if (!hasSelectionRange()) return;
+
+    // 対象トラック = 範囲選択がハイライトしている行のトラック (フォーカス無効なら全トラック)
+    std::set<int> trackSet;
+    auto rows = getSelectionLaneRows();
+    if (rows.empty())
+        for (int i = 0; i < trackManager.getTrackCount(); ++i) trackSet.insert(i);
+    else
+        for (const auto& r : rows) trackSet.insert(r.first);
+
+    const double t1 = loopStartTV, t2 = loopEndTV;
+    selectedMidiClip  = nullptr;
+    selectedMidiTrack = nullptr;
+    extraMidiSelections.clear();
+    for (int ti : trackSet)
     {
         auto* tr = trackManager.getTrack(ti);
         if (!tr || !tr->isMidiTrack()) continue;
         for (int ci = 0; ci < tr->getMidiClipCount(); ++ci)
-            if (tr->getMidiClip(ci) == selectedMidiClip) return;  // まだ実在 → 据え置き
+        {
+            auto* mc = tr->getMidiClip(ci);
+            if (!mc) continue;
+            if (mc->getEndPosition() <= t1 + 1e-6 || mc->getStartPosition() >= t2 - 1e-6)
+                continue;   // 範囲と重ならない
+            if (selectedMidiClip == nullptr)
+            {
+                selectedMidiClip  = mc;
+                selectedMidiTrack = tr;
+            }
+            else
+            {
+                extraMidiSelections.emplace_back(mc, tr);
+            }
+        }
     }
-    selectedMidiClip  = nullptr;
-    selectedMidiTrack = nullptr;
 }
 
 void TimelineView::pushMidiReplaceAction(Track* track,
                                          std::vector<MidiClip*> toRemove,
-                                         std::vector<EditActions::MidiClipReplaceAction::NewMidiClip> toAdd)
+                                         std::vector<EditActions::MidiClipReplaceAction::NewMidiClip> toAdd,
+                                         bool newTransaction)
 {
     if (!track) return;
     auto onChange = [this]
@@ -121,7 +188,8 @@ void TimelineView::pushMidiReplaceAction(Track* track,
 
     if (undoManager)
     {
-        undoManager->beginNewTransaction();
+        if (newTransaction)
+            undoManager->beginNewTransaction();
         undoManager->perform(new EditActions::MidiClipReplaceAction(
             track, std::move(toRemove), std::move(toAdd), onChange, willRemove));
     }
@@ -210,6 +278,43 @@ void TimelineView::splitMidiClip(Track* track, MidiClip* clip, double absSplitTi
 
     clearAllSelections();  // 元クリップを指す選択を先に解除 (差し替えで破棄されるため)
     pushMidiReplaceAction(track, { clip }, { std::move(left), std::move(right) });
+}
+
+// 選択中の MIDI クリップ (プライマリ + 追加選択) のうち track 上のものを 1 クリップへ結合する。
+// 範囲 = [最小開始, 最大終端]。ノート/CC はクリップ相対時刻を保ったまま結合クリップへ写す
+// (録音でクリップが複数に分かれた時に 1 つへまとめる用途・要望 2026-07)。1 Undo で往復
+void TimelineView::mergeSelectedMidiClips(Track* track)
+{
+    if (track == nullptr) return;
+    std::vector<MidiClip*> targets;
+    if (selectedMidiTrack == track && selectedMidiClip != nullptr)
+        targets.push_back(selectedMidiClip);
+    for (const auto& p : extraMidiSelections)
+        if (p.second == track && p.first != nullptr)
+            targets.push_back(p.first);
+    if ((int) targets.size() < 2) return;
+
+    // 開始順に並べ、範囲と結合シーケンスを組み立てる
+    std::sort(targets.begin(), targets.end(),
+              [](const MidiClip* a, const MidiClip* b)
+              { return a->getStartPosition() < b->getStartPosition(); });
+    const double newStart = targets.front()->getStartPosition();
+    double newEnd = newStart;
+    for (auto* c : targets) newEnd = juce::jmax(newEnd, c->getEndPosition());
+
+    using NewMidiClip = EditActions::MidiClipReplaceAction::NewMidiClip;
+    NewMidiClip merged;
+    merged.startPos = newStart;
+    merged.duration = newEnd - newStart;
+    merged.name     = targets.front()->getName();
+    merged.colour   = targets.front()->getColour();
+    merged.channel  = targets.front()->getChannel();
+    for (auto* c : targets)
+        merged.sequence.addSequence(c->getSequence(), c->getStartPosition() - newStart);
+    merged.sequence.updateMatchedPairs();
+
+    clearAllSelections();  // 元クリップを指す選択を先に解除 (差し替えで破棄されるため)
+    pushMidiReplaceAction(track, std::move(targets), { std::move(merged) });
 }
 
 // ── MIDI 録音の確定配置 ──────────────────────────────────────────────────

@@ -7,6 +7,8 @@
 #include "UtawaveLookAndFeel.h"
 #include <cstring>
 #include <cmath>
+#include <limits>
+#include <map>
 
 // MIDI ノート編集を main UndoManager に乗せるための UndoableAction。
 // (#36: PianoRoll の独自 Undo スタックを main 統合)
@@ -24,16 +26,21 @@ namespace
         MidiNotesAction(MidiClip& c,
                         std::function<void(MidiClip*)> reloadCb,
                         juce::MidiMessageSequence b,
-                        juce::MidiMessageSequence a)
+                        juce::MidiMessageSequence a,
+                        double bDur, double aDur)
             : clip(c), onReload(std::move(reloadCb)),
-              beforeSeq(std::move(b)), afterSeq(std::move(a)) {}
+              beforeSeq(std::move(b)), afterSeq(std::move(a)),
+              beforeDur(bDur), afterDur(aDur) {}
 
-        bool perform() override { apply(afterSeq);  return true; }
-        bool undo()    override { apply(beforeSeq); return true; }
+        bool perform() override { apply(afterSeq,  afterDur);  return true; }
+        bool undo()    override { apply(beforeSeq, beforeDur); return true; }
 
     private:
-        void apply(const juce::MidiMessageSequence& src)
+        void apply(const juce::MidiMessageSequence& src, double dur)
         {
+            // Cmd+D の複製がクリップ末尾を越えた時の自動延長も undo/redo で往復させる
+            // (シーケンスだけ戻すと延長された空クリップが残る)
+            if (dur > 0.0) clip.setDuration(dur);
             auto& dst = clip.getSequence();
             dst.clear();
             dst.addSequence(src, 0.0);
@@ -45,6 +52,8 @@ namespace
         std::function<void(MidiClip*)> onReload;
         juce::MidiMessageSequence beforeSeq;
         juce::MidiMessageSequence afterSeq;
+        double beforeDur { 0.0 };
+        double afterDur  { 0.0 };
     };
 }
 
@@ -355,11 +364,25 @@ void PianoRollEditor::rebuildNotesFromClip()
     // notes を作り直すと既存の index ベースの選択/ドラッグ状態は全て無効になる。
     // undo/redo (reloadNotesFromClip) でノート数が減ったとき、selected に残った
     // 範囲外 index で notes[idx] が OOB アクセスになるため、ここで一括リセットする。
+    //
+    // ただし選択は「ノート内容 (pitch/start/dur)」で控えて再構築後に貼り直す。
+    // 編集 → 非同期 Undo コミット → reload の経路で毎回選択が消えると、Shift+↑ の
+    // 連打 (2 オクターブ移動) 等ができない (ユーザー報告 2026-07)。編集直後の reload は
+    // 書いた値をそのまま読み戻すので内容一致で確実に復元でき、undo/redo で内容が
+    // 変わったノートは自然に選択から外れる (velocity は 7bit 量子化で往復値が
+    // 変わるため identity に含めない)
+    std::vector<Note> selKeys;
+    selKeys.reserve(selected.size());
+    for (int idx : selected)
+        if (idx >= 0 && idx < (int) notes.size())
+            selKeys.push_back(notes[(size_t) idx]);
+
     selected.clear();
     dragOrigNotes.clear();
     draggedIdx     = -1;
     velocityIdx    = -1;
     createdNoteIdx = -1;
+    ctrlPointIdx   = -1;   // ctrlMsgs も作り直すので掴み中 index は無効
     ctrlValueEditor.reset();   // 再構築で入力対象が変わるため数値入力は取消
 
     notes.clear();
@@ -393,6 +416,29 @@ void PianoRollEditor::rebuildNotesFromClip()
             n.durationSec = 0.25;
         }
         notes.push_back(n);
+    }
+
+    // 内容一致で選択を復元 (同一内容のノートが複数ある場合も 1:1 で対応付ける)
+    if (!selKeys.empty())
+    {
+        std::vector<bool> used(selKeys.size(), false);
+        for (int i = 0; i < (int) notes.size(); ++i)
+        {
+            const auto& n = notes[(size_t) i];
+            for (size_t k = 0; k < selKeys.size(); ++k)
+            {
+                if (used[k]) continue;
+                const auto& s = selKeys[k];
+                if (s.pitch == n.pitch
+                    && std::abs(s.startSec - n.startSec) < 1.0e-6
+                    && std::abs(s.durationSec - n.durationSec) < 1.0e-6)
+                {
+                    selected.insert(i);
+                    used[k] = true;
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -500,7 +546,10 @@ void PianoRollEditor::firePreview(int note, float velocity, double durationSec)
 // ── マウス操作 ────────────────────────────────────────────────────────────
 void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
 {
-    grabKeyboardFocus();
+    // ヘッドレステスト (合成 MouseEvent) では画面に載っていないため jassert になる。
+    // 実アプリでは常に表示中なので挙動は不変
+    if (isShowing() || isOnDesktop())
+        grabKeyboardFocus();
     // ジェスチャ (ドラッグ) 中は Undo の commit を保留する。callAsync の commit は
     // ドラッグイベントの合間 (ランループが回った時) に発火しうるため、これが無いと
     // 1 回のドラッグが複数の微小トランザクションに分割され、Undo 1 回でドラッグ全体が
@@ -513,6 +562,23 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
     // ツールバー段 (ボタン行) の空きエリアは何もしない (ボタン自体は子コンポーネントが受ける)
     if (e.y < toolbarH)
         return;
+
+    // ノートグリッドの右クリック = ノート編集メニュー (終端クォンタイズ / 長さ揃え / 重なり解消 等)。
+    // 選択外のノートを右クリックした時はそのノート単体を選択してから出す (タイムラインと同じ作法)
+    if (e.mods.isPopupMenu()
+        && e.y >= topH() && e.y <= getHeight() - velocityH && e.x >= keyboardW)
+    {
+        auto hit = hitTestNote(e.getPosition());
+        if (hit.noteIdx >= 0 && selected.count(hit.noteIdx) == 0)
+        {
+            selected.clear();
+            selected.insert(hit.noteIdx);
+            repaint();
+        }
+        if (hit.noteIdx >= 0 || !selected.empty())
+            showNoteContextMenu();
+        return;
+    }
 
     // ルーラー (小節番号バー): クリック = シーク (mouseUp で確定)、縦ドラッグ = 横ズーム
     // (メインのルーラーと同じ。即シークするとズーム操作で再生バーが飛ぶため保留する)
@@ -535,6 +601,16 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // 左鍵盤クリック = 試聴 (押している間鳴らす・縦ドラッグでグリッサンド)
+    if (e.x < keyboardW && e.y >= topH() && e.y < getHeight() - velocityH)
+    {
+        auditionPitch = yToPitch(e.y);
+        if (onPreviewNote) onPreviewNote(auditionPitch, 0.8f, true);
+        dragMode = DragMode::AuditionKey;
+        repaint(0, topH(), keyboardW, getHeight() - velocityH - topH());
+        return;
+    }
+
     // Velocity 領域 / コントロールレーン
     if (e.y > getHeight() - velocityH)
     {
@@ -548,9 +624,32 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
             {
                 snapshotForUndo();
                 dragMode = DragMode::AdjustVelocity;
+                // 掴んだバーが複数選択に含まれていれば選択全体を一括調整する。
+                // ドラッグ開始時の各ノートの velocity を控え、掴んだバーの増減を全員へ適用
+                velDragOrig.clear();
+                if (selected.count(velocityIdx) > 0 && selected.size() > 1)
+                {
+                    for (int idx : selected)
+                        if (idx >= 0 && idx < (int) notes.size())
+                            velDragOrig.emplace_back(idx, notes[(size_t) idx].velocity);
+                }
+                else
+                    velDragOrig.emplace_back(velocityIdx, notes[(size_t) velocityIdx].velocity);
                 setReadout(juce::String((int) std::lround(
                                notes[(size_t) velocityIdx].velocity * 127.0f)),
                            e.getPosition());
+            }
+            else
+            {
+                // バーの無い空きをドラッグ = ランプ描画 (範囲内のノートへ直線の値を適用。
+                // クレッシェンド/デクレッシェンドを一筆で描く)
+                snapshotForUndo();
+                dragMode = DragMode::VelocityRamp;
+                const int top    = getHeight() - velocityH;
+                const int bottom = getHeight() - kScrollBarH;
+                rampT0 = rampT1 = juce::jmax(0.0, xToTime(e.x));
+                rampV0 = rampV1 = juce::jlimit(0.01f, 1.0f,
+                    1.0f - (float)(e.y - top) / (float) juce::jmax(1, bottom - top));
             }
         }
         else if ((penMode && !e.mods.isShiftDown())
@@ -559,16 +658,34 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
             // Cmd+ドラッグで描画 / Option+ドラッグで消去。素のクリックでは値を入れない
             // (誤クリックでピッチベンド等が書き換わる事故防止。Cmd = ペンの一時作画と同じ作法)。
             // **ペンツール (D) 中は Cmd 不要で素のドラッグでも描画** (ノートグリッドのペンと
-            // 同じ体系。範囲選択はペン中でも Shift+ドラッグでできる)
+            // 同じ体系。範囲選択はペン中でも Shift+ドラッグでできる)。
+            // **Cmd+Option = GRID を一時解除したフリー描画** (グリッドの段付きでなく滑らかな
+            // カーブを描ける・要望 2026-07)。消去は Option 単独のみ
             snapshotForUndo();
             dragMode      = DragMode::DrawCtrl;
-            ctrlErasing   = e.mods.isAltDown();
+            ctrlErasing   = e.mods.isAltDown() && !e.mods.isCommandDown();
+            ctrlFreeDraw  = e.mods.isAltDown() &&  e.mods.isCommandDown();
             ctrlDragLastT = -1.0;
             applyCtrlDragPoint(e.getPosition(), ctrlErasing);
             repaint();
         }
         else
         {
+            // 既存イベント点の上なら掴んで調整 (縦 = 値 / 横 = 時刻・GRID スナップ)。
+            // 打ち込んだ点をクリックで直せるようにする (ユーザー要望 2026-07)
+            ctrlPointIdx = hitTestCtrlPoint(e.getPosition());
+            if (ctrlPointIdx >= 0)
+            {
+                snapshotForUndo();
+                dragMode = DragMode::MoveCtrlPoint;
+                const auto& m = ctrlMsgs[(size_t) ctrlPointIdx];
+                setReadout(laneValueText(ctrlLane,
+                               (ctrlLane == CtrlLane::PitchBend)
+                                   ? m.getPitchWheelValue() : m.getControllerValue()),
+                           e.getPosition());
+                repaint();
+                return;
+            }
             // 素のドラッグ = 時間範囲の選択 (Delete で範囲内のイベントを一括削除)。
             // ドラッグせずクリックだけなら mouseUp で選択解除
             const double clipLen = clip.getDuration();
@@ -589,6 +706,30 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
     if (hit.noteIdx >= 0 && e.mods.isAltDown() && !e.mods.isCommandDown())
     {
         splitNoteAt(hit.noteIdx, xToTime(e.x));
+        return;
+    }
+
+    // Cmd+Shift+クリック (ノート上): そのまま上下ドラッグでベロシティ調整 (要望 2026-07)。
+    // 和音はベロシティレーンのバーが重なって個別に掴めないため、ノート自体を掴んで直す。
+    // 掴んだノートが複数選択に含まれていれば選択全体へ同じ増減 (バーの一括調整と同じ作法)
+    if (hit.noteIdx >= 0 && e.mods.isCommandDown() && e.mods.isShiftDown())
+    {
+        snapshotForUndo();
+        dragMode        = DragMode::AdjustVelocity;
+        velocityIdx     = hit.noteIdx;
+        velDragFromGrid = true;
+        velDragOrig.clear();
+        if (selected.count(velocityIdx) > 0 && selected.size() > 1)
+        {
+            for (int idx : selected)
+                if (idx >= 0 && idx < (int) notes.size())
+                    velDragOrig.emplace_back(idx, notes[(size_t) idx].velocity);
+        }
+        else
+            velDragOrig.emplace_back(velocityIdx, notes[(size_t) velocityIdx].velocity);
+        setReadout(juce::String((int) std::lround(
+                       notes[(size_t) velocityIdx].velocity * 127.0f)),
+                   e.getPosition());
         return;
     }
 
@@ -645,6 +786,13 @@ void PianoRollEditor::mouseDown(const juce::MouseEvent& e)
         }
         return;
     }
+
+    // ステップ入力中: グリッド域の空きクリックで入力カーソルをその位置へ移動する
+    // (GRID オン時はグリッドへスナップ。ルーラークリックに加えた第 2 の指定手段・要望 2026-07)。
+    // 範囲選択 (ラバーバンド) はそのまま併用できる (ドラッグに化けてもカーソルは移動済みで害なし)
+    if (stepMode && e.x >= keyboardW && e.y >= topH() && e.y < getHeight() - velocityH
+        && !e.mods.isShiftDown() && !e.mods.isCommandDown())
+        moveStepCursor(snapTimeSecs(juce::jmax(0.0, xToTime(e.x))));
 
     // 空エリアクリック: 修飾なしなら範囲選択開始 (新規作成はダブルクリックで)
     if (!e.mods.isShiftDown() && !e.mods.isCommandDown())
@@ -749,18 +897,76 @@ void PianoRollEditor::mouseDrag(const juce::MouseEvent& e)
     }
     else if (dragMode == DragMode::AdjustVelocity && velocityIdx >= 0)
     {
-        const int top    = getHeight() - velocityH;
-        const int bottom = getHeight() - kScrollBarH;   // バーの描画レンジと揃える
-        const float v = 1.0f - (float)(e.y - top) / (float) juce::jmax(1, bottom - top);
-        auto& n = notes[(size_t) velocityIdx];
-        n.velocity = juce::jlimit(0.01f, 1.0f, v);
-        // 入力中の数値をカーソル脇に表示 (見える化・数値のみ)
-        setReadout(juce::String((int) std::lround(n.velocity * 127.0f)), e.getPosition());
+        float delta;
+        if (velDragFromGrid)
+        {
+            // ノートグリッド上の Cmd+Shift+ドラッグ: 相対増減 (150px = フルレンジ 0..127)。
+            // ノート位置と値の y が無関係なので絶対 y でなくドラッグ量で調整する
+            delta = (float) -dy / 150.0f;
+        }
+        else
+        {
+            const int top    = getHeight() - velocityH;
+            const int bottom = getHeight() - kScrollBarH;   // バーの描画レンジと揃える
+            const float v = juce::jlimit(0.01f, 1.0f,
+                1.0f - (float)(e.y - top) / (float) juce::jmax(1, bottom - top));
+            // 掴んだバーの元値からの増減を、控えた全ノート (単独 or 選択全体) に適用する
+            float grabbedOrig = v;
+            for (const auto& [idx, orig] : velDragOrig)
+                if (idx == velocityIdx) { grabbedOrig = orig; break; }
+            delta = v - grabbedOrig;
+        }
+        for (const auto& [idx, orig] : velDragOrig)
+            if (idx >= 0 && idx < (int) notes.size())
+                notes[(size_t) idx].velocity = juce::jlimit(0.01f, 1.0f, orig + delta);
+        // 入力中の数値をカーソル脇に表示 (見える化・掴んだバーの値)
+        setReadout(juce::String((int) std::lround(
+                       notes[(size_t) velocityIdx].velocity * 127.0f)),
+                   e.getPosition());
         repaint();
+    }
+    else if (dragMode == DragMode::VelocityRamp)
+    {
+        const int top    = getHeight() - velocityH;
+        const int bottom = getHeight() - kScrollBarH;
+        rampT1 = juce::jmax(0.0, xToTime(e.x));
+        rampV1 = juce::jlimit(0.01f, 1.0f,
+            1.0f - (float)(e.y - top) / (float) juce::jmax(1, bottom - top));
+        applyVelocityRamp();
+        setReadout(juce::String((int) std::lround(rampV1 * 127.0f)), e.getPosition());
+        repaint();
+    }
+    else if (dragMode == DragMode::AuditionKey)
+    {
+        // 鍵盤上を縦ドラッグ = グリッサンド試聴
+        const int p = yToPitch(e.y);
+        if (p != auditionPitch && onPreviewNote)
+        {
+            onPreviewNote(auditionPitch, 0.0f, false);
+            onPreviewNote(p, 0.8f, true);
+            auditionPitch = p;
+            repaint(0, topH(), keyboardW, getHeight() - velocityH - topH());
+        }
     }
     else if (dragMode == DragMode::DrawCtrl)
     {
         applyCtrlDragPoint(e.getPosition(), ctrlErasing);
+        repaint();
+    }
+    else if (dragMode == DragMode::MoveCtrlPoint
+             && ctrlPointIdx >= 0 && ctrlPointIdx < (int) ctrlMsgs.size())
+    {
+        // 掴んだ点を移動: 縦 = 値 / 横 = 時刻 (GRID オン時はスナップ。ドラッグ中に
+        // Cmd+Option を押している間はスナップを一時解除 = フリー描画と同じ作法)。
+        // ctrlMsgs は時刻順を保つ必要があるため、外して作り直して挿入し直す
+        const double maxT = (clipLen > 0.0) ? juce::jmax(0.0, clipLen - 1e-4) : 1.0e9;
+        double t = juce::jlimit(0.0, maxT, xToTime(e.x));
+        const double u = (e.mods.isCommandDown() && e.mods.isAltDown()) ? 0.0 : snapUnitSecs();
+        if (u > 0.0) t = juce::jlimit(0.0, maxT, std::round(t / u) * u);
+        const int v = laneValueFromY(e.y, ctrlLane);
+        ctrlMsgs.erase(ctrlMsgs.begin() + ctrlPointIdx);
+        ctrlPointIdx = insertLaneEvent(makeLaneMessage(ctrlLane, v, t));
+        setReadout(laneValueText(ctrlLane, v), e.getPosition());
         repaint();
     }
     else if (dragMode == DragMode::SelectCtrlRange)
@@ -806,15 +1012,44 @@ void PianoRollEditor::mouseDrag(const juce::MouseEvent& e)
 
 void PianoRollEditor::mouseUp(const juce::MouseEvent&)
 {
+    // 掴んだ点の確定: 最終位置と同時刻の別イベント (掴んだ点以外) を除去してから書き戻す。
+    // ドラッグ通過中は消さず、確定時だけ「同時刻の二重登録」を防ぐ
+    if (dragMode == DragMode::MoveCtrlPoint
+        && ctrlPointIdx >= 0 && ctrlPointIdx < (int) ctrlMsgs.size())
+    {
+        const auto kept = ctrlMsgs[(size_t) ctrlPointIdx];
+        const double t  = kept.getTimeStamp();
+        int i = 0;
+        ctrlMsgs.erase(std::remove_if(ctrlMsgs.begin(), ctrlMsgs.end(),
+            [&](const juce::MidiMessage& m)
+            {
+                const bool dup = (i++ != ctrlPointIdx)
+                                 && msgMatchesLane(m, ctrlLane)
+                                 && std::abs(m.getTimeStamp() - t) < 1e-4;
+                return dup;
+            }), ctrlMsgs.end());
+    }
+
     if (dragMode == DragMode::MoveNotes
      || dragMode == DragMode::ResizeLeft
      || dragMode == DragMode::ResizeRight
      || dragMode == DragMode::AdjustVelocity
+     || dragMode == DragMode::VelocityRamp
      || dragMode == DragMode::CreateNote
-     || dragMode == DragMode::DrawCtrl)
+     || dragMode == DragMode::DrawCtrl
+     || dragMode == DragMode::MoveCtrlPoint)
     {
         writeNotesToClip();
     }
+    // 鍵盤試聴を止める (押している間だけ鳴らす)
+    if (dragMode == DragMode::AuditionKey && auditionPitch >= 0)
+    {
+        if (onPreviewNote) onPreviewNote(auditionPitch, 0.0f, false);
+        auditionPitch = -1;
+        repaint(0, topH(), keyboardW, getHeight() - velocityH - topH());
+    }
+    velDragOrig.clear();
+    velDragFromGrid = false;
     // Velocity 領域の高さ変更を確定 (アプリ設定として保存してもらう)
     if (dragMode == DragMode::ResizeVelocityArea && onVelocityAreaResized)
         onVelocityAreaResized(velocityH);
@@ -840,6 +1075,7 @@ void PianoRollEditor::mouseUp(const juce::MouseEvent&)
     draggedIdx     = -1;
     velocityIdx    = -1;
     createdNoteIdx = -1;
+    ctrlPointIdx   = -1;
     // ジェスチャ終了: 保留していた Undo をドラッグ全体で 1 アクションとして確定する
     gestureActive = false;
     if (pendingCommit) commitPendingUndoAction();
@@ -984,19 +1220,25 @@ void PianoRollEditor::updateHoverCursor(juce::Point<int> pos, const juce::Modifi
         return;
     }
     // コントロールレーン (Velocity 以外): 描画できる状態 (ペンツール中 / Cmd / Option) だけ
-    // 十字カーソル。素のドラッグは範囲選択なので通常カーソルのまま
+    // 十字カーソル。素のホバーは既存イベント点の上なら「掴める」ことを手カーソルで示す
+    // (素のドラッグ = 範囲選択は通常カーソルのまま)
     if (pos.y > getHeight() - velocityH && ctrlLane != CtrlLane::Velocity
         && pos.x >= keyboardW)
     {
-        setMouseCursor((penMode || mods.isCommandDown() || mods.isAltDown())
-                           ? juce::MouseCursor::CrosshairCursor
-                           : juce::MouseCursor::NormalCursor);
+        if (penMode || mods.isCommandDown() || mods.isAltDown())
+            setMouseCursor(juce::MouseCursor::CrosshairCursor);
+        else if (hitTestCtrlPoint(pos) >= 0)
+            setMouseCursor(juce::MouseCursor::PointingHandCursor);
+        else
+            setMouseCursor(juce::MouseCursor::NormalCursor);
         return;
     }
     auto hit = hitTestNote(pos);
     if (hit.noteIdx >= 0)
     {
-        if (mods.isAltDown() && !mods.isCommandDown())
+        if (mods.isCommandDown() && mods.isShiftDown())
+            setMouseCursor(juce::MouseCursor::UpDownResizeCursor);  // Cmd+Shift = ベロシティ調整
+        else if (mods.isAltDown() && !mods.isCommandDown())
             setMouseCursor(juce::MouseCursor::IBeamCursor);  // Option+クリック = 分割
         else if (hit.kind == HitKind::NoteLeftEdge
               || hit.kind == HitKind::NoteRightEdge)
@@ -1118,6 +1360,8 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
     if (mods.isCommandDown() && k.getKeyCode() == 'C')      { copySelected(); return true; }
     if (mods.isCommandDown() && k.getKeyCode() == 'X')      { cutSelected(); return true; }
     if (mods.isCommandDown() && k.getKeyCode() == 'V')      { pasteAtPlayhead(); return true; }
+    // Cmd+D: 選択ノートを直後に複製 (メイン画面のクリップ複製と同じキー)
+    if (mods.isCommandDown() && k.getKeyCode() == 'D')      { duplicateSelected(); return true; }
     if ((mods.isCommandDown() && mods.isShiftDown()
             && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
         || (mods.isCommandDown() && !mods.isShiftDown()
@@ -1165,6 +1409,14 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& k)
         }
         return true;
     }
+    // Shift+↑/↓: 選択ノートをオクターブ移動 (ハモリの上下入れ替え用。
+    // 修飾なし ↑↓ の半音ナッジより先に判定する)
+    if (mods.isShiftDown() && !mods.isCommandDown() && !mods.isAltDown() && !mods.isCtrlDown())
+    {
+        if (k.getKeyCode() == juce::KeyPress::upKey)   { nudgeSelected(0.0,  12); return true; }
+        if (k.getKeyCode() == juce::KeyPress::downKey) { nudgeSelected(0.0, -12); return true; }
+    }
+
     // ステップ入力中の ←/→ は入力カーソルを 1 ステップ動かす (→ = 休符送りを兼ねる)。
     // ノートのナッジより優先する (ステップ入力の主操作のため)。↑/↓ は従来どおりピッチナッジ
     if (stepMode && !mods.isAnyModifierKeyDown())
@@ -1379,6 +1631,250 @@ void PianoRollEditor::legatoSelected()
     repaint();
 }
 
+// Cmd+D: 選択ノートを「選択スパン (先頭〜末尾)」分だけ後ろへずらして複製する。
+// GRID オン時はスパンをグリッド倍数へ切り上げ、複製が拍に乗るようにする。
+// 複製後は複製側を選択 (連打で繰り返し並べられる)
+void PianoRollEditor::duplicateSelected()
+{
+    if (selected.empty()) return;
+    double minS = std::numeric_limits<double>::max();
+    double maxE = 0.0;
+    for (int idx : selected)
+    {
+        if (idx < 0 || idx >= (int) notes.size()) continue;
+        const auto& n = notes[(size_t) idx];
+        minS = juce::jmin(minS, n.startSec);
+        maxE = juce::jmax(maxE, n.startSec + n.durationSec);
+    }
+    double span = maxE - minS;
+    if (span <= 0.0) return;
+    const double u = snapUnitSecs();
+    if (u > 0.0) span = std::ceil(span / u - 1e-9) * u;
+
+    snapshotForUndo();
+    std::set<int> newSel;
+    double maxCopyEnd = 0.0;
+    for (int idx : selected)
+    {
+        if (idx < 0 || idx >= (int) notes.size()) continue;
+        Note n = notes[(size_t) idx];
+        n.startSec += span;
+        maxCopyEnd = juce::jmax(maxCopyEnd, n.startSec + n.durationSec);
+        notes.push_back(n);
+        newSel.insert((int) notes.size() - 1);
+    }
+    if (newSel.empty()) return;   // 変化なし (commit 側の同一判定で Undo にも積まれない)
+
+    // 複製がクリップ末尾を越える場合はクリップを自動延長する (旧実装は末尾でクランプ /
+    // 破棄していて「複製すると短いノートになる」不具合だった)。クリップ範囲は常に小節単位の
+    // 不変条件を守るため、タイムライン絶対時間で次の小節境界 (4/4・エディタの小節番号描画と
+    // 同じ前提) へ切り上げる。undo は MidiNotesAction の beforeDur が戻す
+    const double clipLen = clip.getDuration();
+    if (clipLen > 0.0 && maxCopyEnd > clipLen + 1e-9)
+    {
+        const double barSecs = 4.0 * 60.0 / juce::jmax(1.0, bpm);
+        const double absEnd  = clip.getStartPosition() + maxCopyEnd;
+        const double newDur  = std::ceil(absEnd / barSecs - 1e-9) * barSecs
+                               - clip.getStartPosition();
+        clip.setDuration(juce::jmax(newDur, clipLen));
+    }
+    selected = std::move(newSel);
+    writeNotesToClip();
+    repaint();
+}
+
+// 終端 (長さ側) を GRID の最寄りへスナップする。開始位置は動かさない。
+// スナップで長さが 0 になる場合は開始の次のグリッド線まで確保する
+void PianoRollEditor::quantizeNoteEnds()
+{
+    const double u = snapUnitSecs();
+    if (u <= 0.0 || notes.empty()) return;
+
+    std::vector<int> targets;
+    if (selected.empty())
+        for (int i = 0; i < (int) notes.size(); ++i) targets.push_back(i);
+    else
+        targets.assign(selected.begin(), selected.end());
+
+    const double clipLen = clip.getDuration();
+    snapshotForUndo();
+    bool changed = false;
+    for (int idx : targets)
+    {
+        if (idx < 0 || idx >= (int) notes.size()) continue;
+        auto& n = notes[(size_t) idx];
+        double end = std::round((n.startSec + n.durationSec) / u) * u;
+        if (end <= n.startSec + 1e-9)
+            end = (std::floor(n.startSec / u + 1e-9) + 1.0) * u;   // 次のグリッド線まで
+        if (clipLen > 0.0) end = juce::jmin(end, clipLen);
+        const double d = juce::jmax(0.01, end - n.startSec);
+        if (std::abs(d - n.durationSec) < 1e-9) continue;
+        n.durationSec = d;
+        changed = true;
+    }
+    if (!changed) return;
+    writeNotesToClip();
+    repaint();
+}
+
+// 選択ノートの長さを「最も早く始まるノート」の長さに揃える (2 つ以上選択時)
+void PianoRollEditor::equalizeLengths()
+{
+    if (selected.size() < 2) return;
+    int refIdx = -1;
+    double refStart = std::numeric_limits<double>::max();
+    for (int idx : selected)
+        if (idx >= 0 && idx < (int) notes.size() && notes[(size_t) idx].startSec < refStart)
+        {
+            refStart = notes[(size_t) idx].startSec;
+            refIdx   = idx;
+        }
+    if (refIdx < 0) return;
+    const double refLen  = notes[(size_t) refIdx].durationSec;
+    const double clipLen = clip.getDuration();
+    snapshotForUndo();
+    bool changed = false;
+    for (int idx : selected)
+    {
+        if (idx < 0 || idx >= (int) notes.size() || idx == refIdx) continue;
+        auto& n = notes[(size_t) idx];
+        double d = refLen;
+        if (clipLen > 0.0) d = juce::jmin(d, clipLen - n.startSec);
+        d = juce::jmax(0.01, d);
+        if (std::abs(d - n.durationSec) < 1e-9) continue;
+        n.durationSec = d;
+        changed = true;
+    }
+    if (!changed) return;
+    writeNotesToClip();
+    repaint();
+}
+
+// 同一ピッチのノートの重なりを解消する: 前のノートを次の開始位置でトリムし、
+// 完全に内包されるノートは後発を削除する (対象 = 選択 / 無選択は全ノート)。
+// 打ち込み/録音でダブったノートの整理用
+void PianoRollEditor::resolveOverlaps()
+{
+    if (notes.empty()) return;
+    std::vector<int> targets;
+    if (selected.empty())
+        for (int i = 0; i < (int) notes.size(); ++i) targets.push_back(i);
+    else
+        targets.assign(selected.begin(), selected.end());
+
+    // ピッチごとに開始順で並べる
+    std::map<int, std::vector<int>> byPitch;
+    for (int idx : targets)
+        if (idx >= 0 && idx < (int) notes.size())
+            byPitch[notes[(size_t) idx].pitch].push_back(idx);
+
+    snapshotForUndo();
+    bool changed = false;
+    std::set<int> toDelete;
+    const double kEps = 1e-9;
+    for (auto& [pitch, idxs] : byPitch)
+    {
+        std::sort(idxs.begin(), idxs.end(), [this](int a, int b)
+                  { return notes[(size_t) a].startSec < notes[(size_t) b].startSec; });
+        for (size_t i = 0; i + 1 < idxs.size(); ++i)
+        {
+            if (toDelete.count(idxs[i])) continue;
+            auto& a = notes[(size_t) idxs[i]];
+            // a の次に生き残っているノートを探す
+            for (size_t j = i + 1; j < idxs.size(); ++j)
+            {
+                if (toDelete.count(idxs[j])) continue;
+                const auto& b = notes[(size_t) idxs[j]];
+                if (b.startSec >= a.startSec + a.durationSec - kEps) break;   // 重なりなし
+                if (b.startSec + b.durationSec <= a.startSec + a.durationSec + kEps
+                    || b.startSec <= a.startSec + 0.01)
+                {
+                    // 内包 (または実質同じ開始位置) → 後発を削除
+                    toDelete.insert(idxs[j]);
+                    changed = true;
+                    continue;   // さらに次と比較
+                }
+                // 部分的な重なり → a を b の開始でトリム
+                a.durationSec = juce::jmax(0.01, b.startSec - a.startSec);
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (!changed) return;
+    if (!toDelete.empty())
+    {
+        std::vector<int> del(toDelete.begin(), toDelete.end());
+        std::sort(del.begin(), del.end(), std::greater<int>());
+        for (int i : del)
+            if (i >= 0 && i < (int) notes.size())
+                notes.erase(notes.begin() + i);
+        selected.clear();   // index が振り直されるため選択は解除
+    }
+    writeNotesToClip();
+    repaint();
+}
+
+// ベロシティのランプ描画: [rampT0..rampT1] に開始位置が入るノートへ直線補間の値を適用する。
+// ドラッグ中に毎回呼ばれ、範囲/傾きの変化へリアルタイム追従する (確定は mouseUp)
+void PianoRollEditor::applyVelocityRamp()
+{
+    const double t0 = juce::jmin(rampT0, rampT1);
+    const double t1 = juce::jmax(rampT0, rampT1);
+    if (t1 - t0 <= 1e-6) return;
+    const float v0 = (rampT0 <= rampT1) ? rampV0 : rampV1;
+    const float v1 = (rampT0 <= rampT1) ? rampV1 : rampV0;
+    for (auto& n : notes)
+    {
+        if (n.startSec < t0 - 1e-9 || n.startSec > t1 + 1e-9) continue;
+        const float frac = (float)((n.startSec - t0) / (t1 - t0));
+        n.velocity = juce::jlimit(0.01f, 1.0f, v0 + frac * (v1 - v0));
+    }
+}
+
+// ノート/選択の右クリックメニュー (終端クォンタイズ・長さ揃え・重なり解消などの
+// キー割当の無い編集コマンドの入口。既存ショートカットのある操作もヒント付きで並べる)
+void PianoRollEditor::showNoteContextMenu()
+{
+    const bool gridOn = snapUnitSecs() > 0.0;
+    juce::PopupMenu m;
+    m.addItem(1, tr(u8"クォンタイズ (開始位置)") + "  (Q)", gridOn);
+    m.addItem(2, tr(u8"終端をグリッドへ"), gridOn);
+    m.addItem(3, tr(u8"長さを揃える"), selected.size() >= 2);
+    m.addItem(4, tr(u8"重なりを解消"));
+    m.addSeparator();
+    m.addItem(5, tr(u8"レガート") + "  (L)");
+    m.addItem(6, tr(u8"複製") + platformShortcutText("  (Cmd+D)"));
+    m.addSeparator();
+    m.addItem(7, tr(u8"削除") + "  (Delete)");
+
+    m.showMenuAsync(juce::PopupMenu::Options(),
+        [safe = juce::Component::SafePointer<PianoRollEditor>(this)](int result)
+        {
+            auto* self = safe.getComponent();
+            if (self == nullptr) return;
+            switch (result)
+            {
+                case 1: self->quantizeSelected(); break;
+                case 2: self->quantizeNoteEnds(); break;
+                case 3: self->equalizeLengths(); break;
+                case 4: self->resolveOverlaps(); break;
+                case 5: self->legatoSelected(); break;
+                case 6: self->duplicateSelected(); break;
+                case 7: self->deleteSelected(); break;
+                default: break;
+            }
+        });
+}
+
+juce::String PianoRollEditor::noteNameFor(int pitch)
+{
+    static const char* names[12] = { "C", "C#", "D", "D#", "E", "F",
+                                     "F#", "G", "G#", "A", "A#", "B" };
+    // 鍵盤ラベル ("C" + String(p/12 - 1)) と同じオクターブ表記
+    return juce::String(names[pitch % 12]) + juce::String(pitch / 12 - 1);
+}
+
 void PianoRollEditor::quantizeSelected()
 {
     // クォンタイズ: 選択ノート (未選択なら全ノート) の開始位置を GRID の最寄りへスナップする。
@@ -1427,6 +1923,7 @@ void PianoRollEditor::snapshotForUndo()
             pendingCommit    = true;
             pendingBeforeSeq.clear();
             pendingBeforeSeq.addSequence(clip.getSequence(), 0.0);
+            pendingBeforeDur = clip.getDuration();
             juce::Component::SafePointer<PianoRollEditor> safeThis(this);
             juce::MessageManager::callAsync([safeThis]
             {
@@ -1477,7 +1974,8 @@ void PianoRollEditor::commitPendingUndoAction()
     // 実際にノートが変化していなければ Undo 履歴に積まない (クリック選択だけで MoveNotes
     // モードに入り writeNotesToClip → commit まで到達しても、空アクションで Cmd+Z が
     // 無反応になるのを防ぐ)。
-    if (midiSequencesEqual(pendingBeforeSeq, afterSeq))
+    if (midiSequencesEqual(pendingBeforeSeq, afterSeq)
+        && std::abs(pendingBeforeDur - clip.getDuration()) < 1.0e-9)
     {
         pendingBeforeSeq.clear();
         return;
@@ -1488,7 +1986,8 @@ void PianoRollEditor::commitPendingUndoAction()
         clip,
         externalReloadCallback,  // クリップ→現在開いている Editor を解決するコールバック
         std::move(pendingBeforeSeq),
-        std::move(afterSeq)));
+        std::move(afterSeq),
+        pendingBeforeDur, clip.getDuration()));
 
     pendingBeforeSeq.clear();
 }
@@ -1626,6 +2125,21 @@ void PianoRollEditor::paint(juce::Graphics& g)
         g.drawRect(rubberBand, 1);
     }
 
+    // ベロシティのランプ描画中はガイド線を出す (レーンのコンテンツ領域内)
+    if (dragMode == DragMode::VelocityRamp && ctrlLane == CtrlLane::Velocity)
+    {
+        const int top    = getHeight() - velocityH;
+        const int bottom = getHeight() - kScrollBarH;
+        auto yFor = [&](float v) { return (float)(bottom - (int)(v * (float)(bottom - top))); };
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(keyboardW, top + 1,
+                           juce::jmax(0, getWidth() - keyboardW),
+                           juce::jmax(0, bottom - top - 1));
+        g.setColour(AppColours::accent.withAlpha(0.9f));
+        g.drawLine((float) timeToX(rampT0), yFor(rampV0),
+                   (float) timeToX(rampT1), yFor(rampV1), 1.5f);
+    }
+
     // ドラッグ / ホバー中の数値表示 (最前面)
     drawValueReadout(g);
 }
@@ -1644,6 +2158,12 @@ void PianoRollEditor::drawKeyboard(juce::Graphics& g) const
         const bool isBlack = blackKeys[p % 12];
         g.setColour(isBlack ? juce::Colour(0xff111213) : juce::Colour(0xffe8e8e8));
         g.fillRect(0, y, keyboardW - 1, pitchHeight - 1);
+        // クリック試聴中の鍵をハイライト
+        if (p == auditionPitch)
+        {
+            g.setColour(AppColours::accent.withAlpha(0.55f));
+            g.fillRect(0, y, keyboardW - 1, pitchHeight - 1);
+        }
         // C のラベル
         if (p % 12 == 0)
         {
@@ -1693,6 +2213,16 @@ void PianoRollEditor::drawNotes(juce::Graphics& g) const
         g.fillRect(x1, y + 1, juce::jmax(2, x2 - x1) - 1, pitchHeight - 2);
         g.setColour(juce::Colour(0xff000000).withAlpha(0.4f));
         g.drawRect(x1, y + 1, juce::jmax(2, x2 - x1) - 1, pitchHeight - 2, 1);
+
+        // ノート上の音名表示 (収まる大きさの時だけ。C4 等 = 鍵盤ラベルと同じ表記)
+        const int w = x2 - x1;
+        if (pitchHeight >= 10 && w >= 26)
+        {
+            g.setColour(col.contrasting(0.7f).withAlpha(0.85f));
+            g.setFont(juce::FontOptions((float) juce::jmin(10, pitchHeight - 3)));
+            g.drawText(noteNameFor(n.pitch), x1 + 3, y + 1, w - 5, pitchHeight - 2,
+                       juce::Justification::centredLeft);
+        }
     }
 }
 
@@ -1974,12 +2504,35 @@ void PianoRollEditor::removeLaneEventsBetween(double t1, double t2, CtrlLane lan
         }), ctrlMsgs.end());
 }
 
-void PianoRollEditor::insertLaneEvent(const juce::MidiMessage& m)
+int PianoRollEditor::insertLaneEvent(const juce::MidiMessage& m)
 {
     // 時刻順を保って挿入 (laneEffectiveValueAt / 描画のステップ線が順序に依存する)
     auto it = std::upper_bound(ctrlMsgs.begin(), ctrlMsgs.end(), m.getTimeStamp(),
         [](double t, const juce::MidiMessage& x) { return t < x.getTimeStamp(); });
-    ctrlMsgs.insert(it, m);
+    return (int) std::distance(ctrlMsgs.begin(), ctrlMsgs.insert(it, m));
+}
+
+// 現在レーンの既存イベント点 (描画と同じ x=時刻 / y=値 の小さな四角) のヒットテスト。
+// 最も近い点を返す (-1 = 非ヒット)。素のクリックで掴んで値/時刻をドラッグ調整できる
+int PianoRollEditor::hitTestCtrlPoint(juce::Point<int> p) const
+{
+    int best = -1;
+    int bestDist = std::numeric_limits<int>::max();
+    for (int i = 0; i < (int) ctrlMsgs.size(); ++i)
+    {
+        const auto& m = ctrlMsgs[(size_t) i];
+        if (!msgMatchesLane(m, ctrlLane)) continue;
+        const int x = timeToX(m.getTimeStamp());
+        const int y = laneValueToY((ctrlLane == CtrlLane::PitchBend)
+                                       ? m.getPitchWheelValue() : m.getControllerValue(),
+                                   ctrlLane);
+        const int dx = std::abs(p.x - x);
+        const int dy = std::abs(p.y - y);
+        if (dx > kCtrlPointHitPx || dy > kCtrlPointHitPx) continue;
+        const int d = dx * dx + dy * dy;
+        if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
 }
 
 void PianoRollEditor::applyCtrlDragPoint(juce::Point<int> pos, bool erase)
@@ -1988,8 +2541,9 @@ void PianoRollEditor::applyCtrlDragPoint(juce::Point<int> pos, bool erase)
     const double maxT = (clipLen > 0.0) ? juce::jmax(0.0, clipLen - 1e-4) : 1.0e9;
     double t = juce::jlimit(0.0, maxT, xToTime(pos.x));
     // GRID オン時は入力位置をグリッドへスナップ (グリッド単位の段付き入力になる)。
-    // 消去はスナップしない (掃いた範囲をそのまま消す)
-    const double u = snapUnitSecs();
+    // 消去はスナップしない (掃いた範囲をそのまま消す)。
+    // Cmd+Option のフリー描画は GRID を無視して 10ms 間隔の滑らかな入力 (GRID:Off と同じ)
+    const double u = ctrlFreeDraw ? 0.0 : snapUnitSecs();
     if (!erase && u > 0.0)
         t = juce::jlimit(0.0, maxT, std::round(t / u) * u);
     const int v = laneValueFromY(pos.y, ctrlLane);
@@ -2148,7 +2702,7 @@ void PianoRollEditor::drawCtrlLane(juce::Graphics& g) const
         if (x >= keyboardW && x <= laneRight)
         {
             g.drawVerticalLine(x, (float) juce::jmin(prevY, y), (float) juce::jmax(prevY, y));
-            g.fillRect(x - 1, y - 1, 3, 3);
+            g.fillRect(x - 2, y - 2, 5, 5);   // 掴める点 (hitTestCtrlPoint の対象) なので視認しやすく
         }
         prevX = juce::jmax(prevX, x);
         prevY = y;
