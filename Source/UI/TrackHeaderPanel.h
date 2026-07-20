@@ -28,6 +28,12 @@ public:
     void mouseDoubleClick(const juce::MouseEvent&) override;
 
     void refresh();
+    // 全ビューを必ず作り直す (fast-path を経由しない)。プロジェクト読み込み後に使う:
+    // 読み込み中は addTrack 1 本ごとに onChanged → refresh が走るが、各トラックの種別フラグ
+    // (isMidiTrack 等) は addTrack の「後」に設定されるため、**最後に追加されたトラックだけ**
+    // フラグ未設定のまま (= 音声レイアウトの) ビューが作られてしまう (MIDI トラックに I/In:/TList
+    // が出る不具合)。読み込み完了時に全フラグが確定した状態で作り直して直す。
+    void forceRebuild() { displayedTracks.clear(); refresh(); }
     // ループ録音のラップ時用の軽量版: 録音アーム中のトラック (= テイクレーンが増えた
     // トラック) のビューだけ refresh して再レイアウトする。他トラックの ComboBox 再構築や
     // 全面 repaint を毎ラップ繰り返さない (多トラック時のラップ瞬間のヒッチ防止)。

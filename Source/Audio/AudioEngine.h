@@ -750,6 +750,11 @@ public:
     // (MainComponent::updateLiveMidiTarget が選択中の MIDI トラックを publish する)
     void setLiveMidiTargetTrack(int trackIdx) { liveMidiTargetTrack.store(trackIdx); }
     int  getLiveMidiTargetTrack() const       { return liveMidiTargetTrack.load(); }
+    // 停止中、ライブ MIDI ターゲット (trackIdx) の内蔵シンセが現スナップショットにまだ無い
+    // (新規追加した MIDI トラック等・停止中の編集は playbackDirty を立てるだけで再構築しない)
+    // 場合に、その場でスナップショットを再構築して synth を用意する。message thread から呼ぶ。
+    // 再生中や target < 0・既に synth がある場合は何もしない (毎 tick 呼んでも無害)。
+    void ensureLiveMidiTargetPrepared(TrackManager& tm, int trackIdx);
 private:
     struct PreviewMidiEvent { int trackIdx; int note; float velocity; bool isOn; };
     juce::CriticalSection previewMidiLock;

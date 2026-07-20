@@ -340,7 +340,11 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
     toolbar.setPreRollSecs(appSettings.preRollSecs);
     // GRID 表示も復元した snapMode に同期 (スナップは効くのに表示が Off のままになるのを防ぐ)
     syncSnapLabelToSettings();
-    trackHeaderPanel.refresh();
+    // forceRebuild (通常の refresh ではない): 読み込み中は addTrack ごとに onChanged→refresh が
+    // 走るが、種別フラグ (isMidiTrack 等) は addTrack の後に設定されるため、最後に追加された
+    // トラックだけフラグ未設定のビュー (音声レイアウト) になる (MIDI トラックに I/In:/TList が
+    // 出る不具合)。全フラグ確定後にここで作り直す。fast-path はトラック集合不変で素通りするため通らない
+    trackHeaderPanel.forceRebuild();
     timelineView.refresh();
     audioEngine.preparePlayback(trackManager);
     // 読み込んだ CLICK トラックの状態をメトロノームへ反映 (無ければ停止)

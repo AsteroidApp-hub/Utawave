@@ -2001,6 +2001,39 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
             expectWithinAbsoluteError(pL, 0.5f, 0.03f,
                                       "playing: live MIDI reaches the INS chain");
         }
+
+        // (5) 停止中に MIDI トラックを「後から」追加したケース (実バグ再現・2026-07):
+        //     停止中の編集は playbackDirty を立てるだけで snapshot を再構築しないため、
+        //     追加直後のトラックは activeSnapshot に synth が無く、キーボードを弾いても鳴らない。
+        //     updateLiveMidiTarget から呼ぶ ensureLiveMidiTargetPrepared が synth を用意する
+        {
+            Scene s;
+            // 最初は空 (トラック 0 個) で start → その後に MIDI トラックを追加
+            s.start();
+            auto* t = addEmptyMidiTrack(s, /*synthOn*/ true);
+            juce::ignoreUnused(t);
+            s.engine.invalidatePlayback();   // 停止中の編集: dirty を立てるだけ (再構築しない)
+            s.engine.setLiveMidiTargetTrack(0);
+
+            // 修復前: この時点の snapshot には synth が無い → drain は空振りで無音のはず
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 127));
+            float pL = 0, pR = 0;
+            runBlocks(s.engine, 8, &pL, &pR);
+            expect(pL < 0.01f, "stale snapshot: newly added track has no synth yet");
+
+            // ensureLiveMidiTargetPrepared で snapshot を再構築 → 以降は鳴る
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOff(1, 69));
+            runBlocks(s.engine, 4);
+            s.engine.ensureLiveMidiTargetPrepared(*s.tm, 0);
+            s.engine.pushLiveMidi(juce::MidiMessage::noteOn(1, 69, (juce::uint8) 127));
+            runBlocks(s.engine, 8, &pL, &pR);
+            expectWithinAbsoluteError(pL, 0.25f * kCenterPan, 0.03f,
+                                      "after ensure: newly added track sounds on live note-on");
+            // 既に synth があれば no-op (再構築でボイスを飛ばさない): 押しっぱなしのまま呼んでも鳴り続ける
+            s.engine.ensureLiveMidiTargetPrepared(*s.tm, 0);
+            runBlocks(s.engine, 4, &pL, &pR);
+            expect(pL > 0.1f, "ensure is a no-op when synth already exists (voice kept)");
+        }
     }
 };
 

@@ -1360,6 +1360,25 @@ void AudioEngine::invalidatePlayback()
         playbackDirty.store(true);
 }
 
+void AudioEngine::ensureLiveMidiTargetPrepared(TrackManager& tm, int trackIdx)
+{
+    // 停止中の編集は playbackDirty を立てるだけで再構築しないため、新規追加した MIDI トラックは
+    // activeSnapshot に synth が無い (index も範囲外)。その状態で MIDI キーボードを弾いても
+    // ライブ MIDI drain の synth 参照が空振りして鳴らない (ユーザー報告 2026-07)。停止中に
+    // ターゲットの synth が未用意なら、ここで再構築して用意する (次の play() を待たない)。
+    if (trackIdx < 0 || playing.load()) return;
+
+    bool ready = false;
+    {
+        std::shared_ptr<PlaybackSnapshot> snap;
+        { const juce::SpinLock::ScopedLockType l(snapshotLock); snap = activeSnapshot; }
+        if (snap && trackIdx < (int) snap->synths.size() && snap->synths[(size_t) trackIdx])
+            ready = true;
+    }
+    if (!ready)
+        preparePlayback(tm);   // message thread 専用 (readerPool)。呼び出し側が保証する
+}
+
 void AudioEngine::renderClip(PlaybackClip& pc, juce::AudioBuffer<float>& output,
                               juce::AudioBuffer<float>& scratch,
                               double posStart, int numSamples, bool preFader, bool allowStreaming)

@@ -1322,4 +1322,10 @@ void MainComponent::updateLiveMidiTarget()
                 }
     }
     audioEngine.setLiveMidiTargetTrack(target);
+    // 停止中に新規追加した MIDI トラック等は activeSnapshot にまだ synth が無い
+    // (停止中の編集は playbackDirty を立てるだけで再構築しない)。ターゲットの synth を
+    // その場で用意して、クリップが無くてもキーボード入力で鳴るようにする (要望 2026-07)。
+    // 20Hz で呼ばれるが synth が既にあれば no-op なので毎 tick の再構築は起きない。
+    if (target >= 0)
+        audioEngine.ensureLiveMidiTargetPrepared(trackManager, target);
 }

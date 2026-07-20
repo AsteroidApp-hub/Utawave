@@ -318,11 +318,16 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
             int kc = key.getKeyCode();
             if (kc == 'r' || kc == 'R')
             {
-                if (t->isFolderTrack() || t->isMidiTrack() || t->isClickTrack()
-                    || t->isAppCaptureTrack())
+                if (t->isFolderTrack() || t->isClickTrack() || t->isAppCaptureTrack())
                     return true;   // 録音アーム対象外
+                // MIDI トラックは MIDI キーボード接続中のみアーム可 (R ボタンの表示条件と一致。
+                // 未接続では入力手段が無いのでボタンも出ない = Shift+R も無効)
+                if (t->isMidiTrack() && midiKeyboardInput == nullptr)
+                    return true;
                 t->setRecArmed(!t->isRecArmed());
                 trackHeaderPanel.refresh();
+                // MIDI トラックのアームはライブ MIDI のモニタ対象に即反映 (録音先 = モニタ音源)
+                if (t->isMidiTrack()) updateLiveMidiTarget();
                 return true;
             }
             if (kc == 's' || kc == 'S')
