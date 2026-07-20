@@ -13,7 +13,7 @@ if(UTAWAVE_MAC_UNIVERSAL)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS build architectures" FORCE)
 endif()
 
-project(Utawave VERSION 1.0.4)
+project(Utawave VERSION 1.0.5)
 
 if(UTAWAVE_MAC_UNIVERSAL)
     message(STATUS "Utawave: macOS Universal binary (arm64 + x86_64)")
@@ -44,7 +44,7 @@ juce_add_gui_app(Utawave
     PRODUCT_NAME                    "Utawave"
     COMPANY_NAME                    "Utawave"
     BUNDLE_ID                       "com.utawave.app"
-    VERSION                         "1.0.4"
+    VERSION                         "1.0.5"
     ICON_BIG                        "${CMAKE_CURRENT_SOURCE_DIR}/Icon/icon_1024.png"
     ICON_SMALL                      "${CMAKE_CURRENT_SOURCE_DIR}/Icon/icon_256.png"
     MICROPHONE_PERMISSION_ENABLED   TRUE
