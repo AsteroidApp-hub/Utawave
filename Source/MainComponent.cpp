@@ -149,6 +149,10 @@ MainComponent::MainComponent()
             t->setVolume(-7.0f);
             t->setPan(audioEngine.getMetronomePan());
             pushTrackAddUndo(t);
+            // ヘッダビューは addClickTrack の onChanged で既定値のまま作られるため、
+            // 後から設定した Vol(-7)/Pan/音色を反映するには refresh が要る (MIDI トラックと
+            // 同じ「追加直後だけ Vol 表示が 0 dB」不具合の予防)
+            trackHeaderPanel.refresh();
         }
         // CLICK トラックを追加したら -7dB をエンジンへ反映し、追加直後から鳴る状態にする
         // (CLICK ボタンの点灯も syncClickTrackToEngine 内で同期される)。
@@ -1420,6 +1424,11 @@ void MainComponent::addMidiTrack()
                                         newTrackInsertAfter(), /*midi=*/true);
     if (!track) return;
     track->setVolume(-14.0f);  // 内蔵シンセ出力は大きめなので控えめに
+    // ヘッダビューは addTrack の onChanged で (まだ既定 0 dB の状態で) 作られるため、
+    // setVolume(-14) を後から反映するには refresh が要る (無いと追加直後だけ Vol 表示が
+    // 0 dB のまま = トラック移動で直る不具合)。fast-path で各ビューの Vol スライダーを
+    // getVolume() から引き直す
+    trackHeaderPanel.refresh();
 
     // クリップは空のまま作らない。ユーザがタイムライン上で
     // Option+ドラッグ または 空きエリアのダブルクリックで MIDI クリップを作る。
