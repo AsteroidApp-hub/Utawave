@@ -29,12 +29,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
     message(STATUS "JUCE: ローカルの JUCE/ を使用")
     add_subdirectory(JUCE)
 else()
-    message(STATUS "JUCE: ローカルに無いため FetchContent で取得 (8.0.12)")
+    message(STATUS "JUCE: ローカルに無いため FetchContent で取得 (8.0.15)")
     include(FetchContent)
     FetchContent_Declare(
         JUCE
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG        8.0.12          # 開発時 commit は 501c0767。厳密一致が必要ならこの SHA に置換し GIT_SHALLOW を外す
+        GIT_TAG        8.0.15          # 8 系最新パッチ。厳密一致が必要ならこの tag を SHA に置換し GIT_SHALLOW を外す
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(JUCE)
