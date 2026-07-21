@@ -215,6 +215,9 @@ private:
 
     int  hitTestMarker(int x, int y) const;
     void showMarkerContextMenu(int idx);
+    // 右クリック位置に応じた各種メニュー (マーカー/テンポ/拍子/共通)。macOS で mouseDown 内の
+    // 同期表示が即閉じされるのを避けるため、mouseDown から callAsync で遅延呼び出しする
+    void showRulerContextMenuAt(int x, int y);
 
     // 左クリックでのシーク + ドラッグ初期化 (Bars/Time 行・Tempo 行・Meter 行で共用)
     void beginSeekDrag(const juce::MouseEvent& e);

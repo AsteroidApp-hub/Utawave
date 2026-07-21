@@ -187,83 +187,16 @@ void TimelineRuler::showMarkerContextMenu(int idx)
 void TimelineRuler::mouseDown(const juce::MouseEvent& e)
 {
     // ── 右クリック (どの行でも有効): マーカー固有メニュー or 共通メニュー ──
+    // メニュー表示は callAsync で 1 フレーム遅延させる。macOS では mouseDown 内で同期表示すると
+    // 直後の rightMouseUp 等が開いたばかりのモーダルを即閉じし「出たり出なかったり」になるため
     if (e.mods.isRightButtonDown())
     {
-        // マーカー上ならマーカー専用メニュー
-        const int hitMarkerR = hitTestMarker(e.x, e.y);
-        if (hitMarkerR >= 0)
-        {
-            showMarkerContextMenu(hitMarkerR);
-            return;
-        }
-        // Tempo マーカー上ならテンポ削除メニュー
-        const int hitBpmR = hitTestBpmMarker(e.x, e.y);
-        if (hitBpmR >= 0)
-        {
-            juce::PopupMenu m;
-            m.addItem(1, tr(u8"このテンポ変更を削除"));
-            m.showMenuAsync(juce::PopupMenu::Options(),
-                [this, hitBpmR](int result) {
-                    if (result == 1 && hitBpmR < (int)bpmChanges.size())
-                    {
-                        beginMusicEdit();
-                        bpmChanges.erase(bpmChanges.begin() + hitBpmR);
-                        if (onBpmChangesUpdated) onBpmChangesUpdated(bpmChanges);
-                        commitMusicEdit();
-                        repaint();
-                    }
-                });
-            return;
-        }
-        // Meter マーカー上なら拍子削除メニュー
-        const int hitMeterR = hitTestMeterMarker(e.x, e.y);
-        if (hitMeterR >= 0)
-        {
-            juce::PopupMenu m;
-            m.addItem(1, tr(u8"この拍子変更を削除"));
-            m.showMenuAsync(juce::PopupMenu::Options(),
-                [this, hitMeterR](int result) {
-                    if (result == 1 && hitMeterR < (int)meterChanges.size())
-                    {
-                        beginMusicEdit();
-                        meterChanges.erase(meterChanges.begin() + hitMeterR);
-                        if (onMeterChangesUpdated) onMeterChangesUpdated(meterChanges);
-                        commitMusicEdit();
-                        repaint();
-                    }
-                });
-            return;
-        }
-        // それ以外（Tempo / Meter / Bars / Time / Marker 空きエリア）→ 共通メニュー
-        const double t = xToSeconds(e.x);
-        juce::PopupMenu m;
-        m.addItem(1, tr(u8"ここにマーカーを追加"));
-        m.addSeparator();
-        m.addItem(22, tr(u8"ループ範囲をクリア"));
-        m.addItem(30, tr(u8"全マーカーをクリア"));
-        m.addSeparator();
-        m.addItem(50, tr(u8"小節を表示"),   /*enabled*/ true, /*ticked*/ barsRowVisible);
-        m.addItem(51, tr(u8"小節を非表示"), /*enabled*/ true, /*ticked*/ !barsRowVisible);
-        m.addSeparator();
-        m.addItem(40, tr(u8"時刻を表示"),   /*enabled*/ true, /*ticked*/ timeRowVisible);
-        m.addItem(41, tr(u8"時刻を非表示"), /*enabled*/ true, /*ticked*/ !timeRowVisible);
-        m.showMenuAsync(juce::PopupMenu::Options(),
-            [this, t](int result) {
-                if (result == 1 && onAddMarker)     onAddMarker(t);
-                if (result == 22 && onClearLoop)    onClearLoop();
-                if (result == 30 && onClearMarkers) onClearMarkers();
-                if (result == 40 || result == 41)
-                {
-                    const bool show = (result == 40);
-                    setTimeRowVisible(show);
-                    if (onTimeRowVisibilityChanged) onTimeRowVisibilityChanged(show);
-                }
-                if (result == 50 || result == 51)
-                {
-                    const bool show = (result == 50);
-                    setBarsRowVisible(show);
-                    if (onBarsRowVisibilityChanged) onBarsRowVisibilityChanged(show);
-                }
+        const int mx = e.x, my = e.y;
+        juce::MessageManager::callAsync(
+            [safe = juce::Component::SafePointer<TimelineRuler>(this), mx, my]
+            {
+                if (auto* self = safe.getComponent())
+                    self->showRulerContextMenuAt(mx, my);
             });
         return;
     }
@@ -341,6 +274,88 @@ void TimelineRuler::mouseDown(const juce::MouseEvent& e)
 
     // 左クリック: ドラッグ開始位置を記録 + シーク（snap 適用）
     beginSeekDrag(e);
+}
+
+// 右クリックメニューの実体。mouseDown から callAsync で遅延呼び出しされる (macOS で
+// mouseDown 内の同期表示が即閉じされるのを防ぐ)。座標は右クリック時の (mx, my)
+void TimelineRuler::showRulerContextMenuAt(int mx, int my)
+{
+    // マーカー上ならマーカー専用メニュー
+    const int hitMarkerR = hitTestMarker(mx, my);
+    if (hitMarkerR >= 0)
+    {
+        showMarkerContextMenu(hitMarkerR);
+        return;
+    }
+    // Tempo マーカー上ならテンポ削除メニュー
+    const int hitBpmR = hitTestBpmMarker(mx, my);
+    if (hitBpmR >= 0)
+    {
+        juce::PopupMenu m;
+        m.addItem(1, tr(u8"このテンポ変更を削除"));
+        m.showMenuAsync(juce::PopupMenu::Options(),
+            [this, hitBpmR](int result) {
+                if (result == 1 && hitBpmR < (int)bpmChanges.size())
+                {
+                    beginMusicEdit();
+                    bpmChanges.erase(bpmChanges.begin() + hitBpmR);
+                    if (onBpmChangesUpdated) onBpmChangesUpdated(bpmChanges);
+                    commitMusicEdit();
+                    repaint();
+                }
+            });
+        return;
+    }
+    // Meter マーカー上なら拍子削除メニュー
+    const int hitMeterR = hitTestMeterMarker(mx, my);
+    if (hitMeterR >= 0)
+    {
+        juce::PopupMenu m;
+        m.addItem(1, tr(u8"この拍子変更を削除"));
+        m.showMenuAsync(juce::PopupMenu::Options(),
+            [this, hitMeterR](int result) {
+                if (result == 1 && hitMeterR < (int)meterChanges.size())
+                {
+                    beginMusicEdit();
+                    meterChanges.erase(meterChanges.begin() + hitMeterR);
+                    if (onMeterChangesUpdated) onMeterChangesUpdated(meterChanges);
+                    commitMusicEdit();
+                    repaint();
+                }
+            });
+        return;
+    }
+    // それ以外（Tempo / Meter / Bars / Time / Marker 空きエリア）→ 共通メニュー
+    const double t = xToSeconds(mx);
+    juce::PopupMenu m;
+    m.addItem(1, tr(u8"ここにマーカーを追加"));
+    m.addSeparator();
+    m.addItem(22, tr(u8"ループ範囲をクリア"));
+    m.addItem(30, tr(u8"全マーカーをクリア"));
+    m.addSeparator();
+    m.addItem(50, tr(u8"小節を表示"),   /*enabled*/ true, /*ticked*/ barsRowVisible);
+    m.addItem(51, tr(u8"小節を非表示"), /*enabled*/ true, /*ticked*/ !barsRowVisible);
+    m.addSeparator();
+    m.addItem(40, tr(u8"時刻を表示"),   /*enabled*/ true, /*ticked*/ timeRowVisible);
+    m.addItem(41, tr(u8"時刻を非表示"), /*enabled*/ true, /*ticked*/ !timeRowVisible);
+    m.showMenuAsync(juce::PopupMenu::Options(),
+        [this, t](int result) {
+            if (result == 1 && onAddMarker)     onAddMarker(t);
+            if (result == 22 && onClearLoop)    onClearLoop();
+            if (result == 30 && onClearMarkers) onClearMarkers();
+            if (result == 40 || result == 41)
+            {
+                const bool show = (result == 40);
+                setTimeRowVisible(show);
+                if (onTimeRowVisibilityChanged) onTimeRowVisibilityChanged(show);
+            }
+            if (result == 50 || result == 51)
+            {
+                const bool show = (result == 50);
+                setBarsRowVisible(show);
+                if (onBarsRowVisibilityChanged) onBarsRowVisibilityChanged(show);
+            }
+        });
 }
 
 int TimelineRuler::hitTestLoopHandle(int x, int y) const

@@ -275,50 +275,58 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             }
             repaint();
 
-            // 結合対象 = 選択中クリップのうち右クリックしたトラック上のもの (2 つ以上で活性)
-            int mergeCount = 0;
-            {
-                if (selectedMidiTrack == mh.track && selectedMidiClip != nullptr) ++mergeCount;
-                for (const auto& p : extraMidiSelections)
-                    if (p.second == mh.track) ++mergeCount;
-            }
-            const int selCount = selectedMidiClipCount();
-
-            juce::PopupMenu m;
-            m.addItem(1, tr(u8"ピアノロールを開く"));
-            // ノートの開始位置を GRID にスナップ (GRID:Off の間は選べない)
-            m.addItem(3, tr(u8"クォンタイズ (GRID)"),
-                      snapModeUnitSecs(appSettings.snapMode, bpm) > 0.0);
-            if (mergeCount >= 2)
-                m.addItem(4, tr(u8"選択したMIDIクリップを結合") + " (" + juce::String(mergeCount) + ")");
-            m.addSeparator();
-            m.addItem(2, selCount >= 2 ? tr(u8"削除") + " (" + juce::String(selCount) + ")"
-                                       : tr(u8"削除"));
-            // メニュー表示中にプロジェクトを閉じる / クリップが消えることがあるため、
-            // this は SafePointer・clip/track は実行時に生存確認してから触る (UAF 防止)
-            m.showMenuAsync(juce::PopupMenu::Options(),
+            // メニュー構築 + 表示は callAsync で遅延させる (macOS で mouseDown 内の同期表示が
+            // 直後のイベントで即閉じされる「出たり出なかったり」を防ぐ・音声クリップと同じ理由)。
+            // 選択ハイライトの repaint までは同期で済ませ即時フィードバックする
+            juce::MessageManager::callAsync(
                 [safe = juce::Component::SafePointer<TimelineView>(this),
-                 clip = mh.clip, track = mh.track](int result)
+                 clip = mh.clip, track = mh.track]
                 {
                     auto* tv = safe.getComponent();
                     if (tv == nullptr || !tv->midiClipStillExists(clip, track)) return;
-                    if (result == 1)
-                    {
-                        if (tv->onMidiClipDoubleClicked) tv->onMidiClipDoubleClicked(clip, track);
-                    }
-                    else if (result == 2)
-                    {
-                        // 選択全体 (右クリックしたクリップを含む) を一括削除
-                        tv->deleteSelectedMidiClip();
-                    }
-                    else if (result == 3)
-                    {
-                        tv->quantizeMidiClip(track, clip);
-                    }
-                    else if (result == 4)
-                    {
-                        tv->mergeSelectedMidiClips(track);
-                    }
+
+                    // 結合対象 = 選択中クリップのうち右クリックしたトラック上のもの (2 つ以上で活性)
+                    int mergeCount = 0;
+                    if (tv->selectedMidiTrack == track && tv->selectedMidiClip != nullptr) ++mergeCount;
+                    for (const auto& p : tv->extraMidiSelections)
+                        if (p.second == track) ++mergeCount;
+                    const int selCount = tv->selectedMidiClipCount();
+
+                    juce::PopupMenu m;
+                    m.addItem(1, tr(u8"ピアノロールを開く"));
+                    // ノートの開始位置を GRID にスナップ (GRID:Off の間は選べない)
+                    m.addItem(3, tr(u8"クォンタイズ (GRID)"),
+                              snapModeUnitSecs(tv->appSettings.snapMode, tv->bpm) > 0.0);
+                    if (mergeCount >= 2)
+                        m.addItem(4, tr(u8"選択したMIDIクリップを結合") + " (" + juce::String(mergeCount) + ")");
+                    m.addSeparator();
+                    m.addItem(2, selCount >= 2 ? tr(u8"削除") + " (" + juce::String(selCount) + ")"
+                                               : tr(u8"削除"));
+                    // メニュー表示中にプロジェクトを閉じる / クリップが消えることがあるため、
+                    // this は SafePointer・clip/track は実行時に生存確認してから触る (UAF 防止)
+                    m.showMenuAsync(juce::PopupMenu::Options(),
+                        [safe, clip, track](int result)
+                        {
+                            auto* tv2 = safe.getComponent();
+                            if (tv2 == nullptr || !tv2->midiClipStillExists(clip, track)) return;
+                            if (result == 1)
+                            {
+                                if (tv2->onMidiClipDoubleClicked) tv2->onMidiClipDoubleClicked(clip, track);
+                            }
+                            else if (result == 2)
+                            {
+                                // 選択全体 (右クリックしたクリップを含む) を一括削除
+                                tv2->deleteSelectedMidiClip();
+                            }
+                            else if (result == 3)
+                            {
+                                tv2->quantizeMidiClip(track, clip);
+                            }
+                            else if (result == 4)
+                            {
+                                tv2->mergeSelectedMidiClips(track);
+                            }
+                        });
                 });
             return;
         }
@@ -330,7 +338,18 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         auto rcRef = getClipAt(e.x, e.y);
         if (rcRef.valid())
         {
-            showAudioClipContextMenu(rcRef, e);
+            // メニュー表示は callAsync で 1 フレーム遅延させる。macOS では mouseDown 内で
+            // 同期表示すると、直後の rightMouseUp や別ウィンドウから戻った直後のアクティベート
+            // クリックが開いたばかりのモーダルを即閉じし、「右クリックメニューが出たり出なかったり」
+            // になる。イベント対を drain してから開くことで安定する (MIDI/ルーラーも同様)
+            juce::MouseEvent me = e;
+            juce::MessageManager::callAsync(
+                [safe = juce::Component::SafePointer<TimelineView>(this), rcRef, me]
+                {
+                    if (auto* tv = safe.getComponent())
+                        if (tv->clipStillExists(rcRef.clip))
+                            tv->showAudioClipContextMenu(rcRef, me);
+                });
             return;
         }
     }
