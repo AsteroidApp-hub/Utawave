@@ -187,7 +187,8 @@
       <li><a href="#project">Project Basics</a></li>
       <li><a href="#import">Importing a Backing Track</a></li>
       <li><a href="#prepare">Setting Up to Record</a></li>
-      <li><a href="#tempo">Tempo &amp; Metronome</a></li>
+      <li><a href="#tempo">Tempo (BPM) &amp; Time Signature</a></li>
+      <li><a href="#metronome">Metronome &amp; Count-In</a></li>
       <li><a href="#record">Recording</a></li>
       <li><a href="#takes">Managing Takes</a></li>
       <li><a href="#edit">Editing Waveforms</a></li>
@@ -254,18 +255,44 @@
   </section>
 
   <section id="tempo">
-    <h2><span class="num">05</span>Tempo &amp; Metronome</h2>
+    <h2><span class="num">05</span>Tempo (BPM) &amp; Time Signature</h2>
+    <p>You can change the song's tempo (BPM) and time signature (4/4, 3/4, etc.) at any time — even partway through the song.</p>
+
+    <h3>Setting the Tempo (BPM)</h3>
     <ul>
-      <li><b>Tempo (BPM)</b>: <b>Double-click</b> the BPM display in the toolbar to type a value directly.</li>
+      <li><b>Type a value</b>: <b>Double-click</b> the BPM display in the toolbar to type a value directly.</li>
       <li><b>Set it by tapping</b>: Tap the <kbd>TAP</kbd> button along with the song to estimate the tempo.</li>
       <li><b>Detect it automatically</b>: Right-click an imported track and choose "Detect Tempo" to automatically estimate the BPM from the accompaniment.</li>
+    </ul>
+
+    <h3>Changing the Tempo Mid-Song</h3>
+    <p>Use the row in the ruler at the top of the timeline whose left edge shows "<b>… BPM</b>" (the tempo row).</p>
+    <ul>
+      <li><kbd>Ctrl</kbd>+click the tempo row at the position you want to change. The "Set BPM" dialog opens and inserts a tempo change starting at that position (use the toolbar's BPM display for the tempo of the whole song).</li>
+      <li>Drag an inserted tempo-change marker to move it, or right-click it → "Delete this tempo change."</li>
+    </ul>
+
+    <h3>Changing the Time Signature (4/4 → 3/4, etc.)</h3>
+    <p>Use the row below the tempo row whose left edge shows "<b>Meter 4/4</b>" (the time-signature row).</p>
+    <ul>
+      <li><kbd>Ctrl</kbd>+click the row to open the time-signature dialog. Choose the bar number and the numerator/denominator, then press "Insert" — the time signature changes from that bar on.</li>
+      <li>Specify <b>bar 1</b> to change the time signature of the whole song.</li>
+      <li>Drag an inserted marker to move it to another bar, or right-click it → "Delete this time-signature change."</li>
+    </ul>
+    <div class="note"><b>Using the tempo &amp; time signature from a MIDI file:</b> When importing MIDI, check "Import tempo &amp; time signature" to apply the tempo and time signature recorded in the file (including mid-song changes) to your project.</div>
+    <div class="note"><b>Note:</b> Changing the tempo or time signature updates the bar grid and the metronome, but <b>notes and audio you have already placed do not stretch or move</b>. We recommend deciding on them before you start recording or entering notes.</div>
+  </section>
+
+  <section id="metronome">
+    <h2><span class="num">06</span>Metronome &amp; Count-In</h2>
+    <ul>
       <li><b>Metronome</b>: Use the <kbd>CLICK</kbd> button to turn the click sound on / off. You can also adjust its volume and more on the dedicated click track.</li>
       <li><b>Count-in</b>: You can set how many bars of count-in play before recording starts (the <kbd>C-IN</kbd> button in the toolbar).</li>
     </ul>
   </section>
 
   <section id="record">
-    <h2><span class="num">06</span>Recording</h2>
+    <h2><span class="num">07</span>Recording</h2>
     <ol class="step">
       <li>Confirm that <kbd>R</kbd> is lit on the track you want to record to.</li>
       <li>Move the playback position to where you want recording to start (click the ruler, or move bar by bar with <kbd>N</kbd> / <kbd>B</kbd>).</li>
@@ -281,7 +308,7 @@
   </section>
 
   <section id="takes">
-    <h2><span class="num">07</span>Managing Takes</h2>
+    <h2><span class="num">08</span>Managing Takes</h2>
     <p>When you re-record over the same spot, the previous take isn't deleted; it's automatically moved aside to a <b>take lane</b>. You can compare them and pick the best one.</p>
     <ul>
       <li>Use the track's <kbd>TList</kbd> button to show / hide the take lanes.</li>
@@ -291,7 +318,7 @@
   </section>
 
   <section id="edit">
-    <h2><span class="num">08</span>Editing Waveforms</h2>
+    <h2><span class="num">09</span>Editing Waveforms</h2>
     <p>Each chunk of audio on the timeline is called a "waveform." You can edit them intuitively with the mouse.</p>
     <table>
       <tr><th>What you want to do</th><th>How</th></tr>
@@ -317,7 +344,7 @@
   </section>
 
   <section id="pitch">
-    <h2><span class="num">09</span>Key Change &amp; Tempo Detection</h2>
+    <h2><span class="num">10</span>Key Change &amp; Tempo Detection</h2>
     <ul>
       <li><b>Change the key (pitch)</b>: Right-click a waveform → "Change Key..." to choose from -6 to +6 semitones. High-quality processing transposes it while preserving sound quality. The result is saved as a new file, so with the same setting it applies instantly next time. Choose "0 (original pitch)" to return to the original.</li>
       <li><b>Find the tempo</b>: Right-click a waveform → "Detect Tempo" to automatically estimate the accompaniment's BPM.</li>
@@ -325,7 +352,7 @@
   </section>
 
   <section id="fx">
-    <h2><span class="num">10</span>Effects (FX)</h2>
+    <h2><span class="num">11</span>Effects (FX)</h2>
     <p>You can add <b>plugins</b> such as reverb and compressors to individual tracks or to the whole mix (master).</p>
     <h3>Opening the FX Slots</h3>
     <p>Press the <kbd>FX</kbd> button at the bottom left of the TRACKS panel to show the <b>effect slots (INS)</b> on the right side of each track. Press it again to hide them.</p>
@@ -340,7 +367,7 @@
   </section>
 
   <section id="midi">
-    <h2><span class="num">11</span>Importing &amp; Entering MIDI</h2>
+    <h2><span class="num">12</span>Importing &amp; Entering MIDI</h2>
     <p>You can import MIDI data (<code>.mid</code> files) to use as a guide melody, harmony, or accompaniment. You can also enter notes by hand.</p>
 
     <h3>Importing a MIDI File</h3>
@@ -353,15 +380,31 @@
     <div class="note"><b>To make them sound:</b> Imported MIDI tracks play with a built-in tone. Insert a sound-source plugin of your choice to play them with that tone (add it the same way as in <a href="#fx">Effects (FX)</a>).</div>
 
     <h3>Entering Notes by Hand (Creating Harmonies &amp; Guides)</h3>
+    <p>You can create MIDI from scratch <b>with just a mouse</b> — no MIDI keyboard or other external gear is required.</p>
+    <p><b>Step 1: Add a MIDI track</b></p>
     <ul>
-      <li>From the add-track menu, choose "Add MIDI Track."</li>
-      <li><b>Double-click</b> the timeline to create a region for note entry, then <b>double-click</b> that region to open the piano roll (the keyboard editing view).</li>
-      <li>In the piano roll, double-click an empty area to add a note, drag to move or resize, and press <kbd>Delete</kbd> to delete. Use <kbd>↑</kbd> / <kbd>↓</kbd> to move up or down a semitone.</li>
+      <li>Press the <b><kbd>＋</kbd> button at the bottom-left</b> of the track list (TRACKS) on the left side of the screen, and choose "<b>Add MIDI Track</b>" from the menu. An empty MIDI track is added.</li>
     </ul>
+    <p><b>Step 2: Create a MIDI clip (the box that holds your notes)</b></p>
+    <ul>
+      <li><b>Double-click</b> an empty spot in the MIDI track's row to create a one-bar MIDI clip.</li>
+      <li>You can also <kbd>Alt</kbd>+drag to create a clip of the length you trace out.</li>
+      <li>Drag the middle of a clip to move it, or drag its left/right edges to resize it.</li>
+    </ul>
+    <p><b>Step 3: Enter notes in the piano roll</b></p>
+    <ul>
+      <li><b>Double-click</b> the MIDI clip to open the piano roll (the keyboard editing view).</li>
+      <li><b>Double-click</b> an empty area to add a note. Turn on the pencil button at the top (pen tool, or press <kbd>D</kbd>) to place a note with a click and set its length by dragging in one motion.</li>
+      <li>Drag notes to move them, drag their edges to resize, and press <kbd>Delete</kbd> to delete. Use <kbd>↑</kbd> / <kbd>↓</kbd> for semitones and <kbd>Shift+↑</kbd> / <kbd>Shift+↓</kbd> for octaves.</li>
+      <li>Click the keyboard on the left edge to audition a pitch.</li>
+    </ul>
+    <div class="note"><b>If you have a MIDI keyboard:</b> Connect it in Preferences → "MIDI Input" to play and hear notes directly, record in real time, or use step input (everything above works without one, too).</div>
+
+    <div class="note"><b>Changing the tempo or time signature:</b> See "<a href="#tempo">Tempo (BPM) &amp; Time Signature</a>" for how to change them (when importing MIDI, "Import tempo &amp; time signature" applies the file's tempo to your project).</div>
   </section>
 
   <section id="export">
-    <h2><span class="num">12</span>Exporting (WAV / MP3)</h2>
+    <h2><span class="num">13</span>Exporting (WAV / MP3)</h2>
     <p>When you're done, export to an audio file.</p>
     <ol class="step">
       <li>Open the <kbd>EXPORT</kbd> button at the top right, or "File" → "Export..." (<kbd>Ctrl+E</kbd>).</li>
@@ -372,7 +415,7 @@
   </section>
 
   <section id="streaming">
-    <h2><span class="num">13</span>Streaming (Karaoke Streams)</h2>
+    <h2><span class="num">14</span>Streaming (Karaoke Streams)</h2>
     <p>You can send Utawave's audio (the playing track plus your mic monitor) to streaming software such as OBS for karaoke streams.</p>
     <h3>On Windows with the standard driver (WASAPI)</h3>
     <p>Just pick Utawave in your streaming software's "Application Audio Capture" source. No extra setup needed.</p>
@@ -397,11 +440,12 @@
       <li>Balance it against your voice with the track's volume and pan (M mutes it; you can also add effects to its INS slots).</li>
     </ol>
     <div class="tip"><b>Setup:</b> Point the Windows default output device (where apps play their audio) at <b>something other than your main audio interface</b> (e.g. the built-in speakers) and turn its volume down. As long as the app can play to some device, its audio can be captured.</div>
+    <div class="tip"><b>If the built-in speakers also play the sound:</b> use headphones or an audio interface for monitoring, then open "Settings &rarr; System &rarr; Sound &rarr; Output" and set the <b>built-in speaker device's volume to 0</b>. <b>Muting the whole device does not stop the capture</b> &mdash; the audio still reaches your stream. Note: muting <b>just the app in the Volume Mixer also silences the capture</b>, so always mute at the output-device level.</div>
     <div class="note">To mix several apps, add one application track per app. If the app restarts, the capture reconnects automatically. On macOS this feature is not needed — browser audio can play through the same device as Utawave.</div>
   </section>
 
   <section id="gestures">
-    <h2><span class="num">14</span>Right-Click &amp; Handy Actions</h2>
+    <h2><span class="num">15</span>Right-Click &amp; Handy Actions</h2>
     <p class="lead">Utawave has plenty of actions that aren't shown as buttons, available through <b>right-click menus</b> and <b>double-clicks</b>. Here are the ones worth knowing that make work much easier.</p>
 
     <h3>What You Can Do with a Right-Click</h3>
@@ -439,7 +483,7 @@
   </section>
 
   <section id="shortcuts">
-    <h2><span class="num">15</span>Shortcut Quick Reference</h2>
+    <h2><span class="num">16</span>Shortcut Quick Reference</h2>
     <p>Only the main ones are listed here. You can see the full list from "Help" → "Shortcut List..." (<kbd>Ctrl+/</kbd> / <kbd>⌘/</kbd> on Mac).</p>
     <table class="keys">
       <tr><th style="width:46%">What it does</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
@@ -464,7 +508,7 @@
   </section>
 
   <section id="trouble">
-    <h2><span class="num">16</span>Troubleshooting</h2>
+    <h2><span class="num">17</span>Troubleshooting</h2>
     <h3>"Audio file not found" appears</h3>
     <p>The audio the project references may have been moved or deleted. Put the original file back into the project's <code>Audio</code> folder and it will be restored automatically.</p>
     <h3>My last session is gone / the app quit</h3>

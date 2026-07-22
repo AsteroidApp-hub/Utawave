@@ -187,7 +187,8 @@
       <li><a href="#project">專案的基本</a></li>
       <li><a href="#import">匯入伴奏音源</a></li>
       <li><a href="#prepare">準備錄音</a></li>
-      <li><a href="#tempo">節拍與節拍器</a></li>
+      <li><a href="#tempo">節拍速度（BPM）與拍號</a></li>
+      <li><a href="#metronome">節拍器與預備拍</a></li>
       <li><a href="#record">進行錄音</a></li>
       <li><a href="#takes">錄音片段（take）的管理</a></li>
       <li><a href="#edit">編輯波形</a></li>
@@ -254,18 +255,44 @@
   </section>
 
   <section id="tempo">
-    <h2><span class="num">05</span>節拍與節拍器</h2>
+    <h2><span class="num">05</span>節拍速度（BPM）與拍號</h2>
+    <p>樂曲的節拍速度（BPM）和拍號（4/4、3/4 等）隨時都能變更，也可以在樂曲中途切換。</p>
+
+    <h3>設定節拍速度（BPM）</h3>
     <ul>
-      <li><b>節拍（BPM）</b>：<b>雙擊</b>工具列的 BPM 顯示，即可直接輸入數值。</li>
-      <li><b>用敲擊設定</b>：配合曲子敲擊 <kbd>TAP</kbd> 按鈕，即可推算出節拍。</li>
-      <li><b>自動偵測</b>：右鍵點選匯入的音源 →「偵測節拍」，即可從伴奏自動推算 BPM。</li>
+      <li><b>輸入數值</b>：<b>雙擊</b>工具列的 BPM 顯示，即可直接輸入數值。</li>
+      <li><b>用敲擊設定</b>：配合曲子敲擊 <kbd>TAP</kbd> 按鈕，即可推算出速度。</li>
+      <li><b>自動偵測</b>：右鍵點選匯入的音源 →「偵測速度」，即可從伴奏自動推算 BPM。</li>
+    </ul>
+
+    <h3>在樂曲中途變更速度</h3>
+    <p>使用時間軸上方尺規中、左端顯示「<b>◯◯ BPM</b>」的那一列（速度列）。</p>
+    <ul>
+      <li>在速度列上想變更的位置 <kbd>Ctrl</kbd>+點選，會開啟「設定 BPM」對話框，即可從該位置插入速度變更（整首曲子的速度請用工具列的 BPM 顯示變更）。</li>
+      <li>插入的速度變更標記可拖曳移動位置，右鍵點選 →「刪除此速度變更」即可刪除。</li>
+    </ul>
+
+    <h3>變更拍號（4/4 → 3/4 等）</h3>
+    <p>使用速度列下方、左端顯示「<b>Meter 4/4</b>」的那一列（拍號列）。</p>
+    <ul>
+      <li>在拍號列上 <kbd>Ctrl</kbd>+點選，會開啟拍號設定對話框。選擇小節編號和分子／分母後按「插入」，拍號就會從該小節起改變。</li>
+      <li>指定<b>小節 1</b> 即可變更整首曲子的拍號。</li>
+      <li>插入的拍號變更標記可拖曳移到其他小節，右鍵點選 →「刪除此拍號變更」即可刪除。</li>
+    </ul>
+    <div class="note"><b>要使用 MIDI 檔案的速度·拍號：</b>匯入 MIDI 時勾選「一併匯入速度與拍號」，檔案中記錄的速度·拍號（包括中途的變化）就會反映到專案裡。</div>
+    <div class="note"><b>注意：</b>變更速度或拍號後，小節刻度（格線）和節拍器會採用新設定，但<b>已放置的音符和波形的位置·長度不會改變</b>。建議在開始編寫或錄音前先定好。</div>
+  </section>
+
+  <section id="metronome">
+    <h2><span class="num">06</span>節拍器與預備拍</h2>
+    <ul>
       <li><b>節拍器</b>：用 <kbd>CLICK</kbd> 按鈕開關節拍器聲音。透過節拍器專用軌道也可調整音量等。</li>
       <li><b>預備拍（count-in）</b>：可設定錄音前要先響幾小節的預備拍（工具列的 <kbd>C-IN</kbd> 按鈕）。</li>
     </ul>
   </section>
 
   <section id="record">
-    <h2><span class="num">06</span>進行錄音</h2>
+    <h2><span class="num">07</span>進行錄音</h2>
     <ol class="step">
       <li>確認要錄音的軌道的 <kbd>R</kbd> 已亮起。</li>
       <li>將播放位置對到錄音起始位置（點擊尺規，或用 <kbd>N</kbd> / <kbd>B</kbd> 一小節一小節移動）。</li>
@@ -281,7 +308,7 @@
   </section>
 
   <section id="takes">
-    <h2><span class="num">07</span>錄音片段（take）的管理</h2>
+    <h2><span class="num">08</span>錄音片段（take）的管理</h2>
     <p>在同一位置重錄時，先前的錄音片段不會消失，而是自動退避到<b>錄音片段軌（take lane）</b>。可聽比後選擇較好的片段。</p>
     <ul>
       <li>用軌道的 <kbd>TList</kbd> 按鈕切換錄音片段軌的顯示 / 隱藏。</li>
@@ -291,7 +318,7 @@
   </section>
 
   <section id="edit">
-    <h2><span class="num">08</span>編輯波形</h2>
+    <h2><span class="num">09</span>編輯波形</h2>
     <p>時間軸上的聲音區塊稱為「波形」。可用滑鼠直覺地編輯。</p>
     <table>
       <tr><th>想做的事</th><th>操作</th></tr>
@@ -317,7 +344,7 @@
   </section>
 
   <section id="pitch">
-    <h2><span class="num">09</span>變調·節拍偵測</h2>
+    <h2><span class="num">10</span>變調·節拍偵測</h2>
     <ul>
       <li><b>變更音調（音高）</b>：右鍵點選波形 →「變更音調...」，可從 -6～+6 半音中選擇。以高品質的處理在保持音質的情況下移調。結果會儲存為新檔案，相同設定下次會立即套用。選「0（原始音高）」即可回到原狀。</li>
       <li><b>查出節拍</b>：右鍵點選波形 →「偵測節拍」，即可自動推算伴奏的 BPM。</li>
@@ -325,7 +352,7 @@
   </section>
 
   <section id="fx">
-    <h2><span class="num">10</span>效果（FX）</h2>
+    <h2><span class="num">11</span>效果（FX）</h2>
     <p>可將殘響、壓縮器等<b>外掛程式</b>加到軌道或整體（master）。</p>
     <h3>開啟 FX 插槽</h3>
     <p>按下 TRACKS 面板左下的 <kbd>FX</kbd> 按鈕後，各軌道右側會顯示<b>效果用的插槽（INS）</b>。再按一次即可隱藏。</p>
@@ -340,28 +367,44 @@
   </section>
 
   <section id="midi">
-    <h2><span class="num">11</span>匯入·手動編寫 MIDI</h2>
+    <h2><span class="num">12</span>匯入·手動編寫 MIDI</h2>
     <p>可匯入 MIDI 資料（<code>.mid</code> 檔案），作為導唱旋律、和聲或伴奏使用。也可用手動方式編寫。</p>
 
     <h3>匯入 MIDI 檔案</h3>
     <ol class="step">
       <li>選擇「檔案」→「匯入 MIDI...」，開啟 <code>.mid</code> 檔案（也可拖放到時間軸上）。</li>
       <li>在「匯入 MIDI」對話框中，<b>勾選想匯入的軌道</b>（會顯示各軌道的聲道與音符數）。</li>
-      <li>配置方式可從「<b>配置於開頭</b>」或「<b>配置於目前播放位置</b>」中選擇。視需要勾選「一併匯入節拍·拍號」「一併匯入標記」。</li>
+      <li>配置方式可從「<b>配置於開頭</b>」或「<b>配置於目前播放位置</b>」中選擇。視需要勾選「一併匯入速度與拍號」「一併匯入標記」。</li>
       <li>按下「<b>匯入</b>」後，選取的軌道會以 MIDI 軌道的形式加入。</li>
     </ol>
     <div class="note"><b>要發出聲音：</b>匯入的 MIDI 軌道會以內建音色播放。若插入你喜好的音源外掛程式，即可用該音色發聲（與<a href="#fx">效果（FX）</a>相同的方式加入）。</div>
 
     <h3>手動編寫（製作和聲·導唱）</h3>
+    <p>MIDI 可以<b>只用滑鼠從零開始製作</b>，沒有 MIDI 鍵盤等外部器材也沒問題。</p>
+    <p><b>步驟 1：新增 MIDI 軌道</b></p>
     <ul>
-      <li>從新增軌道選單中選擇「新增 MIDI 軌道」。</li>
-      <li><b>雙擊</b>時間軸即可建立編寫用的區段，<b>雙擊</b>該區段則會開啟鋼琴卷軸（鍵盤編輯畫面）。</li>
-      <li>在鋼琴卷軸中，雙擊空白處可新增音符，拖曳可移動／變更長度，按 <kbd>Delete</kbd> 可刪除。用 <kbd>↑</kbd> / <kbd>↓</kbd> 可上下移動半音。</li>
+      <li>按下畫面左側軌道清單（TRACKS）<b>左下角的 <kbd>＋</kbd> 按鈕</b>，在選單中選擇「<b>新增 MIDI 軌道</b>」。這會新增一條空的 MIDI 軌道。</li>
     </ul>
+    <p><b>步驟 2：建立 MIDI 片段（放音符的盒子）</b></p>
+    <ul>
+      <li><b>雙擊</b>所新增 MIDI 軌道列的空白處，即可建立一個 1 小節長的 MIDI 片段。</li>
+      <li>也可以用 <kbd>Alt</kbd>+拖曳，建立拖出長度的片段。</li>
+      <li>拖曳片段中間可移動，拖曳左右兩端可變更長度。</li>
+    </ul>
+    <p><b>步驟 3：在鋼琴卷軸中輸入音符</b></p>
+    <ul>
+      <li><b>雙擊</b> MIDI 片段即可開啟鋼琴卷軸（鍵盤編輯畫面）。</li>
+      <li><b>雙擊</b>空白處可新增音符。開啟上方的鉛筆按鈕（畫筆工具·<kbd>D</kbd> 鍵）後，點一下即可放置音符，並可接著拖曳決定長度。</li>
+      <li>音符可拖曳移動、拖曳左右端變更長度、按 <kbd>Delete</kbd> 刪除。用 <kbd>↑</kbd> / <kbd>↓</kbd> 升降半音，<kbd>Shift+↑</kbd> / <kbd>Shift+↓</kbd> 升降八度。</li>
+      <li>點擊左側的鍵盤，可以試聽該音高。</li>
+    </ul>
+    <div class="note"><b>如果你有 MIDI 鍵盤：</b>在偏好設定的「MIDI 輸入」中連接鍵盤後，可以直接彈奏確認聲音，也可以進行即時錄音或步進輸入（沒有鍵盤也能按上述步驟完成全部輸入）。</div>
+
+    <div class="note"><b>要變更速度·拍號：</b>節拍速度（BPM）和拍號的變更方法彙整在「<a href="#tempo">節拍速度（BPM）與拍號</a>」一章（匯入 MIDI 時也可用「一併匯入速度與拍號」反映檔案的速度）。</div>
   </section>
 
   <section id="export">
-    <h2><span class="num">12</span>匯出（WAV / MP3）</h2>
+    <h2><span class="num">13</span>匯出（WAV / MP3）</h2>
     <p>完成後匯出成音訊檔案。</p>
     <ol class="step">
       <li>開啟畫面右上的 <kbd>EXPORT</kbd> 按鈕，或「檔案」→「匯出...」（<kbd>Ctrl+E</kbd>）。</li>
@@ -372,7 +415,7 @@
   </section>
 
   <section id="streaming">
-    <h2><span class="num">13</span>直播（連接直播軟體）</h2>
+    <h2><span class="num">14</span>直播（連接直播軟體）</h2>
     <p>可以將 Utawave 的聲音（正在播放的伴奏 + 麥克風返送）送入 OBS 等直播軟體，進行唱歌直播。</p>
     <h3>Windows 使用標準驅動（WASAPI）時</h3>
     <p>在直播軟體的「應用程式音訊擷取」中選擇 Utawave 即可拾取聲音，無需額外設定。</p>
@@ -397,11 +440,12 @@
       <li>用軌道的音量和聲像調整與歌聲的平衡（M 靜音，也可以在 INS 插槽中加效果）。</li>
     </ol>
     <div class="tip"><b>準備：</b>請將 Windows 的預設輸出裝置（應用程式發聲的目標）設為<b>主音訊介面以外的裝置</b>（例如內建喇叭）並調低音量。只要應用程式能在某個裝置上播放，就能擷取它的聲音。</div>
+    <div class="tip"><b>本機喇叭也發出聲音時：</b>請用耳機或音訊介面來監聽，然後開啟「設定 → 系統 → 音效 → 輸出」，把<b>內建喇叭裝置本身的音量設為 0</b>。<b>將整個裝置靜音不會中斷擷取</b>，聲音仍會送往直播。注意：在音量混音器中<b>僅將該應用程式靜音會一併切斷擷取</b>，因此請務必在輸出裝置端靜音。</div>
     <div class="note">要混合多個應用程式，請為每個應用程式新增一條應用程式軌道。應用程式重新啟動後會自動重新連接。macOS 上瀏覽器的聲音可以直接與 Utawave 使用同一裝置播放，因此沒有此功能。</div>
   </section>
 
   <section id="gestures">
-    <h2><span class="num">14</span>右鍵·便利操作</h2>
+    <h2><span class="num">15</span>右鍵·便利操作</h2>
     <p class="lead">Utawave 中有許多沒有顯示在按鈕上、透過<b>右鍵選單</b>或<b>雙擊</b>就能完成的操作。以下整理了知道後能讓作業更輕鬆的項目。</p>
 
     <h3>右鍵能做的事</h3>
@@ -439,7 +483,7 @@
   </section>
 
   <section id="shortcuts">
-    <h2><span class="num">15</span>快速鍵速查表</h2>
+    <h2><span class="num">16</span>快速鍵速查表</h2>
     <p>此處僅摘錄主要項目。完整清單可從「說明」→「快速鍵一覽...」（<kbd>Ctrl+/</kbd> / Mac 為 <kbd>⌘/</kbd>）查看。</p>
     <table class="keys">
       <tr><th style="width:46%">作用</th><th style="width:27%">Windows</th><th style="width:27%">macOS</th></tr>
@@ -464,7 +508,7 @@
   </section>
 
   <section id="trouble">
-    <h2><span class="num">16</span>遇到問題時</h2>
+    <h2><span class="num">17</span>遇到問題時</h2>
     <h3>顯示「找不到音訊檔案」</h3>
     <p>專案參照的音源可能被移動／刪除了。將原始檔案放回專案內的 <code>Audio</code> 資料夾，即可自動復原。</p>
     <h3>上次的作業不見了／應用程式結束了</h3>
