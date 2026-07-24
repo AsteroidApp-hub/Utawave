@@ -8,9 +8,12 @@
 #include <cmath>
 
 // ケロケロボイスのモダン UI: 中央に**スクロールする音程トレース** (灰 = 入力ピッチ /
-// シアン = スナップ後のノート段差)。背景にスケール構成音のグリッド線 (C にはオクターブ表記)。
-// 右端に現在のターゲットノートを大きく表示。上部に スケール (半音階/メジャー/マイナー/ペンタ 2 種) と
-// キー (C..B・スケール選択時のみ) のボタン。下部に スピード / 補正量 / トランスポーズ / 感度 / ミックス のノブ。
+// シアン = スナップ後のノート段差)。背景に半音グリッド (C はラベル + 強調)。
+// 右端に現在のターゲットノートを大きく表示。下部に スピード / 補正量 / トランスポーズ /
+// 感度 / ミックス のノブ。
+// **スケール / キーの UI は出さない (常に半音階)**: メジャー/マイナー等の音楽用語は初心者に
+// 分かりにくいため非表示にした (要望 2026-07)。DSP 側の Scale/Key パラメータとスケールスナップ
+// 機能は温存してあり (テストも行使)、将来「上級者向け」で再表示する場合はボタンを戻すだけ。
 class BuiltInKeroVoiceEditor : public ModernEffectEditor
 {
 public:
@@ -20,49 +23,17 @@ public:
                                   BuiltInKeroVoice::Mix }, 236),
           kero(k)
     {
-        auto styleBtn = [this] (juce::TextButton* b, juce::Colour onCol, juce::Colour onText)
-        {
-            b->setClickingTogglesState(false);
-            b->setColour(juce::TextButton::buttonColourId,   AppColours::buttonBg);
-            b->setColour(juce::TextButton::buttonOnColourId, onCol);
-            b->setColour(juce::TextButton::textColourOffId,  AppColours::textDim);
-            b->setColour(juce::TextButton::textColourOnId,   onText);
-            addAndMakeVisible(b);
-        };
-
-        const char* scaleKeys[BuiltInKeroVoice::NumScales] =
-            { u8"半音階", u8"メジャー", u8"マイナー", u8"メジャーペンタ", u8"マイナーペンタ" };
-        for (int i = 0; i < BuiltInKeroVoice::NumScales; ++i)
-        {
-            auto* b = new juce::TextButton(tr(scaleKeys[i]));
-            styleBtn(b, AppColours::accent, juce::Colours::white);
-            const int idx = i;
-            b->onClick = [this, idx] { kero.setP(BuiltInKeroVoice::Scale, (float) idx); clearPresetSelection(); refreshControls(); repaint(); };
-            scaleBtns.add(b);
-        }
-        for (int i = 0; i < 12; ++i)
-        {
-            auto* b = new juce::TextButton(BuiltInKeroVoice::keyLabel(i));
-            styleBtn(b, AppColours::fxCyan, juce::Colours::black);
-            const int idx = i;
-            b->onClick = [this, idx] { kero.setP(BuiltInKeroVoice::Key, (float) idx); clearPresetSelection(); refreshControls(); repaint(); };
-            keyBtns.add(b);
-        }
-
         for (int i = 0; i < kHist; ++i) { histIn[i] = -1.0f; histOut[i] = -1.0f; }
 
         setSize(juce::jmax(640, getWidth()), getHeight());
         resized();
-        refreshControls();
     }
 
 private:
     static constexpr int   kHist = 220;
-    static constexpr float kBtnAreaH = 56.0f;
     static constexpr float kNoteW = 88.0f;
 
     BuiltInKeroVoice& kero;
-    juce::OwnedArray<juce::TextButton> scaleBtns, keyBtns;
     float histIn[kHist] {}, histOut[kHist] {};
     int   histPos { 0 };
     float viewCenter { 60.0f };
@@ -74,20 +45,6 @@ private:
         return juce::String(BuiltInKeroVoice::keyLabel(pc)) + juce::String(m / 12 - 1);
     }
 
-    void refreshControls()
-    {
-        const int scale = juce::jlimit(0, (int) BuiltInKeroVoice::NumScales - 1,
-                                       (int) std::lround(kero.getP(BuiltInKeroVoice::Scale)));
-        const int key   = juce::jlimit(0, 11, (int) std::lround(kero.getP(BuiltInKeroVoice::Key)));
-        for (int i = 0; i < scaleBtns.size(); ++i)
-            scaleBtns[i]->setToggleState(i == scale, juce::dontSendNotification);
-        for (int i = 0; i < keyBtns.size(); ++i)
-        {
-            keyBtns[i]->setVisible(scale != BuiltInKeroVoice::Chromatic);
-            keyBtns[i]->setToggleState(i == key, juce::dontSendNotification);
-        }
-    }
-
     void onTick() override
     {
         histIn[histPos]  = kero.getUiInputMidi();
@@ -95,47 +52,26 @@ private:
         histPos = (histPos + 1) % kHist;
         const float out = kero.getUiTargetMidi();
         if (out >= 0.0f) viewCenter += (out - viewCenter) * 0.10f;
-        refreshControls();
-    }
-
-    void layoutOverlay(juce::Rectangle<int> g) override
-    {
-        const int bx = g.getX() + 8, by = g.getY() + 6;
-        // ペンタ 2 種はラベルが長いので幅を個別指定
-        const int widths[BuiltInKeroVoice::NumScales] = { 64, 72, 72, 102, 102 };
-        int sx = bx;
-        for (int i = 0; i < scaleBtns.size(); ++i)
-        {
-            scaleBtns[i]->setBounds(sx, by, widths[i], 20);
-            sx += widths[i] + 4;
-        }
-        int kx = bx, ky = by + 26;
-        for (auto* b : keyBtns) { b->setBounds(kx, ky, 28, 20); kx += 30; }
     }
 
     void paintGraph(juce::Graphics& g, juce::Rectangle<float> area) override
     {
-        const int scale = juce::jlimit(0, (int) BuiltInKeroVoice::NumScales - 1,
-                                       (int) std::lround(kero.getP(BuiltInKeroVoice::Scale)));
-        const int key   = juce::jlimit(0, 11, (int) std::lround(kero.getP(BuiltInKeroVoice::Key)));
         const juce::Colour cyan { AppColours::fxCyan };
 
         auto noteCol = area.removeFromRight(kNoteW);
-        auto trace = area.withTrimmedTop(kBtnAreaH).reduced(8.0f, 6.0f);
+        auto trace = area.reduced(8.0f, 6.0f);
 
         const float semiSpan = 8.0f;   // 表示レンジ ±8 半音
         const float pxPerSemi = trace.getHeight() / (semiSpan * 2.0f);
         auto yFor = [&] (float midi) { return trace.getCentreY() - (midi - viewCenter) * pxPerSemi; };
 
-        // ── ノートグリッド (スケール構成音を強調・C はラベル) ──
+        // ── 半音グリッド (C はラベル + 強調) ──
         g.setFont(10.0f);
         for (int m = (int) std::ceil(viewCenter - semiSpan); m <= (int) std::floor(viewCenter + semiSpan); ++m)
         {
             int pc = m % 12; if (pc < 0) pc += 12;
-            const bool inScale = BuiltInKeroVoice::isPitchClassInScale(pc, scale, key);
             const float y = yFor((float) m);
-            g.setColour(inScale ? AppColours::rulerLine.withAlpha(0.45f)
-                                : AppColours::rulerLine.withAlpha(0.12f));
+            g.setColour(AppColours::rulerLine.withAlpha(pc == 0 ? 0.45f : 0.16f));
             g.drawHorizontalLine((int) y, trace.getX(), trace.getRight());
             if (pc == 0)
             {
