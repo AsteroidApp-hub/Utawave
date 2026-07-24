@@ -9,13 +9,15 @@
 
 // ケロケロボイスのモダン UI: 中央に**スクロールする音程トレース** (灰 = 入力ピッチ /
 // シアン = スナップ後のノート段差)。背景にスケール構成音のグリッド線 (C にはオクターブ表記)。
-// 右端に現在のターゲットノートを大きく表示。上部に スケール (半音階/メジャー/マイナー) と
-// キー (C..B・スケール選択時のみ) のボタン。下部に スピード / ミックス のノブ。
+// 右端に現在のターゲットノートを大きく表示。上部に スケール (半音階/メジャー/マイナー/ペンタ 2 種) と
+// キー (C..B・スケール選択時のみ) のボタン。下部に スピード / 補正量 / トランスポーズ / 感度 / ミックス のノブ。
 class BuiltInKeroVoiceEditor : public ModernEffectEditor
 {
 public:
     explicit BuiltInKeroVoiceEditor(BuiltInKeroVoice& k)
-        : ModernEffectEditor(k, { BuiltInKeroVoice::Speed, BuiltInKeroVoice::Mix }, 236),
+        : ModernEffectEditor(k, { BuiltInKeroVoice::Speed, BuiltInKeroVoice::Amount,
+                                  BuiltInKeroVoice::Transpose, BuiltInKeroVoice::Sens,
+                                  BuiltInKeroVoice::Mix }, 236),
           kero(k)
     {
         auto styleBtn = [this] (juce::TextButton* b, juce::Colour onCol, juce::Colour onText)
@@ -28,8 +30,9 @@ public:
             addAndMakeVisible(b);
         };
 
-        const char* scaleKeys[3] = { u8"半音階", u8"メジャー", u8"マイナー" };
-        for (int i = 0; i < 3; ++i)
+        const char* scaleKeys[BuiltInKeroVoice::NumScales] =
+            { u8"半音階", u8"メジャー", u8"マイナー", u8"メジャーペンタ", u8"マイナーペンタ" };
+        for (int i = 0; i < BuiltInKeroVoice::NumScales; ++i)
         {
             auto* b = new juce::TextButton(tr(scaleKeys[i]));
             styleBtn(b, AppColours::accent, juce::Colours::white);
@@ -73,7 +76,8 @@ private:
 
     void refreshControls()
     {
-        const int scale = juce::jlimit(0, 2,  (int) std::lround(kero.getP(BuiltInKeroVoice::Scale)));
+        const int scale = juce::jlimit(0, (int) BuiltInKeroVoice::NumScales - 1,
+                                       (int) std::lround(kero.getP(BuiltInKeroVoice::Scale)));
         const int key   = juce::jlimit(0, 11, (int) std::lround(kero.getP(BuiltInKeroVoice::Key)));
         for (int i = 0; i < scaleBtns.size(); ++i)
             scaleBtns[i]->setToggleState(i == scale, juce::dontSendNotification);
@@ -97,15 +101,22 @@ private:
     void layoutOverlay(juce::Rectangle<int> g) override
     {
         const int bx = g.getX() + 8, by = g.getY() + 6;
+        // ペンタ 2 種はラベルが長いので幅を個別指定
+        const int widths[BuiltInKeroVoice::NumScales] = { 64, 72, 72, 102, 102 };
         int sx = bx;
-        for (auto* b : scaleBtns) { b->setBounds(sx, by, 78, 20); sx += 82; }
+        for (int i = 0; i < scaleBtns.size(); ++i)
+        {
+            scaleBtns[i]->setBounds(sx, by, widths[i], 20);
+            sx += widths[i] + 4;
+        }
         int kx = bx, ky = by + 26;
         for (auto* b : keyBtns) { b->setBounds(kx, ky, 28, 20); kx += 30; }
     }
 
     void paintGraph(juce::Graphics& g, juce::Rectangle<float> area) override
     {
-        const int scale = juce::jlimit(0, 2,  (int) std::lround(kero.getP(BuiltInKeroVoice::Scale)));
+        const int scale = juce::jlimit(0, (int) BuiltInKeroVoice::NumScales - 1,
+                                       (int) std::lround(kero.getP(BuiltInKeroVoice::Scale)));
         const int key   = juce::jlimit(0, 11, (int) std::lround(kero.getP(BuiltInKeroVoice::Key)));
         const juce::Colour cyan { AppColours::fxCyan };
 

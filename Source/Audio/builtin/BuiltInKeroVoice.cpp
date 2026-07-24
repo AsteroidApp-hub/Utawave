@@ -17,12 +17,13 @@ namespace
     const char* kKeyLabels[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
     // スケールの構成音 (キーからの半音オフセット)
-    const int kMajorPc[7] = { 0, 2, 4, 5, 7, 9, 11 };
-    const int kMinorPc[7] = { 0, 2, 3, 5, 7, 8, 10 };
+    const int kMajorPc[7]      = { 0, 2, 4, 5, 7, 9, 11 };
+    const int kMinorPc[7]      = { 0, 2, 3, 5, 7, 8, 10 };
+    const int kMajorPentaPc[5] = { 0, 2, 4, 7, 9 };
+    const int kMinorPentaPc[5] = { 0, 3, 5, 7, 10 };
 
     constexpr float kYinThreshold     = 0.15f;   // CMNDF の第一極小しきい値
     constexpr float kVoicedMaxCmndf   = 0.35f;   // これを超える周期性は無声扱い
-    constexpr float kLevelGateMs      = -55.0f;  // 入力レベルゲート (dBFS, mean-square 換算)
     constexpr float kSnapHysteresis   = 0.12f;   // ノート境界のヒステリシス (半音)
 }
 
@@ -31,25 +32,37 @@ const char* BuiltInKeroVoice::keyLabel(int idx) { return kKeyLabels[juce::jlimit
 bool BuiltInKeroVoice::isPitchClassInScale(int pc, int scaleType, int key)
 {
     if (scaleType == Chromatic) return true;
-    const int* tbl = scaleType == Minor ? kMinorPc : kMajorPc;
+    const int* tbl = kMajorPc;
+    int n = 7;
+    switch (scaleType)
+    {
+        case Minor:      tbl = kMinorPc;      n = 7; break;
+        case MajorPenta: tbl = kMajorPentaPc; n = 5; break;
+        case MinorPenta: tbl = kMinorPentaPc; n = 5; break;
+        default: break;
+    }
     int rel = (pc - key) % 12;
     if (rel < 0) rel += 12;
-    for (int i = 0; i < 7; ++i)
+    for (int i = 0; i < n; ++i)
         if (tbl[i] == rel) return true;
     return false;
 }
 
 BuiltInKeroVoice::BuiltInKeroVoice()
 {
-    addParam({ "scale",   u8"スケール", "",   0.0f,  2.0f,   0.0f, 1.0f });   // 0=半音階/1=メジャー/2=マイナー (UI はボタン)
+    addParam({ "scale",   u8"スケール", "",   0.0f,  4.0f,   0.0f, 1.0f });   // 0=半音階/1=メジャー/2=マイナー/3=メジャーペンタ/4=マイナーペンタ (UI はボタン)
     addParam({ "key",     u8"キー",     "",   0.0f, 11.0f,   0.0f, 1.0f });   // C..B (UI はボタン)
     addParam({ "speedMs", u8"スピード", "ms", 0.0f, 200.0f,  0.0f, 0.5f });   // 0 = 即スナップ (ケロケロ)
     addParam({ "mix",     u8"ミックス", "%",  0.0f, 100.0f, 100.0f, 1.0f });
+    addParam({ "amount",  u8"補正量",   "%",  0.0f, 100.0f, 100.0f, 1.0f });  // スナップへの寄せ具合 (100=完全)
+    addParam({ "transpose", u8"トランスポーズ", "st", -12.0f, 12.0f, 0.0f, 1.0f });  // 補正後の移調
+    addParam({ "sens",    u8"感度",     "dB", -70.0f, -30.0f, -55.0f, 1.0f }); // 補正が効き始める入力レベル
 
-    //          scale key  speed  mix
-    addPreset(u8"ケロケロ",     { 0.0f, 0.0f,   0.0f, 100.0f });
-    addPreset(u8"しっかり補正", { 0.0f, 0.0f,  35.0f, 100.0f });
-    addPreset(u8"ナチュラル",   { 0.0f, 0.0f, 110.0f, 100.0f });
+    //          scale key  speed  mix     amount transpose sens
+    addPreset(u8"ケロケロ",     { 0.0f, 0.0f,   0.0f, 100.0f, 100.0f,   0.0f, -55.0f });
+    addPreset(u8"しっかり補正", { 0.0f, 0.0f,  35.0f, 100.0f, 100.0f,   0.0f, -55.0f });
+    addPreset(u8"ナチュラル",   { 0.0f, 0.0f, 110.0f, 100.0f,  80.0f,   0.0f, -55.0f });
+    addPreset(u8"オクターブ下", { 0.0f, 0.0f,   0.0f, 100.0f, 100.0f, -12.0f, -55.0f });
 }
 
 const juce::String BuiltInKeroVoice::getName() const { return tr(u8"ケロケロボイス"); }
@@ -91,13 +104,13 @@ void BuiltInKeroVoice::prepareToPlay(double sampleRate, int)
     lvl = 0.0f;
     voiced = false;
     lastTargetMidi = -1.0f;
-    setUnvoiced();
+    setUnvoiced(1.0);
 }
 
-void BuiltInKeroVoice::setUnvoiced()
+void BuiltInKeroVoice::setUnvoiced(double transposeRatio)
 {
     voiced = false;
-    targetRatio = 1.0;
+    targetRatio = transposeRatio;   // 無声区間もトランスポーズは維持 (ロボ声/移調用途で子音が浮かない)
     lastTargetMidi = -1.0f;
     uiInMidi.store(-1.0f, std::memory_order_relaxed);
     uiOutMidi.store(-1.0f, std::memory_order_relaxed);
@@ -136,14 +149,16 @@ float BuiltInKeroVoice::snapToScale(float midiF, int scaleType, int key)
     return cand;
 }
 
-void BuiltInKeroVoice::runDetection(int scaleType, int key)
+void BuiltInKeroVoice::runDetection(int scaleType, int key, float amount, float transpose, float sensDb)
 {
     const int m = winDec + maxLagDec;
     if (decCount < (std::int64_t) m) return;
 
-    // レベルゲート: 静かな入力 (ブレス/ノイズ床) は補正しない
-    const float gate = juce::Decibels::decibelsToGain(kLevelGateMs);
-    if (lvl < gate * gate) { setUnvoiced(); return; }
+    const double transposeRatio = std::pow(2.0, (double) transpose / 12.0);
+
+    // レベルゲート (感度): 静かな入力 (ブレス/ノイズ床) は補正しない
+    const float gate = juce::Decibels::decibelsToGain(sensDb);
+    if (lvl < gate * gate) { setUnvoiced(transposeRatio); return; }
 
     const std::int64_t start = decCount - (std::int64_t) m;
     for (int j = 0; j < m; ++j)
@@ -182,7 +197,7 @@ void BuiltInKeroVoice::runDetection(int scaleType, int key)
         for (int tau = minLagDec; tau <= maxLagDec; ++tau)
             if (cmndf[(size_t) tau] < bv) { bv = cmndf[(size_t) tau]; best = tau; }
     }
-    if (best < minLagDec || cmndf[(size_t) best] > kVoicedMaxCmndf) { setUnvoiced(); return; }
+    if (best < minLagDec || cmndf[(size_t) best] > kVoicedMaxCmndf) { setUnvoiced(transposeRatio); return; }
 
     // 放物線補間で小数ラグへ
     double tauF = (double) best;
@@ -196,15 +211,17 @@ void BuiltInKeroVoice::runDetection(int scaleType, int key)
 
     const double decSr = sr / (double) kDecim;
     const double freq = decSr / tauF;
-    if (! std::isfinite(freq) || freq < kMinHz * 0.9 || freq > kMaxHz * 1.1) { setUnvoiced(); return; }
+    if (! std::isfinite(freq) || freq < kMinHz * 0.9 || freq > kMaxHz * 1.1) { setUnvoiced(transposeRatio); return; }
 
     voiced = true;
     curPeriod = (float) juce::jlimit(sr / (double) kMaxHz, sr / (double) kMinHz, sr / freq);
 
-    const float midiF  = 69.0f + 12.0f * (float) (std::log2(freq / 440.0));
-    const float target = snapToScale(midiF, scaleType, key);
-    targetRatio = juce::jlimit(0.5, 2.0, std::pow(2.0, (double) (target - midiF) / 12.0));
-    lastTargetMidi = target;
+    const float midiF   = 69.0f + 12.0f * (float) (std::log2(freq / 440.0));
+    const float snapped = snapToScale(midiF, scaleType, key);
+    // 補正量でスナップへの寄せ具合を薄め、その後トランスポーズ (ヒステリシスはスナップ値で判定)
+    const float target  = midiF + (snapped - midiF) * amount + transpose;
+    targetRatio = juce::jlimit(0.25, 4.0, std::pow(2.0, (double) (target - midiF) / 12.0));
+    lastTargetMidi = snapped;
 
     uiInMidi.store(midiF, std::memory_order_relaxed);
     uiOutMidi.store(target, std::memory_order_relaxed);
@@ -219,10 +236,13 @@ void BuiltInKeroVoice::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
     const int n     = buffer.getNumSamples();
     if (numCh <= 0 || bufMask <= 0 || (int) ringL.size() != bufMask + 1) return;
 
-    const int   scaleType = juce::jlimit(0, 2,  (int) std::lround(getP(Scale)));
+    const int   scaleType = juce::jlimit(0, (int) NumScales - 1, (int) std::lround(getP(Scale)));
     const int   key       = juce::jlimit(0, 11, (int) std::lround(getP(Key)));
     const float speedMs   = getP(Speed);
     const float mix       = juce::jlimit(0.0f, 1.0f, getP(Mix) * 0.01f);
+    const float amount    = juce::jlimit(0.0f, 1.0f, getP(Amount) * 0.01f);
+    const float transpose = juce::jlimit(-12.0f, 12.0f, getP(Transpose));
+    const float sensDb    = getP(Sens);
 
     // リトゥーンの平滑化係数 (speed 0 は即スナップ = ケロケロ)
     const double retCoef = speedMs < 1.0f ? 0.0 : std::exp(-1.0 / (sr * (double) speedMs * 0.001));
@@ -262,7 +282,7 @@ void BuiltInKeroVoice::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
         if (++detCounter >= detInterval)
         {
             detCounter = 0;
-            runDetection(scaleType, key);
+            runDetection(scaleType, key, amount, transpose, sensDb);
         }
 
         // リトゥーン (比率の平滑化)

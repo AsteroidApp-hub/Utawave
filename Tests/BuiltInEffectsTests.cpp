@@ -633,6 +633,67 @@ private:
             expect(std::abs(f - 392.0) < 4.0, "output should be snapped to 392 Hz (G4) in C major");
         }
 
+        beginTest("KeroVoice transpose shifts the corrected note");
+        {
+            // 220 Hz (A3・オンピッチ) + トランスポーズ +12 → 440 Hz (A4)
+            BuiltInKeroVoice k;
+            k.setP(BuiltInKeroVoice::Scale, 0.0f);
+            k.setP(BuiltInKeroVoice::Speed, 0.0f);
+            k.setP(BuiltInKeroVoice::Transpose, 12.0f);
+            k.prepareToPlay(kSr, 512);
+
+            auto b = makeSine(220.0, 0.5, 72000);
+            processInBlocks(k, b);
+            const double f = measureFreq(b, 48000, 24000);
+            expect(std::abs(f - 440.0) < 6.0, "transpose +12 should output ~440 Hz from a 220 Hz input");
+        }
+
+        beginTest("KeroVoice amount=0 leaves pitch uncorrected");
+        {
+            // 補正量 0 はスナップへ寄せない (検出は生きるが比率 1 のまま)
+            BuiltInKeroVoice k;
+            k.setP(BuiltInKeroVoice::Amount, 0.0f);
+            k.setP(BuiltInKeroVoice::Speed, 0.0f);
+            k.prepareToPlay(kSr, 512);
+
+            auto b = makeSine(226.0, 0.5, 72000);
+            processInBlocks(k, b);
+            const double f = measureFreq(b, 48000, 24000);
+            expect(std::abs(f - 226.0) < 3.0, "amount=0 should keep the input pitch (~226 Hz)");
+        }
+
+        beginTest("KeroVoice snaps to major pentatonic");
+        {
+            // 345 Hz (midi 64.79・F4 の近く) → C メジャーペンタは F を含まないため E4 (329.6 Hz) へ
+            BuiltInKeroVoice k;
+            k.setP(BuiltInKeroVoice::Scale, (float) BuiltInKeroVoice::MajorPenta);
+            k.setP(BuiltInKeroVoice::Key, 0.0f);
+            k.setP(BuiltInKeroVoice::Speed, 0.0f);
+            k.prepareToPlay(kSr, 512);
+
+            auto b = makeSine(345.0, 0.5, 72000);
+            processInBlocks(k, b);
+            const double f = measureFreq(b, 48000, 24000);
+            expect(std::abs(f - 329.63) < 4.0, "output should be snapped to E4 in C major pentatonic");
+        }
+
+        beginTest("KeroVoice sensitivity gates correction on quiet input");
+        {
+            // 小さい入力 (~-47dBFS 平均二乗) は感度 -30dB では補正されず、既定 -55dB では補正される
+            auto run = [&] (float sensDb) -> double
+            {
+                BuiltInKeroVoice k;
+                k.setP(BuiltInKeroVoice::Speed, 0.0f);
+                k.setP(BuiltInKeroVoice::Sens, sensDb);
+                k.prepareToPlay(kSr, 512);
+                auto b = makeSine(226.0, 0.006, 72000);
+                processInBlocks(k, b);
+                return measureFreq(b, 48000, 24000);
+            };
+            expect(std::abs(run(-30.0f) - 226.0) < 3.0, "quiet input should stay uncorrected with low sensitivity");
+            expect(std::abs(run(-55.0f) - 220.0) < 3.0, "quiet input should still be corrected with default sensitivity");
+        }
+
         beginTest("KeroVoice keeps silence silent");
         {
             BuiltInKeroVoice k;

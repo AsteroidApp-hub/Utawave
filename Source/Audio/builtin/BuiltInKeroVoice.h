@@ -12,8 +12,11 @@
 
     - **検出**: 入力のモノ和を 1/4 デシメーション + YIN (CMNDF) で基音を推定 (約 5ms 間隔)。
       60〜1000 Hz のボーカル帯域のみ。無声音/無音は補正しない (子音・ブレスは素通り)。
-    - **スナップ**: 検出ピッチを半音階 (クロマチック) またはキー指定のメジャー/マイナー
-      スケールの最寄りノートへ。境界のばたつきはヒステリシスで抑える。
+      補正が効き始める入力レベルは**感度** (dB) で調整できる。
+    - **スナップ**: 検出ピッチを半音階 (クロマチック) / キー指定のメジャー・マイナー /
+      メジャーペンタ・マイナーペンタの最寄りノートへ。境界のばたつきはヒステリシスで抑える。
+      **補正量** (%) でスナップへの寄せ具合を薄められ、**トランスポーズ** (±12 半音) で
+      補正後にさらに移調できる (オクターブ下ロボ声等。無声区間もトランスポーズは維持)。
     - **シフト**: ピッチ同期スプライスのディレイライン方式 (検出周期ぶんだけ戻る/進める +
       短いクロスフェード)。FFT も先読みも使わないので **報告レイテンシー 0** (PDC 不要)、
       実効遅延もディレイラインの数 ms のみ。ライブモニタ経由でそのまま「ケロった声」を返せる。
@@ -24,8 +27,9 @@
 class BuiltInKeroVoice : public BuiltInEffect
 {
 public:
-    enum Param { Scale = 0, Key, Speed, Mix, NumParams };
-    enum ScaleType { Chromatic = 0, Major = 1, Minor = 2 };
+    // Amount 以降は後から追加したパラメータ。保存 XML は id キーなので**末尾追加のみ可** (並べ替え不可)
+    enum Param { Scale = 0, Key, Speed, Mix, Amount, Transpose, Sens, NumParams };
+    enum ScaleType { Chromatic = 0, Major = 1, Minor = 2, MajorPenta = 3, MinorPenta = 4, NumScales };
 
     BuiltInKeroVoice();
 
@@ -53,9 +57,9 @@ public:
     static constexpr float kMaxHz = 1000.0f;
 
 private:
-    void runDetection(int scaleType, int key);
+    void runDetection(int scaleType, int key, float amount, float transpose, float sensDb);
     float snapToScale(float midiF, int scaleType, int key);
-    void setUnvoiced();
+    void setUnvoiced(double transposeRatio);
 
     inline float readCubic(const std::vector<float>& buf, double pos) const noexcept
     {
