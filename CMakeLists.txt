@@ -81,6 +81,7 @@ target_sources(Utawave PRIVATE
     Source/Audio/builtin/BuiltInMaximizer.cpp
     Source/Audio/builtin/BuiltInDelay.cpp
     Source/Audio/builtin/BuiltInReverb.cpp
+    Source/Audio/builtin/BuiltInKeroVoice.cpp
     Source/Audio/builtin/BuiltInFactory.cpp
     Source/Tracks/AudioClip.cpp
     Source/Tracks/Track.cpp
@@ -135,6 +136,7 @@ target_sources(Utawave PRIVATE
     Source/UI/BuiltInMaximizerEditor.cpp
     Source/UI/BuiltInDelayEditor.cpp
     Source/UI/BuiltInReverbEditor.cpp
+    Source/UI/BuiltInKeroVoiceEditor.cpp
     Source/UI/StatusBar.cpp
 )
 
@@ -384,6 +386,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/Audio/builtin/BuiltInMaximizer.cpp
         Source/Audio/builtin/BuiltInDelay.cpp
         Source/Audio/builtin/BuiltInReverb.cpp
+        Source/Audio/builtin/BuiltInKeroVoice.cpp
         Source/Audio/builtin/BuiltInFactory.cpp
         Source/UI/BuiltInEffectEditor.cpp
         Source/UI/ModernEffectEditor.cpp
@@ -394,6 +397,7 @@ if(UTAWAVE_BUILD_TESTS)
         Source/UI/BuiltInMaximizerEditor.cpp
         Source/UI/BuiltInDelayEditor.cpp
         Source/UI/BuiltInReverbEditor.cpp
+        Source/UI/BuiltInKeroVoiceEditor.cpp
         Source/Project/AdService.cpp
         Source/Project/UpdateChecker.cpp
         Source/Project/CrashReporter.cpp

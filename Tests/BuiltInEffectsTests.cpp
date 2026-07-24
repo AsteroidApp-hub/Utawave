@@ -19,6 +19,7 @@
 #include "../Source/Audio/builtin/BuiltInMaximizer.h"
 #include "../Source/Audio/builtin/BuiltInDelay.h"
 #include "../Source/Audio/builtin/BuiltInReverb.h"
+#include "../Source/Audio/builtin/BuiltInKeroVoice.h"
 #include "../Source/Audio/builtin/BuiltInFactory.h"
 
 namespace
@@ -68,6 +69,7 @@ public:
         testMaximizer();
         testDelay();
         testReverb();
+        testKeroVoice();
         testFactory();
     }
 
@@ -566,6 +568,124 @@ private:
         }
     }
 
+    void testKeroVoice()
+    {
+        // 検出 (YIN) → スケールスナップ → ピッチ同期シフトの統合をオフラインで検証する。
+        // 出力周波数は正方向ゼロ交差 (最初と最後の交差間の周期数) で推定する (PitchEngineTests と同じ定石)。
+        auto measureFreq = [] (const juce::AudioBuffer<float>& b, int start, int len) -> double
+        {
+            const float* x = b.getReadPointer(0);
+            int first = -1, last = -1, count = 0;
+            for (int i = start + 1; i < start + len; ++i)
+                if (x[i - 1] <= 0.0f && x[i] > 0.0f)
+                {
+                    if (first < 0) first = i;
+                    last = i;
+                    ++count;
+                }
+            if (count < 2 || last <= first) return 0.0;
+            return (double) (count - 1) * kSr / (double) (last - first);
+        };
+        auto processInBlocks = [this] (BuiltInKeroVoice& k, juce::AudioBuffer<float>& b)
+        {
+            float* chans[2] = { b.getWritePointer(0), b.getWritePointer(1) };
+            for (int pos = 0; pos < b.getNumSamples(); pos += 512)
+            {
+                const int len = juce::jmin(512, b.getNumSamples() - pos);
+                juce::AudioBuffer<float> blk(chans, 2, pos, len);
+                k.processBlock(blk, emptyMidi);
+            }
+        };
+
+        beginTest("KeroVoice snaps an off-pitch note to the nearest semitone");
+        {
+            // 226 Hz (A3=220 から +47 セント) → クロマチックで A3 へスナップされ出力 ~220 Hz
+            BuiltInKeroVoice k;
+            k.setP(BuiltInKeroVoice::Scale, 0.0f);
+            k.setP(BuiltInKeroVoice::Speed, 0.0f);
+            k.setP(BuiltInKeroVoice::Mix, 100.0f);
+            k.prepareToPlay(kSr, 512);
+
+            auto b = makeSine(226.0, 0.5, 72000);
+            processInBlocks(k, b);
+            const double f = measureFreq(b, 48000, 24000);
+            expect(std::abs(f - 220.0) < 3.0, "output should be snapped to 220 Hz (A3)");
+            expect(std::abs(f - 226.0) > 2.5, "output should have moved away from the 226 Hz input");
+            const double rms = rmsTail(b, 24000);
+            expect(rms > 0.25 && rms < 0.45, "shifted output should keep the input level");
+            expect(k.getUiTargetMidi() >= 0.0f
+                   && std::abs(k.getUiTargetMidi() - 57.0f) < 0.01f, "target note should be midi 57 (A3)");
+        }
+
+        beginTest("KeroVoice snaps to the key scale (C major)");
+        {
+            // 380 Hz (midi 66.46 = F#4 と G4 の間) → C メジャーでは F# が構成音でないため G4 (392 Hz) へ
+            BuiltInKeroVoice k;
+            k.setP(BuiltInKeroVoice::Scale, (float) BuiltInKeroVoice::Major);
+            k.setP(BuiltInKeroVoice::Key, 0.0f);
+            k.setP(BuiltInKeroVoice::Speed, 0.0f);
+            k.setP(BuiltInKeroVoice::Mix, 100.0f);
+            k.prepareToPlay(kSr, 512);
+
+            auto b = makeSine(380.0, 0.5, 72000);
+            processInBlocks(k, b);
+            const double f = measureFreq(b, 48000, 24000);
+            expect(std::abs(f - 392.0) < 4.0, "output should be snapped to 392 Hz (G4) in C major");
+        }
+
+        beginTest("KeroVoice keeps silence silent");
+        {
+            BuiltInKeroVoice k;
+            k.prepareToPlay(kSr, 512);
+            juce::AudioBuffer<float> b(2, 24000);
+            b.clear();
+            processInBlocks(k, b);
+            expect(rmsTail(b, 12000) < 1.0e-4, "silent input should stay silent");
+        }
+
+        beginTest("KeroVoice mix=0 is exact passthrough");
+        {
+            BuiltInKeroVoice k;
+            k.setP(BuiltInKeroVoice::Mix, 0.0f);
+            k.prepareToPlay(kSr, 512);
+
+            auto b = makeSine(300.0, 0.4, 8192);
+            juce::AudioBuffer<float> ref(2, 8192);
+            for (int ch = 0; ch < 2; ++ch)
+                ref.copyFrom(ch, 0, b, ch, 0, 8192);
+            processInBlocks(k, b);
+            bool same = true;
+            for (int ch = 0; ch < 2 && same; ++ch)
+                for (int i = 0; i < 8192; ++i)
+                    if (b.getSample(ch, i) != ref.getSample(ch, i)) { same = false; break; }
+            expect(same, "mix=0 must be a bit-exact passthrough");
+        }
+
+        beginTest("KeroVoice reports zero latency");
+        {
+            BuiltInKeroVoice k;
+            k.prepareToPlay(kSr, 512);
+            expect(k.getLatencySamples() == 0, "kero voice must not report plugin latency");
+        }
+
+        beginTest("KeroVoice state round-trips");
+        {
+            BuiltInKeroVoice a;
+            a.setP(BuiltInKeroVoice::Scale, 2.0f);
+            a.setP(BuiltInKeroVoice::Key, 9.0f);
+            a.setP(BuiltInKeroVoice::Speed, 55.5f);
+            a.setP(BuiltInKeroVoice::Mix, 70.0f);
+
+            juce::MemoryBlock mb;
+            a.getStateInformation(mb);
+
+            BuiltInKeroVoice b;
+            b.setStateInformation(mb.getData(), (int) mb.getSize());
+            for (int i = 0; i < a.getParamCount(); ++i)
+                expect(std::abs(a.getP(i) - b.getP(i)) < 1.0e-3f, "param should round-trip");
+        }
+    }
+
     void testFactory()
     {
         beginTest("Factory creates by identifier");
@@ -576,6 +696,7 @@ private:
             expect(BuiltInFactory::create("utawave.maximizer") != nullptr, "maximizer id creates");
             expect(BuiltInFactory::create("utawave.delay")   != nullptr, "delay id creates");
             expect(BuiltInFactory::create("utawave.reverb")  != nullptr, "reverb id creates");
+            expect(BuiltInFactory::create("utawave.kerovoice") != nullptr, "kerovoice id creates");
             expect(BuiltInFactory::create("nope")            == nullptr, "unknown id is null");
         }
 

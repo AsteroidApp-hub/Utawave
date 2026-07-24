@@ -9,6 +9,7 @@
 #include "BuiltInMaximizer.h"
 #include "BuiltInDelay.h"
 #include "BuiltInReverb.h"
+#include "BuiltInKeroVoice.h"
 #include "../../Localisation.h"
 
 namespace BuiltInFactory
@@ -33,6 +34,7 @@ namespace
         { "utawave.maximizer", u8"マキシマイザー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInMaximizer()); } },
         { "utawave.delay",   u8"ディレイ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDelay()); } },
         { "utawave.reverb",  u8"リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
+        { "utawave.kerovoice", u8"ケロケロボイス", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInKeroVoice()); } },
     };
     constexpr int kNumEntries = (int) (sizeof(kEntries) / sizeof(kEntries[0]));
 }
