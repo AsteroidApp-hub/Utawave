@@ -8,11 +8,20 @@
     トラック単位のインサートエフェクトチェーン。
     複数のプラグインを直列に通し、入力バッファをそのまま加工する。
 */
-class PluginChain
+class PluginChain : private juce::AudioProcessorListener,
+                    private juce::AsyncUpdater
 {
 public:
     PluginChain();
-    ~PluginChain();
+    ~PluginChain() override;
+
+    // プラグイン出力の安全上限 (絶対値・+18dBFS 相当)。processBlock が各プラグインの後で
+    // これを超えるサンプル / NaN / Inf を検出したブロックだけを修復する (正常時は検出スキャンのみ)。
+    // プラグインが UI 操作 (オーバーサンプリング切替等) の内部再構成中に未初期化バッファ由来の
+    // 巨大値や NaN を吐いても、爆音がスピーカーへ直行したり後段 (リバーブバス / PDC 遅延ライン /
+    // 他プラグイン) の内部状態を汚染したりしないための安全網。正規の信号がプラグイン間で
+    // +18dBFS を超えることは実用上無く、ゴミは桁違い (1e10 等) なので誤クランプは起きない。
+    static constexpr float kMaxPluginSample = 8.0f;
 
     // ─── プラグイン管理（メッセージスレッドから呼び出す） ───
     void   addPlugin(std::unique_ptr<juce::AudioPluginInstance> plugin);
@@ -77,7 +86,27 @@ public:
     // 変更通知
     std::function<void()> onChainChanged;
 
+    // プラグインが setLatencySamples でレイテンシを変えた時にメッセージスレッドで呼ばれる
+    // (AudioProcessorListener::audioProcessorChanged の latencyChanged を AsyncUpdater で
+    // メッセージスレッドへ集約)。AudioEngine が invalidatePlayback (PDC 再構築) を配線する。
+    // これが無いとプラグインのモード切替 (ルックアヘッド ON/OFF 等) 後に trackDelays が
+    // stale なまま整合がずれ続ける。
+    std::function<void()> onLatencyChanged;
+
 private:
+    // ─── AudioProcessorListener (プラグインからの変更通知) ───
+    // audioProcessorChanged はプラグイン次第で audio thread からも呼ばれうるため、ここでは
+    // triggerAsyncUpdate だけ行い、コールバック実行はメッセージスレッド (handleAsyncUpdate) に寄せる。
+    void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails& details) override
+    {
+        if (details.latencyChanged)
+            triggerAsyncUpdate();
+    }
+    void audioProcessorParameterChanged(juce::AudioProcessor*, int, float) override {}
+    void handleAsyncUpdate() override
+    {
+        if (onLatencyChanged) onLatencyChanged();
+    }
     struct Slot
     {
         std::unique_ptr<juce::AudioPluginInstance> plugin;

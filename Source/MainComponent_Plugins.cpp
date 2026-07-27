@@ -534,8 +534,11 @@ void MainComponent::togglePluginBypassUndoable(int trackIdx, int slot)
     if (c == nullptr) return;
     const bool before = c->isBypassed(slot);
     undoManager.beginNewTransaction();
+    // invalidatePlayback: getTotalLatencySamples はバイパス中を除外するため、レイテンシ持ち
+    // プラグインのバイパス切替で PDC (trackDelays) を組み直す (undo/redo でも apply 毎に呼ばれる)
     undoManager.perform(new PluginBypassAction(
-        makeChainResolver(t), slot, before, !before, [this] { markProjectDirty(); }));
+        makeChainResolver(t), slot, before, !before,
+        [this] { markProjectDirty(); audioEngine.invalidatePlayback(); }));
 }
 
 // ── Track プラグインチェーン ─────────────────────────────────────────

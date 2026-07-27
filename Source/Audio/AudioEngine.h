@@ -328,6 +328,13 @@ public:
     // (setMonitorChain の「停止中 prepare (肝)」と同じ作法・message thread から呼ぶ)
     void ensureLiveChainPrepared(class PluginChain& chain);
 
+    // プラグインのレイテンシ変更通知 (PluginChain::onLatencyChanged) を PDC 再構築
+    // (invalidatePlayback) へ配線する。プラグイン UI のモード切替 (ルックアヘッド ON/OFF 等) で
+    // setLatencySamples が変わっても trackDelays が stale にならないようにする。
+    // チェーンに触る全経路 (ctor / preparePlayback / setMonitorChain / ensureLiveChainPrepared) が
+    // 呼ぶ (再代入は冪等・message thread 専用)。
+    void wireChainLatencyCallback(class PluginChain& chain);
+
     // 現在デバイスの入力チャンネル数
     int getNumInputChannels() const
     {

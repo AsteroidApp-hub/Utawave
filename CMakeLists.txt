@@ -354,6 +354,7 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/GridSnapMathTests.cpp
         Tests/EditActionsTests.cpp
         Tests/PluginActionsTests.cpp
+        Tests/PluginChainTests.cpp
         Tests/LufsMeterTests.cpp
         Tests/BpmDetectorTests.cpp
         Tests/ProjectManagerTests.cpp

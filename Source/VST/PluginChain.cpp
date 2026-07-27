@@ -2,9 +2,42 @@
 // Copyright (C) 2025-2026 Utawave
 
 #include "PluginChain.h"
+#include <cmath>
+
+// プラグイン出力の修復 (kMaxPluginSample 超 / NaN / Inf を含むブロックのみ呼ばれる)。
+// NaN は 0 へ、有限の過大値は ±limit へクランプする。audio thread から呼ばれるため確保無し。
+static void repairPluginBlock(float* d, int n, float limit) noexcept
+{
+    for (int i = 0; i < n; ++i)
+    {
+        const float v = d[i];
+        d[i] = std::isfinite(v) ? juce::jlimit(-limit, limit, v) : 0.0f;
+    }
+}
+
+// 不正サンプルの検出。NaN はあらゆる比較が false になるため !(abs(v) <= limit) で確実に拾う
+// (SIMD の min/max は NaN を取りこぼすことがあり findMinAndMax では検出に使えない)。
+static bool pluginBlockNeedsRepair(const float* d, int n, float limit) noexcept
+{
+    bool bad = false;
+    for (int i = 0; i < n; ++i)
+        bad |= !(std::abs(d[i]) <= limit);
+    return bad;
+}
 
 PluginChain::PluginChain() = default;
-PluginChain::~PluginChain() { releaseResources(); }
+
+PluginChain::~PluginChain()
+{
+    cancelPendingUpdate();
+    {
+        const juce::ScopedLock sl(chainLock);
+        for (auto* s : slots)
+            if (s && s->plugin)
+                s->plugin->removeListener(this);
+    }
+    releaseResources();
+}
 
 void PluginChain::addPlugin(std::unique_ptr<juce::AudioPluginInstance> plugin)
 {
@@ -23,6 +56,7 @@ void PluginChain::addPlugin(std::unique_ptr<juce::AudioPluginInstance> plugin)
     plugin->setPlayConfigDetails(2, 2, sr, bs);
     if (psr > 0.0 && pbs > 0)
         plugin->prepareToPlay(psr, pbs);
+    plugin->addListener(this);   // レイテンシ変更 (latencyChanged) を購読
 
     auto* slot = new Slot();
     slot->plugin = std::move(plugin);
@@ -46,6 +80,7 @@ void PluginChain::insertPluginAt(int slotIdx, std::unique_ptr<juce::AudioPluginI
     plugin->setPlayConfigDetails(2, 2, sr, bs);
     if (psr > 0.0 && pbs > 0)
         plugin->prepareToPlay(psr, pbs);
+    plugin->addListener(this);   // レイテンシ変更 (latencyChanged) を購読
 
     {
         const juce::ScopedLock sl(chainLock);
@@ -55,7 +90,10 @@ void PluginChain::insertPluginAt(int slotIdx, std::unique_ptr<juce::AudioPluginI
 
         auto* slot = slots[slotIdx];
         if (slot->plugin)
+        {
+            slot->plugin->removeListener(this);
             slot->plugin->releaseResources();   // 既存があれば差し替え
+        }
         slot->plugin   = std::move(plugin);
         slot->bypassed = false;
         activePluginCount.store(slots.size(), std::memory_order_release);
@@ -82,7 +120,10 @@ void PluginChain::removePlugin(int index)
         activePluginCount.store(slots.size(), std::memory_order_release);
     }
     if (removedPlugin)
+    {
+        removedPlugin->removeListener(this);
         removedPlugin->releaseResources();
+    }
     if (onChainChanged) onChainChanged();
 }
 
@@ -103,7 +144,10 @@ std::unique_ptr<juce::AudioPluginInstance> PluginChain::extractPlugin(int index)
         activePluginCount.store(slots.size(), std::memory_order_release);
     }
     if (taken)
+    {
+        taken->removeListener(this);   // 移動先チェーンが自分のリスナーを付け直す
         taken->releaseResources();
+    }
     if (onChainChanged) onChainChanged();
     return taken;
 }
@@ -228,6 +272,16 @@ void PluginChain::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                 buffer.clear(c, 0, buffer.getNumSamples());
         }
         s->plugin->processBlock(buffer, midi);
+
+        // 出力ガード: プラグインが内部再構成中 (UI のモード切替等) に吐く未初期化バッファ由来の
+        // 巨大値 / NaN / Inf を修復し、爆音の出力直行と後段の状態汚染を防ぐ。正常時は検出のみ。
+        const int n = buffer.getNumSamples();
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        {
+            float* d = buffer.getWritePointer(ch);
+            if (pluginBlockNeedsRepair(d, n, kMaxPluginSample))
+                repairPluginBlock(d, n, kMaxPluginSample);
+        }
     }
 }
 

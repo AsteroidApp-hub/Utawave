@@ -301,10 +301,17 @@ void AudioEngine::drainRetiredAppCapVoices()
 
 void AudioEngine::ensureLiveChainPrepared(PluginChain& chain)
 {
+    wireChainLatencyCallback(chain);
     if (chain.getActivePluginCountAtomic() > 0
         && currentSampleRate > 0.0 && currentBufferSize > 0
         && !chain.isPreparedFor(currentSampleRate, currentBufferSize))
         chain.prepareToPlay(currentSampleRate, currentBufferSize);
+}
+
+void AudioEngine::wireChainLatencyCallback(PluginChain& chain)
+{
+    // PluginChain の AsyncUpdater 経由でメッセージスレッドから呼ばれる (audio thread からは来ない)
+    chain.onLatencyChanged = [this] { invalidatePlayback(); };
 }
 
 // アプリ音声取り込み (アプリケーショントラック): 各 voice のリングから読み、トラックの
@@ -399,6 +406,8 @@ void AudioEngine::setMonitorChain(PluginChain* chain, int inputCh, bool stereo, 
     // (未 prepare のプラグインを叩くとクラッシュしうる)。既に同設定なら何もしない (再 prepare で
     // プラグイン状態がリセットされてグリッチになるのを避ける)。prepare は message thread・
     // PluginChain::chainLock が audio thread の processBlock と直列化する。
+    if (chain != nullptr)
+        wireChainLatencyCallback(*chain);
     if (chain != nullptr && chain->getActivePluginCountAtomic() > 0
         && currentSampleRate > 0.0 && currentBufferSize > 0
         && !chain->isPreparedFor(currentSampleRate, currentBufferSize))
@@ -542,6 +551,7 @@ AudioEngine::AudioEngine()
     activeRecConfig   = std::make_shared<const RecordingConfig>();
     activeAppSettings = std::make_shared<const AppSettings>();
     activeMonConfig   = std::make_shared<const MonitorConfig>();
+    wireChainLatencyCallback(*masterChain);
     formatManager.registerBasicFormats();
 
     // ディスクストリーミングの先読みスレッドを起動 (エンジン存続中ずっと走る。
@@ -1083,6 +1093,7 @@ void AudioEngine::preparePlayback(TrackManager& tm)
                 auto* tr = tm.getTrack(ti);
                 if (!tr) continue;
                 auto& chain = tr->getPluginChain();
+                wireChainLatencyCallback(chain);
                 if (!chain.isPreparedFor(currentSampleRate, currentBufferSize))
                     chain.prepareToPlay(currentSampleRate, currentBufferSize);
                 maxIdx = juce::jmax(maxIdx, ti);
@@ -1766,6 +1777,11 @@ void AudioEngine::renderOfflineRange(double startSec, double endSec,
                                       const std::vector<int>& includeTracks,
                                       bool preFader, bool includeClick)
 {
+    // 書き出しはバックグラウンドスレッドで走るため、デバイスコールバック側の
+    // ScopedNoDenormals は効かない (FTZ/DAZ はスレッドごと)。denormal を出すプラグインで
+    // 書き出しが不必要に遅くなるのを防ぐ。
+    juce::ScopedNoDenormals noDenormals;
+
     if (endSec <= startSec || currentSampleRate <= 0.0) return;
 
     const double sr        = currentSampleRate;

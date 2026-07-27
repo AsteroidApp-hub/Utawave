@@ -66,6 +66,10 @@ void AudioWorkerPool::parallelFor(int count, JobFn fn, void* ctx)
 
 void AudioWorkerPool::Worker::run()
 {
+    // FTZ/DAZ はスレッドごとの FPU フラグ。デバイスコールバックの ScopedNoDenormals は
+    // このワーカーには効かないため、ここで張らないとプラグインのテール減衰等の denormal で
+    // 演算が桁違いに遅くなり CPU スパイク (ドロップアウト) の原因になる。
+    juce::ScopedNoDenormals noDenormals;
     while (! threadShouldExit())
     {
         wake.wait();                 // 次ブロックの signal まで休眠 (CPU を食わない)
