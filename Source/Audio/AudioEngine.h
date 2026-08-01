@@ -485,6 +485,20 @@ private:
     int                       declickXfadeRemain { 0 };  // audio thread 専用 (クロスフェード残サンプル)
     float                     declickLast[2] { 0.0f, 0.0f };// audio thread 専用 (直前出力値)
     float                     declickHold[2] { 0.0f, 0.0f };// audio thread 専用 (クロスフェード元値)
+
+    // ── 停止直後の「残像」ミュート (audio thread 専用) ──
+    // レイテンシ持ちプラグインは停止時点で内部に直前の再生音声を溜めており、停止中プレビュー
+    // (無音入力でチェーンを回す Melodyne 用経路) がそれを吐き出して停止直後に「遅れた残像」が
+    // 聞こえる。再生→停止のエッジからの経過サンプルを数え、チェーンのレイテンシ未満の間は
+    // 処理だけして出力へ混ぜない (内部状態は流しきる。レイテンシ 0 のテール生成系は影響なし)。
+    bool stopFlushArm            { false };     // 再生ブランチが毎ブロック立てる (エッジ検出用)
+    int  stoppedSamplesSinceStop { 1 << 30 };   // 停止からの経過サンプル (飽和加算)
+
+    // 停止→再生の開始時に PDC 遅延ラインを無音へリセットする要求 (play() が立て、audio thread が
+    // 再生ブランチのブロック先頭で消費)。遅延ラインは rebuild 間で持ち回すため、リセットしないと
+    // 前回停止時の音声が残ったまま再生冒頭に漏れてプチッと鳴る。UI からの直接 clear は停止直前の
+    // in-flight ブロック (再生ブランチ実行中) と競合しうるため、audio thread 側で消費する
+    std::atomic<bool>         pdcResetRequest { false };
     // トラック単位のドライバッファ（プラグインチェーン処理用、index = trackIdx）は
     // PlaybackSnapshot::trackBuffers に集約 (公開後は構造不変、audio thread が中身のみ書く)。
 

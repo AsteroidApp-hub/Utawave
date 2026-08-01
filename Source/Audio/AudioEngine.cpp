@@ -618,6 +618,13 @@ void AudioEngine::play()
     if (playbackDirty.load() && lastTrackManager != nullptr)
         preparePlayback(*lastTrackManager);
 
+    // 停止→再生の開始時に PDC 遅延ラインのリセットを予約する (audio thread が再生ブランチの
+    // ブロック先頭で消費)。遅延ラインは rebuild 間で持ち回すため、前回停止時の音声が残った
+    // まま再生を始めると冒頭に古い音が漏れてプチッと鳴る (再生開始位置も変わっているため
+    // 内容として不正)。
+    if (!playing.load())
+        pdcResetRequest.store(true, std::memory_order_release);
+
     playing.store(true);
 }
 
@@ -2852,6 +2859,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         // (凍結保持された前回のテールが次の再生開始で漏れ出すのを防ぐ)
         if (reverbBusDirty) { masterReverbBus.reset(); reverbBusDirty = false; }
 
+        // 再生→停止のエッジで停止経過サンプルをリセットする (停止直後のチェーン残像ミュート用。
+        // stopFlushArm は再生ブランチが毎ブロック立てる)
+        if (stopFlushArm) { stopFlushArm = false; stoppedSamplesSinceStop = 0; }
+        const int sinceStopSamples = stoppedSamplesSinceStop;
+        stoppedSamplesSinceStop = juce::jmin(stoppedSamplesSinceStop + numSamples, 1 << 30);
+
         // このブロックでメータを測定したトラックの記録 (再生ブランチと同じ trackMeterFed 方式。
         // 停止中もシンセ/チェーンのプレビュー音・ライブ MIDI 演奏をメータへ反映し、
         // 測定しなかったトラックだけを後段で減衰させる)
@@ -2935,6 +2948,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 buf.clear();                                     // 無音入力 (プラグインの自前生成音のみ拾う)
                 emptyMidi.clear();
                 chain.processBlock(buf, emptyMidi, &playHead);
+
+                // 停止直後は、レイテンシ持ちプラグインが内部に溜めた「停止直前の再生音声」を
+                // 無音入力で吐き出す (停止後に遅れた残像が聞こえる)。チェーン処理は続けて内部
+                // 状態を流しきりつつ、レイテンシぶんの出力はミュートして混ぜない (リバーブ等
+                // レイテンシ 0 のテール生成系はそのまま鳴る。メータにも乗せない = 減衰へ)
+                if (sinceStopSamples < chain.getTotalLatencySamples())
+                    continue;
 
                 // トラックの Vol/Pan を反映して出力へ (synth プレビューと同じ扱い・マスターは通さない)
                 const float vol  = juce::Decibels::decibelsToGain(trk->getVolume(), -60.0f);
@@ -3129,6 +3149,16 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // ワークバッファに全クリップをミックス
     workBuffer.setSize(juce::jmax(2, numOutputChannels), numSamples, false, false, true);
     workBuffer.clear();
+
+    // 停止→再生の開始時は PDC 遅延ラインを無音へリセットする (play() が要求し、ここで消費 =
+    // 再生ブランチを実行するのは自分だけなので in-flight ブロックとの競合が無い)。
+    // buf.clear() は確保無し = RT 安全
+    if (pdcResetRequest.exchange(false, std::memory_order_acq_rel))
+        for (auto& d : snap->trackDelays)
+            if (d != nullptr && d->delaySamples > 0) { d->buf.clear(); d->writePos = 0; }
+
+    // 停止エッジ検出用 (停止直後のチェーン残像ミュート)。停止ブランチが最初のブロックで消費する
+    stopFlushArm = true;
 
     // このブロックでメータを測定したトラックの記録をリセット (未測定分はブロック末尾で減衰)
     juce::zeromem(trackMeterFed, sizeof(trackMeterFed));

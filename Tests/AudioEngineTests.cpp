@@ -420,6 +420,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testFolderBus();
         testBufferSizeChangeWhilePlaying();
         testRebuildKeepsDelayLines();
+        testStopStartArtifacts();
 
         tempDir.deleteRecursively();
     }
@@ -554,6 +555,48 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         s.engine.invalidatePlayback();
         runBlocks(s.engine, 10, &pL, &pR);
         expectWithinAbsoluteError(pL, 1.0f, 0.05f, "steady mix restored after latency change");
+    }
+
+    // 停止/再生の境界アーティファクトの回帰テスト (レイテンシ持ちプラグインの実機報告 2026-08):
+    // (1) 停止直後の「残像」— レイテンシ持ちプラグインが内部に溜めた停止直前の再生音声を、
+    //     停止中プレビュー (無音入力でチェーンを回す Melodyne 用経路) が吐き出して聞こえていた。
+    //     修正 = 停止からレイテンシぶんの間はチェーン出力をミュート (処理は続けて内部状態を流しきる)。
+    // (2) 再生開始時の「プチッ」— PDC 遅延ラインの持ち回しで前回停止時の音声が残ったまま
+    //     再生冒頭に漏れていた。修正 = play() がリセットを予約し audio thread が消費。
+    //     信号は const 0.5 で「正しい出力が無音になる位置」(クリップ後方) から再生して漏れを検出する
+    void testStopStartArtifacts()
+    {
+        beginTest("stop/start with latency plugin: no residual flush, no stale delay-line leak");
+
+        auto wav = tempDir.getChildFile("stopstart.wav");
+        expect(writeMonoConstWav(wav, (int)(kSR * 2.0), 0.5f), "write const wav");
+
+        Scene s;
+        auto* heavy = s.addConstTrack(wav, 2.0);   // レイテンシ持ち = 最遅
+        s.addConstTrack(wav, 2.0);                 // 遅延ライン 600smp が付く側
+        heavy->getPluginChain().addPlugin(std::make_unique<LatencyFakePlugin>(600));
+        s.start();
+        s.engine.play();
+
+        float pL = 0, pR = 0;
+        runBlocks(s.engine, 10, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.03f, "steady mix while playing");
+
+        // ── (1) 停止直後: 残像 (チェーンの吐き出し) が出力に乗らない ──
+        // 旧実装: 最初のブロックでレイテンシ持ちプラグインが 0.5 を吐き、出力ピーク ~0.5
+        s.engine.stop();
+        runBlocks(s.engine, 2, &pL, &pR);
+        expect(pL < 0.01f && pR < 0.01f, "no residual chain flush right after stop");
+        runBlocks(s.engine, 10);   // 内部状態を流しきる (レイテンシ 600smp << 10 ブロック)
+
+        // ── (2) 再生開始: 前回停止時の PDC 遅延ライン内容が漏れない ──
+        // クリップ範囲の後ろ (無音域) から再生する。正しい出力は完全な無音。
+        // 旧実装: 遅延ライン持ち回し + リセット無しで、停止時に溜まっていた 0.5 が
+        // 冒頭 600 サンプル漏れてプチッと鳴っていた
+        s.engine.setPosition(3.0);
+        s.engine.play();
+        runBlocks(s.engine, 3, &pL, &pR);
+        expect(pL < 0.01f, "no stale delay-line audio leaks at playback start");
     }
 
     void testFolderBus()
