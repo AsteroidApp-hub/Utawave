@@ -527,6 +527,7 @@ TrackHeaderView::~TrackHeaderView()
 void TrackHeaderView::rebuildInsertChips()
 {
     fxChips.clear();
+    fxBypassBtns.clear();
     auto& chain = track.getPluginChain();
     const int maxSlots = Track::insertSlotCount;
 
@@ -562,17 +563,25 @@ void TrackHeaderView::rebuildInsertChips()
                     // Cmd+クリックでバイパス切替（macOS）/ Ctrl+クリック（Windows 等）
                     if (juce::ModifierKeys::currentModifiers.isCommandDown())
                     {
-                        auto& chain = track.getPluginChain();
-                        chain.setBypassed(slotIdx, !chain.isBypassed(slotIdx));
-                        rebuildInsertChips();
-                        resized();
-                        if (onChanged) onChanged();
+                        togglePluginBypass(slotIdx);
                         return;
                     }
                     if (onPluginEditRequest) onPluginEditRequest(slotIdx);
                 };
                 // 右クリックで context menu
                 btn->addMouseListener(this, false);
+
+                // チップ左のワンクリック・バイパススイッチ (LED ランプ)。
+                // チップ左端の角丸を落として (ConnectedOnLeft) スイッチと一体の枠に見せる
+                btn->setConnectedEdges(juce::Button::ConnectedOnLeft);
+                auto* sw = new PluginBypassSwitch();
+                sw->setBypassed(chain.isBypassed(i));
+                sw->setTooltip(chain.isBypassed(i)
+                    ? tr(u8"バイパス中（クリックでオンに戻す）")
+                    : tr(u8"クリックでバイパス（オフ）"));
+                sw->onClick = [this, slotIdx] { togglePluginBypass(slotIdx); };
+                fxBypassBtns.add(sw);
+                addAndMakeVisible(sw);
             }
         }
         else
@@ -589,11 +598,29 @@ void TrackHeaderView::rebuildInsertChips()
             {
                 if (onPluginAddRequest) onPluginAddRequest(slotIdx);
             };
+            // 空きスロットはスイッチ無し (index を fxChips と揃えるため nullptr を積む)
+            fxBypassBtns.add(nullptr);
         }
 
         fxChips.add(btn);
         addAndMakeVisible(btn);
     }
+}
+
+void TrackHeaderView::togglePluginBypass(int slotIdx)
+{
+    // Undo + PDC 再構築のため MainComponent の togglePluginBypassUndoable 経由を正とする。
+    // チップの見た目更新は PluginBypassAction が onChainChanged を発火 → callAsync で再構築。
+    if (onPluginBypassRequest)
+    {
+        onPluginBypassRequest(slotIdx);
+        return;
+    }
+    auto& chain = track.getPluginChain();   // フォールバック (未配線時のみ)
+    chain.setBypassed(slotIdx, !chain.isBypassed(slotIdx));
+    rebuildInsertChips();
+    resized();
+    if (onChanged) onChanged();
 }
 
 void TrackHeaderView::updateInputLevels(float peakL, float peakR, float vuL, float vuR)
@@ -1121,14 +1148,29 @@ void TrackHeaderView::resized()
             const int chipH = slotH - 2;
             // スロット全体が可視領域に収まる時だけ表示 (収まらない分は隠す)
             const bool fits = (chipY + chipH) <= insVisibleH;
+            auto* sw = (i < fxBypassBtns.size() ? fxBypassBtns[i] : nullptr);
             fxChips[i]->setVisible(fits);
+            if (sw) sw->setVisible(fits);
             if (fits)
-                fxChips[i]->setBounds(frameX + padX, chipY, frameW - padX * 2, chipH);
+            {
+                int cx = frameX + padX;
+                int cw = frameW - padX * 2;
+                if (sw)
+                {
+                    // 左端にバイパススイッチ (隙間ゼロ = チップと一体の枠の左セグメント)
+                    const int swW = 16;
+                    sw->setBounds(cx, chipY, swW, chipH);
+                    cx += swW;
+                    cw -= swW;
+                }
+                fxChips[i]->setBounds(cx, chipY, cw, chipH);
+            }
         }
     }
     else
     {
         for (auto* chip : fxChips) chip->setVisible(false);
+        for (auto* sw : fxBypassBtns) if (sw) sw->setVisible(false);
     }
 
     // 底部: [TList] 左40%  |  In: [ComboBox] 右60%（メータ行ぶん下げる）

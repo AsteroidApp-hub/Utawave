@@ -5,6 +5,7 @@
 #include <JuceHeader.h>
 #include "../Localisation.h"
 #include "../Tracks/Track.h"
+#include "PluginBypassSwitch.h"
 
 class TrackHeaderView : public juce::Component,
                         public juce::DragAndDropTarget,
@@ -197,7 +198,11 @@ private:
 
     // ── インサート FX スロット ──
     void rebuildInsertChips();
+    // バイパストグルの単一入口 (スイッチ / Cmd+クリック共用): Undo 対応パスへ委譲
+    void togglePluginBypass(int slotIdx);
     juce::OwnedArray<juce::TextButton> fxChips;   // 4 スロット固定枠
+    // チップ左のワンクリック・バイパススイッチ (fxChips と index 並走・空きスロットは nullptr)
+    juce::OwnedArray<PluginBypassSwitch> fxBypassBtns;
 
     void populateInputChannelBox();
 

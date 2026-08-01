@@ -115,6 +115,7 @@ void MasterPanel::setCollapsed(bool v)
     gainLabel.setVisible(showContent);
     peakResetBtn.setVisible(showContent);
     for (auto* c : fxChips) c->setVisible(showContent && insertSlotsVisible);
+    for (auto* sw : fxBypassBtns) if (sw) sw->setVisible(showContent && insertSlotsVisible);
 
     collapseBtn.setButtonText(collapsed ? ">" : "<");
     collapseBtn.setTooltip(juce::String::fromUTF8(
@@ -132,6 +133,8 @@ void MasterPanel::setInsertSlotsVisible(bool v)
     // チップ自身の可視性も切り替え
     for (auto* chip : fxChips)
         chip->setVisible(v);
+    for (auto* sw : fxBypassBtns)
+        if (sw) sw->setVisible(v);
     resized();
     repaint();
     if (onInsertSlotsVisibilityChanged) onInsertSlotsVisibilityChanged(v);
@@ -140,7 +143,11 @@ void MasterPanel::setInsertSlotsVisible(bool v)
 void MasterPanel::refreshChips()
 {
     fxChips.clear();
+    fxBypassBtns.clear();
     if (pluginChain == nullptr) return;
+
+    // 再構築が折りたたみ中 / INS 非表示中に走っても表示状態を壊さない
+    const bool showNow = !collapsed && insertSlotsVisible;
 
     for (int i = 0; i < insertSlotCount; ++i)
     {
@@ -172,6 +179,22 @@ void MasterPanel::refreshChips()
                 if (onPluginEditRequest) onPluginEditRequest(slotIdx);
             };
             btn->addMouseListener(this, false);
+
+            // チップ左のワンクリック・バイパススイッチ (LED ランプ)。
+            // チップ左端の角丸を落として (ConnectedOnLeft) スイッチと一体の枠に見せる
+            btn->setConnectedEdges(juce::Button::ConnectedOnLeft);
+            auto* sw = new PluginBypassSwitch();
+            sw->setBypassed(bypassed);
+            sw->setTooltip(bypassed
+                ? tr(u8"バイパス中（クリックでオンに戻す）")
+                : tr(u8"クリックでバイパス（オフ）"));
+            sw->onClick = [this, slotIdx]
+            {
+                if (onPluginBypassRequest) onPluginBypassRequest(slotIdx);
+            };
+            fxBypassBtns.add(sw);
+            addAndMakeVisible(sw);
+            sw->setVisible(showNow);
         }
         else
         {
@@ -186,10 +209,13 @@ void MasterPanel::refreshChips()
             {
                 if (onPluginAddRequest) onPluginAddRequest(slotIdx);
             };
+            // 空きスロットはスイッチ無し (index を fxChips と揃えるため nullptr を積む)
+            fxBypassBtns.add(nullptr);
         }
 
         fxChips.add(btn);
         addAndMakeVisible(btn);
+        btn->setVisible(showNow);
     }
 }
 
@@ -478,16 +504,26 @@ void MasterPanel::resized()
     gainLabel.setBounds(0, bottom + 2, getWidth(), 16);
     peakResetBtn.setBounds(6, getHeight() - 26, getWidth() - 12, 20);
 
-    // INS チップの配置
+    // INS チップの配置 (プラグイン入りスロットは左端にバイパススイッチを敷く)
     auto inner = getInsertsInnerArea();
     const int slotH = inner.getHeight() / insertSlotCount;
     const int padX  = 2;
     for (int i = 0; i < fxChips.size(); ++i)
     {
-        fxChips[i]->setBounds(inner.getX() + padX,
-                              inner.getY() + i * slotH + 1,
-                              inner.getWidth() - padX * 2,
-                              juce::jmax(0, slotH - 2));
+        const int chipY = inner.getY() + i * slotH + 1;
+        const int chipH = juce::jmax(0, slotH - 2);
+        int cx = inner.getX() + padX;
+        int cw = inner.getWidth() - padX * 2;
+        auto* sw = (i < fxBypassBtns.size() ? fxBypassBtns[i] : nullptr);
+        if (sw)
+        {
+            // 隙間ゼロ = チップと一体の枠の左セグメント
+            const int swW = 16;
+            sw->setBounds(cx, chipY, swW, chipH);
+            cx += swW;
+            cw -= swW;
+        }
+        fxChips[i]->setBounds(cx, chipY, cw, chipH);
     }
 }
 

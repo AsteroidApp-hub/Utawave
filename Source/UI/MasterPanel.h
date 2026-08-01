@@ -4,6 +4,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "UtawaveLookAndFeel.h"
+#include "PluginBypassSwitch.h"
 
 class PluginChain;
 
@@ -88,6 +89,8 @@ private:
 
     PluginChain* pluginChain { nullptr };
     juce::OwnedArray<juce::TextButton> fxChips;
+    // チップ左のワンクリック・バイパススイッチ (fxChips と index 並走・空きスロットは nullptr)
+    juce::OwnedArray<PluginBypassSwitch> fxBypassBtns;
 
     // D&D 状態
     int  dragSourceSlotIdx { -1 };
