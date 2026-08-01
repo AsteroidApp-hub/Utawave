@@ -419,6 +419,7 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         testEmptyRangeOfflineRender();
         testFolderBus();
         testBufferSizeChangeWhilePlaying();
+        testRebuildKeepsDelayLines();
 
         tempDir.deleteRecursively();
     }
@@ -504,6 +505,55 @@ struct AudioEngineRealtimeTests : public juce::UnitTest
         s.engine.audioDeviceAboutToStart(&smallDevice);
         runBlocks(s.engine, 10, &pL, &pR);
         expectWithinAbsoluteError(pL, 1.0f, 0.05f, "steady mix restored after changing back");
+    }
+
+    // 再生中の rebuild (バイパス切替や編集の invalidatePlayback) で PDC 遅延ラインの内容が
+    // 旧スナップショットから持ち回され、音が途切れない回帰テスト。旧実装は rebuild のたびに
+    // 遅延ラインをゼロクリアしていたため、レイテンシ持ちプラグインのあるセッションでは
+    // 遅延ライン付きトラックが最大遅延ぶん無音になり「バイパスで一瞬音が止まる」原因だった。
+    // ピークでは 1 ブロック内の落ち込みを検出できないのでブロック内の最小値で判定する
+    // (信号は DC 0.5+0.5=1.0 の定常ミックス)。
+    void testRebuildKeepsDelayLines()
+    {
+        beginTest("rebuild while playing carries over PDC delay line contents (no dropout)");
+
+        auto wav = tempDir.getChildFile("pdckeep.wav");
+        expect(writeMonoConstWav(wav, (int)(kSR * 6.0), 0.5f), "write const wav");
+
+        Scene s;
+        auto* heavy = s.addConstTrack(wav, 6.0);   // レイテンシ持ち = 最遅 (自身の遅延ラインは 0)
+        s.addConstTrack(wav, 6.0);                 // プラグイン無し = 600 サンプルの遅延ラインが付く
+        heavy->getPluginChain().addPlugin(std::make_unique<LatencyFakePlugin>(600));
+        s.start();
+        s.engine.play();
+
+        float pL = 0, pR = 0;
+        runBlocks(s.engine, 10, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.03f, "steady mix before rebuild");
+
+        // 再生したまま rebuild (レイテンシ不変 = バイパス切替や編集と同じ経路)。
+        // 遅延量が全トラック不変なので遅延ラインは持ち回される
+        s.engine.invalidatePlayback();
+
+        // 旧実装: 直後のブロックで遅延ライン (600smp > block 512) がゼロ埋め → 該当トラックが
+        // 丸ごと欠けて最小値が ~0.5 に落ちる。新実装: 定常 1.0 のまま
+        juce::AudioBuffer<float> out(2, kBlock);
+        float minSample = 1.0e9f;
+        for (int b = 0; b < 6; ++b)
+        {
+            out.clear();
+            float* chans[2] = { out.getWritePointer(0), out.getWritePointer(1) };
+            s.engine.audioDeviceIOCallbackWithContext(nullptr, 0, chans, 2, kBlock, {});
+            for (int i = 0; i < kBlock; ++i)
+                minSample = juce::jmin(minSample, out.getSample(0, i));
+        }
+        expect(minSample > 0.9f, "mix never dips after in-place rebuild (delay lines carried over)");
+
+        // レイテンシが変わる rebuild (プラグイン除去) は遅延ラインを作り直す = 従来どおり整合が優先
+        heavy->getPluginChain().removePlugin(0);
+        s.engine.invalidatePlayback();
+        runBlocks(s.engine, 10, &pL, &pR);
+        expectWithinAbsoluteError(pL, 1.0f, 0.05f, "steady mix restored after latency change");
     }
 
     void testFolderBus()

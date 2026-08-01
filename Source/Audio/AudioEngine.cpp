@@ -1176,12 +1176,27 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             for (int ti = 0; ti <= maxIdx; ++ti)
             {
                 auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
-                auto& d = snap->trackDelays[(size_t)ti];
-                d.delaySamples = (tr != nullptr && tr->isFolderTrack())
-                                     ? 0
-                                     : newMaxLat - totalLats[(size_t)ti];
-                d.buf.setSize(2, delayBufLen, false, true, true);
-                d.writePos = 0;
+                const int wantDelay = (tr != nullptr && tr->isFolderTrack())
+                                          ? 0
+                                          : newMaxLat - totalLats[(size_t)ti];
+                // 遅延量/バッファ長が不変なら旧スナップショットの遅延ラインを持ち回す
+                // (synth と同じ作法)。audio thread が書き溜めた内容が継続するので、再生中の
+                // rebuild (バイパス切替/編集) で遅延ラインがゼロクリアされて最大遅延ぶん
+                // 無音になるのを防ぐ。共有中の実体は UI から一切 mutate しない。
+                if (srUnchanged && prevSnap
+                    && ti < (int)prevSnap->trackDelays.size()
+                    && prevSnap->trackDelays[(size_t)ti] != nullptr
+                    && prevSnap->trackDelays[(size_t)ti]->delaySamples == wantDelay
+                    && prevSnap->trackDelays[(size_t)ti]->buf.getNumSamples() == delayBufLen)
+                {
+                    snap->trackDelays[(size_t)ti] = prevSnap->trackDelays[(size_t)ti];
+                    continue;
+                }
+                auto d = std::make_shared<TrackDelay>();
+                d->delaySamples = wantDelay;
+                d->buf.setSize(2, delayBufLen, false, true, true);
+                d->writePos = 0;
+                snap->trackDelays[(size_t)ti] = std::move(d);
             }
         }
         else
@@ -1256,6 +1271,13 @@ void AudioEngine::applyTrackDelay(std::vector<TrackDelay>& delays, int trackIdx,
 {
     if (trackIdx < 0 || trackIdx >= (int)delays.size()) return;
     applyDelayLine(delays[(size_t)trackIdx], trackBuf, numSamples);
+}
+
+void AudioEngine::applyTrackDelay(std::vector<std::shared_ptr<TrackDelay>>& delays, int trackIdx,
+                                  juce::AudioBuffer<float>& trackBuf, int numSamples)
+{
+    if (trackIdx < 0 || trackIdx >= (int)delays.size()) return;
+    if (auto& d = delays[(size_t)trackIdx]) applyDelayLine(*d, trackBuf, numSamples);
 }
 
 void AudioEngine::applyDelayLine(TrackDelay& d, juce::AudioBuffer<float>& buf, int numSamples)

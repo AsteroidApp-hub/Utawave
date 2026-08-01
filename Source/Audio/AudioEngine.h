@@ -500,6 +500,9 @@ private:
     // PDC: スナップショットの trackDelays を渡して trackBuf を遅延させる。
     void applyTrackDelay(std::vector<TrackDelay>& delays, int trackIdx,
                          juce::AudioBuffer<float>& trackBuf, int numSamples);
+    // 再生スナップショット用 (shared_ptr 持ち回し版・null 要素は no-op)
+    void applyTrackDelay(std::vector<std::shared_ptr<TrackDelay>>& delays, int trackIdx,
+                         juce::AudioBuffer<float>& trackBuf, int numSamples);
     // 単一の遅延ライン (循環バッファ) を buf に適用する。applyTrackDelay と書き出しの
     // クリック遅延で共用 (delaySamples==0 は no-op)。
     static void applyDelayLine(TrackDelay& d, juce::AudioBuffer<float>& buf, int numSamples);
@@ -807,7 +810,13 @@ private:
         // トラックごとに別インスタンスなので、マルチコア描画でワーカーが並列に renderClip を
         // 呼んでも競合しない (旧: 単一メンバ clipBuffer を共有していた)。preparePlayback で確保。
         std::vector<juce::AudioBuffer<float>>       clipScratch;
-        std::vector<TrackDelay>                      trackDelays;
+        // PDC 遅延ライン。synths と同じく shared_ptr で rebuild 間で持ち回す:
+        // 遅延量/バッファ長/SR/blockSize が不変なトラックは旧スナップショットと同一実体を
+        // 共有し、audio thread が書き溜めた内容 (writePos/buf) が途切れず継続する。
+        // これが無いと再生中の全 rebuild (バイパス切替/編集) で遅延ラインがゼロクリアされ、
+        // レイテンシ持ちプラグインがあるセッションでは最大遅延ぶん全トラックが無音になる。
+        // 共有インスタンスは UI から一切 mutate しない (変える時は新規生成)。null = 遅延なし相当。
+        std::vector<std::shared_ptr<TrackDelay>>    trackDelays;
         std::vector<std::shared_ptr<InternalSynth>> synths;
         // 遅延破棄: 破棄系編集 (テイク操作/分割/無音カット) で取り除いた AudioClip を、まだそれを
         // 参照しているスナップショットが生きている間は破棄せずここで保持する。これにより再生中編集でも
