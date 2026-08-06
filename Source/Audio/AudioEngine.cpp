@@ -618,13 +618,6 @@ void AudioEngine::play()
     if (playbackDirty.load() && lastTrackManager != nullptr)
         preparePlayback(*lastTrackManager);
 
-    // 停止→再生の開始時に PDC 遅延ラインのリセットを予約する (audio thread が再生ブランチの
-    // ブロック先頭で消費)。遅延ラインは rebuild 間で持ち回すため、前回停止時の音声が残った
-    // まま再生を始めると冒頭に古い音が漏れてプチッと鳴る (再生開始位置も変わっているため
-    // 内容として不正)。
-    if (!playing.load())
-        pdcResetRequest.store(true, std::memory_order_release);
-
     playing.store(true);
 }
 
@@ -1183,27 +1176,12 @@ void AudioEngine::preparePlayback(TrackManager& tm)
             for (int ti = 0; ti <= maxIdx; ++ti)
             {
                 auto* tr = (ti < nTracks) ? tm.getTrack(ti) : nullptr;
-                const int wantDelay = (tr != nullptr && tr->isFolderTrack())
-                                          ? 0
-                                          : newMaxLat - totalLats[(size_t)ti];
-                // 遅延量/バッファ長が不変なら旧スナップショットの遅延ラインを持ち回す
-                // (synth と同じ作法)。audio thread が書き溜めた内容が継続するので、再生中の
-                // rebuild (バイパス切替/編集) で遅延ラインがゼロクリアされて最大遅延ぶん
-                // 無音になるのを防ぐ。共有中の実体は UI から一切 mutate しない。
-                if (srUnchanged && prevSnap
-                    && ti < (int)prevSnap->trackDelays.size()
-                    && prevSnap->trackDelays[(size_t)ti] != nullptr
-                    && prevSnap->trackDelays[(size_t)ti]->delaySamples == wantDelay
-                    && prevSnap->trackDelays[(size_t)ti]->buf.getNumSamples() == delayBufLen)
-                {
-                    snap->trackDelays[(size_t)ti] = prevSnap->trackDelays[(size_t)ti];
-                    continue;
-                }
-                auto d = std::make_shared<TrackDelay>();
-                d->delaySamples = wantDelay;
-                d->buf.setSize(2, delayBufLen, false, true, true);
-                d->writePos = 0;
-                snap->trackDelays[(size_t)ti] = std::move(d);
+                auto& d = snap->trackDelays[(size_t)ti];
+                d.delaySamples = (tr != nullptr && tr->isFolderTrack())
+                                     ? 0
+                                     : newMaxLat - totalLats[(size_t)ti];
+                d.buf.setSize(2, delayBufLen, false, true, true);
+                d.writePos = 0;
             }
         }
         else
@@ -1278,13 +1256,6 @@ void AudioEngine::applyTrackDelay(std::vector<TrackDelay>& delays, int trackIdx,
 {
     if (trackIdx < 0 || trackIdx >= (int)delays.size()) return;
     applyDelayLine(delays[(size_t)trackIdx], trackBuf, numSamples);
-}
-
-void AudioEngine::applyTrackDelay(std::vector<std::shared_ptr<TrackDelay>>& delays, int trackIdx,
-                                  juce::AudioBuffer<float>& trackBuf, int numSamples)
-{
-    if (trackIdx < 0 || trackIdx >= (int)delays.size()) return;
-    if (auto& d = delays[(size_t)trackIdx]) applyDelayLine(*d, trackBuf, numSamples);
 }
 
 void AudioEngine::applyDelayLine(TrackDelay& d, juce::AudioBuffer<float>& buf, int numSamples)
@@ -2859,12 +2830,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
         // (凍結保持された前回のテールが次の再生開始で漏れ出すのを防ぐ)
         if (reverbBusDirty) { masterReverbBus.reset(); reverbBusDirty = false; }
 
-        // 再生→停止のエッジで停止経過サンプルをリセットする (停止直後のチェーン残像ミュート用。
-        // stopFlushArm は再生ブランチが毎ブロック立てる)
-        if (stopFlushArm) { stopFlushArm = false; stoppedSamplesSinceStop = 0; }
-        const int sinceStopSamples = stoppedSamplesSinceStop;
-        stoppedSamplesSinceStop = juce::jmin(stoppedSamplesSinceStop + numSamples, 1 << 30);
-
         // このブロックでメータを測定したトラックの記録 (再生ブランチと同じ trackMeterFed 方式。
         // 停止中もシンセ/チェーンのプレビュー音・ライブ MIDI 演奏をメータへ反映し、
         // 測定しなかったトラックだけを後段で減衰させる)
@@ -2948,13 +2913,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
                 buf.clear();                                     // 無音入力 (プラグインの自前生成音のみ拾う)
                 emptyMidi.clear();
                 chain.processBlock(buf, emptyMidi, &playHead);
-
-                // 停止直後は、レイテンシ持ちプラグインが内部に溜めた「停止直前の再生音声」を
-                // 無音入力で吐き出す (停止後に遅れた残像が聞こえる)。チェーン処理は続けて内部
-                // 状態を流しきりつつ、レイテンシぶんの出力はミュートして混ぜない (リバーブ等
-                // レイテンシ 0 のテール生成系はそのまま鳴る。メータにも乗せない = 減衰へ)
-                if (sinceStopSamples < chain.getTotalLatencySamples())
-                    continue;
 
                 // トラックの Vol/Pan を反映して出力へ (synth プレビューと同じ扱い・マスターは通さない)
                 const float vol  = juce::Decibels::decibelsToGain(trk->getVolume(), -60.0f);
@@ -3149,16 +3107,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     // ワークバッファに全クリップをミックス
     workBuffer.setSize(juce::jmax(2, numOutputChannels), numSamples, false, false, true);
     workBuffer.clear();
-
-    // 停止→再生の開始時は PDC 遅延ラインを無音へリセットする (play() が要求し、ここで消費 =
-    // 再生ブランチを実行するのは自分だけなので in-flight ブロックとの競合が無い)。
-    // buf.clear() は確保無し = RT 安全
-    if (pdcResetRequest.exchange(false, std::memory_order_acq_rel))
-        for (auto& d : snap->trackDelays)
-            if (d != nullptr && d->delaySamples > 0) { d->buf.clear(); d->writePos = 0; }
-
-    // 停止エッジ検出用 (停止直後のチェーン残像ミュート)。停止ブランチが最初のブロックで消費する
-    stopFlushArm = true;
 
     // このブロックでメータを測定したトラックの記録をリセット (未測定分はブロック末尾で減衰)
     juce::zeromem(trackMeterFed, sizeof(trackMeterFed));

@@ -104,6 +104,7 @@ public:
         testHotButLegitSignalUntouched();
         testDownstreamPluginIsProtected();
         testLatencyChangeNotification();
+        testBypassSkipsProcessing();
     }
 
 private:
@@ -117,6 +118,47 @@ private:
                 d[i] = value;
         }
         return b;
+    }
+
+    // バイパスの基本動作: バイパス中のプラグインは processBlock で叩かれず信号が素通りし、
+    // 解除すると再び処理される (チップ左のバイパススイッチ / Cmd+クリックの土台)
+    void testBypassSkipsProcessing()
+    {
+        beginTest("Bypassed plugin is skipped; un-bypass processes again");
+        PluginChain chain;
+        chain.addPlugin(std::make_unique<FillFakePlugin>(0.75f));
+
+        {
+            auto buf = makeBuffer(0.25f);
+            juce::MidiBuffer midi;
+            chain.processBlock(buf, midi);
+            expectEquals(buf.getSample(0, 0), 0.75f, "active plugin processes the block");
+        }
+
+        chain.setBypassed(0, true);
+        expect(chain.isBypassed(0), "bypass flag is set");
+        {
+            auto buf = makeBuffer(0.25f);
+            juce::MidiBuffer midi;
+            chain.processBlock(buf, midi);
+            bool untouched = true;
+            for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+            {
+                const float* d = buf.getReadPointer(ch);
+                for (int i = 0; i < buf.getNumSamples(); ++i)
+                    untouched = untouched && (d[i] == 0.25f);
+            }
+            expect(untouched, "bypassed plugin leaves the signal bit-exact");
+        }
+
+        chain.setBypassed(0, false);
+        expect(!chain.isBypassed(0), "bypass flag is cleared");
+        {
+            auto buf = makeBuffer(0.25f);
+            juce::MidiBuffer midi;
+            chain.processBlock(buf, midi);
+            expectEquals(buf.getSample(0, 0), 0.75f, "un-bypassed plugin processes again");
+        }
     }
 
     void testNaNIsRepairedToSilence()

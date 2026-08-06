@@ -535,22 +535,10 @@ void MainComponent::togglePluginBypassUndoable(int trackIdx, int slot)
     const bool before = c->isBypassed(slot);
     undoManager.beginNewTransaction();
     // invalidatePlayback: getTotalLatencySamples はバイパス中を除外するため、レイテンシ持ち
-    // プラグインのバイパス切替で PDC (trackDelays) を組み直す (undo/redo でも apply 毎に呼ばれる)。
-    // レイテンシ 0 のプラグインは PDC が一切変わらないので再構築しない — バイパスフラグは
-    // audio thread が毎ブロック読むため切替はそれだけで即時反映され、再生が完全に途切れない
-    // (再構築は僅かでもデクリック遷移を伴う)。判定は apply 時に行う (プラグインの UI モード
-    // 切替でレイテンシが後から変わっても正しく追従する)
-    auto resolver = makeChainResolver(t);
+    // プラグインのバイパス切替で PDC (trackDelays) を組み直す (undo/redo でも apply 毎に呼ばれる)
     undoManager.perform(new PluginBypassAction(
-        resolver, slot, before, !before,
-        [this, resolver, slot]
-        {
-            markProjectDirty();
-            if (auto* chain = resolver())
-                if (auto* p = chain->getPlugin(slot))
-                    if (p->getLatencySamples() > 0)
-                        audioEngine.invalidatePlayback();
-        }));
+        makeChainResolver(t), slot, before, !before,
+        [this] { markProjectDirty(); audioEngine.invalidatePlayback(); }));
 }
 
 // ── Track プラグインチェーン ─────────────────────────────────────────
