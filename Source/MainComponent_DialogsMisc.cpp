@@ -208,6 +208,22 @@ void MainComponent::openBundledHelp(const juce::String& anchor)
     const auto f = findBundledHelpFile();
     if (! f.existsAsFile())
     {
+        // 同梱ヘルプが無い (Windows で zip を展開せず中の exe を直接起動した = exe だけが一時
+        // フォルダへ取り出される等) 場合は、公式サイトの同言語ガイドを開く。サイトのガイドは
+        // 同梱ヘルプとアンカーを共有しないので先頭を開く
+        juce::String sub;
+        switch (Localisation::getSavedLanguage())
+        {
+            case Localisation::Language::English:            sub = "en/";      break;
+            case Localisation::Language::SimplifiedChinese:  sub = "zh-Hans/"; break;
+            case Localisation::Language::TraditionalChinese: sub = "zh-Hant/"; break;
+            case Localisation::Language::Korean:             sub = "ko/";      break;
+            case Localisation::Language::Japanese:
+            default:                                         break;
+        }
+        if (juce::URL("https://utawave.com/" + sub + "guide.html").launchInDefaultBrowser())
+            return;
+
         juce::AlertWindow::showAsync(juce::MessageBoxOptions()
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"使い方ドキュメント"))
