@@ -22,6 +22,7 @@ namespace
         const char* identifier;
         const char* nameKey;   // メニュー表示名の tr() キー (各エフェクトの getName() と一致させる)
         std::unique_ptr<BuiltInEffect> (*make)();
+        bool hidden = false;   // true = メニューに出さない (復元/生成は可能・1 行戻せば再表示)
     };
 
     // 並び順 = メニューの並び順。エフェクトを増やすときはここに 1 行足す。
@@ -34,7 +35,7 @@ namespace
         { "utawave.maximizer", u8"マキシマイザー", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInMaximizer()); } },
         { "utawave.delay",   u8"ディレイ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInDelay()); } },
         { "utawave.reverb",  u8"リバーブ",   [] { return std::unique_ptr<BuiltInEffect>(new BuiltInReverb()); } },
-        { "utawave.kerovoice", u8"ケロケロボイス", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInKeroVoice()); } },
+        { "utawave.kerovoice", u8"ケロケロボイス", [] { return std::unique_ptr<BuiltInEffect>(new BuiltInKeroVoice()); }, true },  // 歌唱中に切替できず録音特化の方針に合わないため非表示
     };
     constexpr int kNumEntries = (int) (sizeof(kEntries) / sizeof(kEntries[0]));
 }
@@ -71,7 +72,8 @@ void appendMenu(juce::PopupMenu& builtinSubMenu)
 {
     // 表示名は nameKey を tr() するだけ (DSP 実体を作らない)。
     for (int i = 0; i < kNumEntries; ++i)
-        builtinSubMenu.addItem(kMenuIdBase + 1 + i, tr(kEntries[i].nameKey));
+        if (! kEntries[i].hidden)
+            builtinSubMenu.addItem(kMenuIdBase + 1 + i, tr(kEntries[i].nameKey));
 }
 
 }  // namespace BuiltInFactory
