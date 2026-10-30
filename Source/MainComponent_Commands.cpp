@@ -668,6 +668,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
         stopTransport();
         audioEngine.rewind();
         playPosition = 0.0;
+        playStartPos = 0.0;   // RTZ 基準も先頭へ (次の停止で旧位置へ戻さない)
         toolbar.setTimePosition(0.0, 1, 1);
         timelineView.setPlayheadPosition(0.0);
         propagatePlayheadToPianoRolls(0.0);
