@@ -814,6 +814,27 @@ private:
                 expect(! uids.contains(eff->getUid()), "uid must be unique across built-in effects");
                 uids.add(eff->getUid());
             }
+
+            // メニュー非表示のエフェクトも保存プロジェクトからは復元されるので一意性の対象に含める
+            auto hidden = BuiltInFactory::create("utawave.kerovoice");
+            expect(hidden != nullptr, "hidden effect is still creatable");
+            if (hidden != nullptr)
+            {
+                expect(! ids.contains(hidden->getIdentifier()), "hidden effect identifier must be unique");
+                expect(! uids.contains(hidden->getUid()), "hidden effect uid must be unique");
+            }
+        }
+
+        beginTest("Hidden built-in effects are not listed in the menu");
+        {
+            juce::PopupMenu m;
+            BuiltInFactory::appendMenu(m);
+            bool listed = false;
+            for (juce::PopupMenu::MenuItemIterator it(m); it.next();)
+                if (auto fx = BuiltInFactory::createFromMenuId(it.getItem().itemID))
+                    if (auto* eff = dynamic_cast<BuiltInEffect*>(fx.get()))
+                        listed = listed || eff->getIdentifier() == "utawave.kerovoice";
+            expect(! listed, "kerovoice must not appear in the add menu");
         }
 
         beginTest("Factory identifier-string round-trips");

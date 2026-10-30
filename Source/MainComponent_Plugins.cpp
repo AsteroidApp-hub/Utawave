@@ -78,8 +78,9 @@ MainComponent::PluginEditorWindow::PluginEditorWindow(
         setContentOwned(lbl, true);
     }
 
+    // 表示 (setVisible) は呼び出し側 showPluginEditorWindow が行う。プラグイン GUI の起動は
+    // 表示時に走るため、そこで投げられた例外を窓の所有者が捕捉して片付けられるようにする
     centreWithSize(getWidth(), getHeight());
-    setVisible(true);
 }
 
 MainComponent::PluginEditorWindow::~PluginEditorWindow()
@@ -699,23 +700,7 @@ void MainComponent::openMasterPluginEditor(int slotIdx)
     for (auto* w : pluginEditorWindows)
         if (w && w->getPlugin() == plugin) { w->toFront(true); return; }
 
-    auto* w = new PluginEditorWindow(*plugin,
-        [this](PluginEditorWindow* self) { pluginEditorWindows.removeObject(self); });
-    pluginEditorWindows.add(w);
-
-    auto* mappings = commandManager.getKeyMappings();
-    w->addKeyListener(mappings);
-    std::function<void(juce::Component*)> attach = [&](juce::Component* c)
-    {
-        if (c == nullptr) return;
-        c->addKeyListener(mappings);
-        for (auto* child : c->getChildren()) attach(child);
-    };
-    if (auto* content = w->getContentComponent())
-    {
-        content->setWantsKeyboardFocus(true);
-        attach(content);
-    }
+    showPluginEditorWindow(*plugin);
 }
 
 void MainComponent::removeMasterPlugin(int slotIdx)
@@ -824,9 +809,29 @@ void MainComponent::openPluginEditor(int trackIdx, int slotIdx)
     for (auto* w : pluginEditorWindows)
         if (w && w->getPlugin() == plugin) { w->toFront(true); return; }
 
-    auto* w = new PluginEditorWindow(*plugin,
-        [this](PluginEditorWindow* self) { pluginEditorWindows.removeObject(self); });
-    pluginEditorWindows.add(w);
+    showPluginEditorWindow(*plugin);
+}
+
+void MainComponent::showPluginEditorWindow(juce::AudioPluginInstance& plugin)
+{
+    // 一部のプラグインは GUI の起動 (エディタ生成 / 表示時のビュー接続) で C++ 例外を投げる。
+    // 捕捉しないとメッセージループを抜けてアプリごと終了するため、ここで受け止めて窓を片付ける
+    // (クラッシュレポート上位: 特定メーカーのエディタが WebView 起動中に例外)
+    PluginEditorWindow* w = nullptr;
+    try
+    {
+        w = new PluginEditorWindow(plugin,
+            [this](PluginEditorWindow* self) { pluginEditorWindows.removeObject(self); });
+        pluginEditorWindows.add(w);
+        w->setVisible(true);
+    }
+    catch (...)
+    {
+        if (w != nullptr)
+            pluginEditorWindows.removeObject(w);   // エディタを editorBeingDeleted 経由で破棄
+        showPluginEditorFailedDialog(plugin);
+        return;
+    }
 
     // プラグイン GUI 内部の子コンポーネントにフォーカスが当たっていても
     // スペース/トランスポートキーが効くよう、エディタ階層に再帰的に KeyListener を仕込む
@@ -845,6 +850,24 @@ void MainComponent::openPluginEditor(int trackIdx, int slotIdx)
         content->setWantsKeyboardFocus(true);
         attach(content);
     }
+}
+
+void MainComponent::showPluginEditorFailedDialog(const juce::AudioPluginInstance& plugin)
+{
+    const auto desc   = plugin.getPluginDescription();
+    auto       target = desc.name.isNotEmpty() ? desc.name : plugin.getName();
+    if (desc.manufacturerName.isNotEmpty())
+        target << " (" << desc.manufacturerName << ")";
+
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::MessageBoxIconType::WarningIcon,
+        tr(u8"プラグインの画面を開けませんでした"),
+        tr(u8"「%1」の画面を開く途中で、プラグイン内部でエラーが発生しました。\n"
+           u8"アプリが終了しないように画面を開く処理を中止しました。\n\n"
+           u8"このプラグインの音の処理はそのまま有効です (Utawave の他の機能もそのまま使えます)。\n\n"
+           u8"解決しない場合は次をお試しください:\n"
+           u8"・プラグインをメーカーの最新版に更新する\n"
+           u8"・同じ症状をプラグインのメーカーに問い合わせる").replace("%1", target));
 }
 
 void MainComponent::showPluginManager()

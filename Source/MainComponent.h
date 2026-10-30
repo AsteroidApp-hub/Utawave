@@ -164,6 +164,10 @@ private:
     void openBundledHelp(const juce::String& anchor);
     void addPluginToTrack(int trackIdx, int slotIdx = -1);
     void openPluginEditor(int trackIdx, int slotIdx);
+    // エディタ窓の生成 + 表示 + キー配線の共通処理。プラグインが GUI 起動中に例外を投げても
+    // アプリを落とさず、窓を片付けて案内ダイアログを出す (トラック/マスター共用)
+    void showPluginEditorWindow(juce::AudioPluginInstance& plugin);
+    void showPluginEditorFailedDialog(const juce::AudioPluginInstance& plugin);
     void closePluginEditorFor(juce::AudioPluginInstance* plugin);
     void removePluginFromTrack(int trackIdx, int slotIdx);
     // D&D: 他トラックからのドロップ。move (copy=false) または copy (copy=true)
