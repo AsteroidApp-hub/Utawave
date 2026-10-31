@@ -118,7 +118,14 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
     auto curStem        = srcFileForMenu.getFileNameWithoutExtension();
     int  currentSemis   = 0;
     juce::String srcStem = curStem;
-    if (curStem.contains("_pitch"))
+    const bool clipStretched = rcRef.clip && rcRef.clip->getStretch().isActive();
+    if (clipStretched)
+    {
+        // 伸縮済みは元ファイルから毎回レンダーし直すので ★ (キャッシュ) は出さない
+        currentSemis = juce::roundToInt(rcRef.clip->getStretch().semitones);
+        srcFileForMenu = juce::File();
+    }
+    else if (curStem.contains("_pitch"))
     {
         srcStem = curStem.upToLastOccurrenceOf("_pitch", false, false);
         currentSemis = curStem.fromLastOccurrenceOf("_pitch", false, false).getIntValue();
@@ -146,6 +153,8 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
         if (s == 0) pitchMenu.addSeparator();
     }
     m.addSubMenu(tr(u8"キーを変更..."), pitchMenu);
+    if (clipStretched)
+        m.addItem(520, tr(u8"元の長さに戻す (100%)"));
     m.addSeparator();
     m.addItem(400, tr(u8"削除"));
 
@@ -344,6 +353,12 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                 }
                 return;
             }
+            if (result == 520)
+            {
+                if (rcRef.valid() && rcRef.track && rcRef.clip)
+                    applyClipStretch(rcRef.track, rcRef.clip, 1.0, /*anchorEnd*/ false);
+                return;
+            }
             // キー変更: ID 500..512 (= -6..+6 半音, 506 = 0)
             if (result >= 500 && result <= 512)
             {
@@ -351,6 +366,16 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                 if (!rcRef.valid() || !rcRef.track || !rcRef.clip) return;
                 auto* clip = rcRef.clip;
                 auto srcFile = clip->getFile();
+
+                // 伸縮済みクリップは倍率を保ったまま、元ファイルからキー変更と合成して作り直す
+                // (伸縮結果にさらにキー変更を掛けると劣化が重なるため)
+                if (clip->getStretch().isActive())
+                {
+                    if (juce::roundToInt(clip->getStretch().semitones) != semis)
+                        applyClipStretch(rcRef.track, clip, clip->getStretch().ratio,
+                                         /*anchorEnd*/ false, (double) semis);
+                    return;
+                }
 
                 // 元ファイル (拡張子付き) を解決
                 // - 現在が xxx_pitch±N.<ext> なら xxx.<ext> に戻して探す
@@ -386,12 +411,7 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                             .withButton("OK"), nullptr);
                         return;
                     }
-                    clip->setFile(origFile);
-                    clip->invalidateWaveformCache();
-                    clip->refreshThumbnail();
-                    if (editChangeCb) editChangeCb();
-                    if (onWaveformRefreshNeeded) onWaveformRefreshNeeded();
-                    repaint();
+                    setClipFileUndoable(clip, origFile);
                     return;
                 }
 
@@ -404,12 +424,7 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                 // 既存キャッシュがあれば即時切り替え
                 if (outFile.existsAsFile())
                 {
-                    clip->setFile(outFile);
-                    clip->invalidateWaveformCache();
-                    clip->refreshThumbnail();
-                    if (editChangeCb) editChangeCb();
-                    if (onWaveformRefreshNeeded) onWaveformRefreshNeeded();
-                    repaint();
+                    setClipFileUndoable(clip, outFile);
                     return;
                 }
 
@@ -459,13 +474,7 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                         .withButton("OK"), nullptr);
                     return;
                 }
-                clip->setFile(outFile);
-                clip->invalidateWaveformCache();
-                clip->refreshThumbnail();
-                if (editChangeCb) editChangeCb();
-                // ロード完了までポーリングして波形を再描画 (MainComponent 側に委譲)
-                if (onWaveformRefreshNeeded) onWaveformRefreshNeeded();
-                repaint();
+                setClipFileUndoable(clip, outFile);
                 return;
             }
             // (「このテイクを使う」は ID 321 で上の方で処理済み。以前ここに ID 320 の

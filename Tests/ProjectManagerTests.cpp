@@ -79,6 +79,7 @@ public:
         projDir.createDirectory();
         auto wav = writeWav(projDir.getChildFile("Audio").getChildFile("clip.wav"), 48000.0, 1.0);
         auto projFile = projDir.getChildFile("Proj.uta");
+        auto stretchSrc = writeWav(projDir.getChildFile("Audio").getChildFile("orig.wav"), 48000.0, 1.0);
 
         // ── シーン構築 (A) ──
         juce::AudioFormatManager fmtA; fmtA.registerBasicFormats();
@@ -98,6 +99,9 @@ public:
             c->setFadeInSecs(0.1); c->setFadeOutSecs(0.2);
             c->setFadeInCurve(FadeCurve::EqualPower); c->setFadeOutCurve(FadeCurve::SCurve);
             c->getGainPointsRW() = { { 0.0, 0.0f }, { 1.0, -3.0f } };
+            ClipStretch st;
+            st.ratio = 1.25; st.source = stretchSrc; st.srcStart = 0.3; st.semitones = 2.0;
+            c->setStretch(st);
             t0->getLane(0)->soloed = true;
         }
 
@@ -232,6 +236,11 @@ public:
                     expect(approxEq(gp[0].time, 0.0, 1e-9) && approxEq(gp[0].dB, 0.0, 1e-4)
                            && approxEq(gp[1].time, 1.0, 1e-9) && approxEq(gp[1].dB, -3.0, 1e-4),
                            "gain envelope point times/dB values preserved");
+                const auto& st = c->getStretch();
+                expect(st.isActive(), "clip time-stretch persisted");
+                expect(approxEq(st.ratio, 1.25, 1e-9) && approxEq(st.srcStart, 0.3, 1e-9)
+                       && approxEq(st.semitones, 2.0, 1e-9), "stretch ratio/srcStart/semitones");
+                expect(st.source == stretchSrc, "stretch source resolved via relative path");
             }
         }
 

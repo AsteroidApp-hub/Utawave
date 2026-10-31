@@ -160,6 +160,7 @@ void Track::trimAndCrossfadeOnLane0(AudioClip* newClip, double startPos, double 
             // 元がトラック色追従 (customColour=false) のときに呼ぶと
             // デフォルト色 (青) が固定化されてしまうため。
             if (c->hasCustomColour()) right->setColour(c->getColour());
+            right->setStretch(c->getStretch());
             const double rf = juce::jmin(kPunchXfade, right->getDuration() * 0.5, newHalf);
             right->setFadeInSecs(rf);
             rightFade = juce::jmin(rightFade, rf);   // newClip 右端と同値に

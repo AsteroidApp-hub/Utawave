@@ -13,6 +13,26 @@ struct GainPoint
 
 enum class FadeCurve { Linear, Logarithmic, EqualPower, SCurve };
 
+// タイムストレッチ情報。伸縮したクリップは「元ファイルの一区間を (ratio 倍の尺 + semitones の
+// キー変更) で 1 回レンダーしたファイル」を参照する。再ストレッチ / 100% 戻しは常に source から
+// 作り直す (劣化を重ねない)。現ファイルの t=0 は source の srcStart 秒目に対応するので、
+// source 上の位置 = srcStart + fileOffset / ratio。ratio == 1 のクリップは非ストレッチ
+struct ClipStretch
+{
+    double     ratio     { 1.0 };
+    juce::File source;
+    double     srcStart  { 0.0 };
+    double     semitones { 0.0 };
+
+    bool isActive() const { return std::abs(ratio - 1.0) > 1.0e-6 && source != juce::File(); }
+    bool operator==(const ClipStretch& o) const
+    {
+        return ratio == o.ratio && source == o.source
+            && srcStart == o.srcStart && semitones == o.semitones;
+    }
+    bool operator!=(const ClipStretch& o) const { return !(*this == o); }
+};
+
 // ファイル内容 (ファイル名 + サイズ + 更新日時) から算出するサムネイルキャッシュ用ハッシュ。
 // 同一パスでも内容が差し替わるとハッシュが変わるので、AudioThumbnailCache がそのファイル
 // だけ自動的にミス → 再デコードする (ファイル単位の stale 判定)。逆に「同一内容の確定済み
@@ -123,6 +143,9 @@ public:
         cachedSampleRate = 0.0;
     }
     bool hasCustomColour() const        { return customColour; }
+
+    const ClipStretch& getStretch() const          { return stretch; }
+    void setStretch(const ClipStretch& st)         { stretch = st.isActive() ? st : ClipStretch{}; }
     void resetColour()                   { customColour = false; }
 
     // フェード
@@ -198,6 +221,7 @@ private:
     FadeCurve fadeOutCurve { FadeCurve::Linear };
 
     std::vector<GainPoint> gainPoints;  // クリップゲインエンベロープ
+    ClipStretch stretch;
 
     juce::AudioThumbnail thumbnail;
     std::unique_ptr<juce::AudioFormatReader> cachedReader;

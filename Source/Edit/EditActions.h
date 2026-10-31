@@ -61,12 +61,15 @@ struct ClipParams
     // 焼き付き「移動すると色が変わる」バグになっていた。ソースクリップから作る時は
     // 必ず customColour = src->hasCustomColour() を入れること
     bool         customColour { false };
+    ClipStretch  stretch;   // ソースクリップから作る時は src->getStretch() を渡す (伸縮情報の継承)
 };
 
 // クリップ全プロパティのスナップショット
 struct ClipState
 {
     AudioClip* clip       { nullptr };
+    juce::File file;          // タイムストレッチ / キー変更でファイルが差し替わるため保持
+    ClipStretch stretch;
     double     startPos   { 0.0 };
     double     duration   { 0.0 };
     double     fileOffset { 0.0 };
@@ -82,6 +85,8 @@ struct ClipState
     {
         clip = c;
         if (!c) return;
+        file         = c->getFile();
+        stretch      = c->getStretch();
         startPos     = c->getStartPosition();
         duration     = c->getDuration();
         fileOffset   = c->getFileOffset();
@@ -97,6 +102,13 @@ struct ClipState
     void restore() const
     {
         if (!clip) return;
+        if (file != juce::File() && clip->getFile() != file)
+        {
+            clip->setFile(file);
+            clip->invalidateWaveformCache();
+            clip->refreshThumbnail();
+        }
+        clip->setStretch(stretch);
         clip->setStartPosition(startPos);
         clip->setDuration(duration);
         clip->setFileOffset(fileOffset);
@@ -111,7 +123,9 @@ struct ClipState
 
     bool differsFrom(const ClipState& other) const
     {
-        if (startPos     != other.startPos
+        if (file         != other.file
+         || stretch      != other.stretch
+         || startPos     != other.startPos
          || duration     != other.duration
          || fileOffset   != other.fileOffset
          || fadeIn       != other.fadeIn
@@ -198,6 +212,7 @@ public:
                 // setColour は無条件で customColour 化するため、明示色の時だけ焼き付ける
                 // (既定はトラック色追従のまま = 移動/コピーで色が変わらない)
                 if (params.customColour) addedPtr->setColour(params.colour);
+                addedPtr->setStretch(params.stretch);
             }
         }
         if (onChange) onChange();
@@ -293,6 +308,7 @@ public:
             origName          = original->getName();
             origColour        = original->getColour();
             origHasCustomCol  = original->hasCustomColour();
+            origStretch       = original->getStretch();
         }
     }
 
@@ -333,6 +349,7 @@ public:
             leftPtr->setFadeOutCurve(origState.fadeOutCurve);
             // 元がカスタム色を持つ場合のみ引き継ぐ (トラック色追従を壊さないため)
             if (origHasCustomCol) leftPtr->setColour(origColour);
+            leftPtr->setStretch(origStretch);
 
             // ゲインエンベロープを継承（境界に補間ポイントを追加）
             auto& leftPts = leftPtr->getGainPointsRW();
@@ -352,6 +369,7 @@ public:
             rightPtr->setFadeInCurve(origState.fadeInCurve);
             rightPtr->setFadeOutCurve(origState.fadeOutCurve);
             if (origHasCustomCol) rightPtr->setColour(origColour);
+            rightPtr->setStretch(origStretch);
 
             // 右クリップ: 境界のポイント（時刻 0）と分割時刻以降のポイントを時刻シフトしてコピー
             auto& rightPts = rightPtr->getGainPointsRW();
@@ -411,6 +429,7 @@ private:
     juce::String                   origName;
     juce::Colour                   origColour;
     bool                           origHasCustomCol { false };
+    ClipStretch                    origStretch;   // 分割片も同じレンダー/元ファイル対応を保つ
 
     std::unique_ptr<AudioClip>     storedOriginal;
     AudioClip*                     leftPtr  { nullptr };
@@ -443,6 +462,7 @@ public:
             origName          = original->getName();
             origColour        = original->getColour();
             origHasCustomCol  = original->hasCustomColour();
+            origStretch       = original->getStretch();
         }
     }
 
@@ -482,6 +502,7 @@ public:
             nc->setGain(origState.gain);
             nc->setName(origName);
             if (origHasCustomCol) nc->setColour(origColour);
+            nc->setStretch(origStretch);
 
             // フェード: 先頭/末尾セグメントは元のフェード値を継承、内側境界には短いフェードを当てる
             const bool isFirst = (i == 0);
@@ -550,6 +571,7 @@ private:
     juce::String                   origName;
     juce::Colour                   origColour;
     bool                           origHasCustomCol { false };
+    ClipStretch                    origStretch;   // 分割片も同じレンダー/元ファイル対応を保つ
 
     std::unique_ptr<AudioClip>     storedOriginal;
     std::vector<AudioClip*>        createdClips;
@@ -575,6 +597,7 @@ public:
         FadeCurve    fadeInCurve  { FadeCurve::Linear };
         FadeCurve    fadeOutCurve { FadeCurve::Linear };
         std::vector<GainPoint> gainPoints;
+        ClipStretch  stretch;
 
         static ClipSnap capture(AudioClip* c)
         {
@@ -592,6 +615,7 @@ public:
             s.fadeInCurve     = c->getFadeInCurve();
             s.fadeOutCurve    = c->getFadeOutCurve();
             s.gainPoints      = c->getGainPoints();  // クリップゲインエンベロープも保存 (テイク採用で消えるのを防ぐ)
+            s.stretch         = c->getStretch();
             return s;
         }
     };
@@ -634,6 +658,7 @@ private:
             c->setFadeInSecs(s.fadeIn);
             c->setFadeOutSecs(s.fadeOut);
             c->getGainPointsRW() = s.gainPoints;  // ゲインエンベロープを復元
+            c->setStretch(s.stretch);
         }
         if (onChange) onChange();
     }

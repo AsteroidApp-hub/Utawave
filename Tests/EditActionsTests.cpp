@@ -58,6 +58,8 @@ public:
     {
         testClipsProperty();
         testClipsPropertyValidator();
+        testClipsPropertyFileAndStretch();
+        testStretchCarriedBySplitAndSnapshot();
         testRestoreOrderClamp();
         testClipAdd();
         testClipDelete();
@@ -284,6 +286,77 @@ public:
         act.perform();   // redo
         expect(approxEq(c->getStartPosition(), 2.0, 1e-9), "redo -> new geometry");
         expect(changes == 3, "onChange fired on perform/undo/redo");
+    }
+
+    // ── タイムストレッチ / キー変更: ClipState がファイル差し替えと伸縮情報を往復させる ──
+    void testClipsPropertyFileAndStretch()
+    {
+        beginTest("ClipsPropertyAction: file swap + stretch info round-trip (time stretch undo)");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        juce::AudioThumbnailCache cache(8);
+        Lane lane;
+        auto* c = lane.addClip(juce::File("/tmp/orig.wav"), 10.0, 2.0, fmt, cache);
+        c->setFileOffset(3.0);
+        EditActions::ClipState oldS; oldS.capture(c);
+
+        ClipStretch st; st.ratio = 1.5; st.source = juce::File("/tmp/orig.wav"); st.srcStart = 1.0;
+        c->setFile(juce::File("/tmp/orig_st15000_48000_288000.wav"));
+        c->setStretch(st);
+        c->setDuration(3.0); c->setFileOffset(3.0);
+        EditActions::ClipState newS; newS.capture(c);
+        expect(newS.differsFrom(oldS), "file/stretch change is a difference");
+
+        EditActions::ClipsPropertyAction act({ oldS }, { newS }, {}, nullptr);
+        act.undo();
+        expect(c->getFile() == juce::File("/tmp/orig.wav"), "undo -> original file");
+        expect(! c->getStretch().isActive(), "undo -> unstretched");
+        expect(approxEq(c->getDuration(), 2.0, 1e-9), "undo -> original duration");
+        act.perform();
+        expect(c->getFile() == juce::File("/tmp/orig_st15000_48000_288000.wav"), "redo -> rendered file");
+        expect(c->getStretch() == st, "redo -> stretch info");
+
+        EditActions::ClipState keyOnly = oldS;
+        keyOnly.file = juce::File("/tmp/orig_pitch+2.wav");
+        expect(keyOnly.differsFrom(oldS), "file-only change (key change) is a difference");
+
+        ClipStretch unity; unity.ratio = 1.0; unity.source = juce::File("/tmp/orig.wav");
+        c->setStretch(unity);
+        expect(! c->getStretch().isActive(), "ratio 1 is stored as unstretched");
+    }
+
+    // 分割片 / レーンスナップショット / コピー用パラメータが伸縮情報を引き継ぐ
+    void testStretchCarriedBySplitAndSnapshot()
+    {
+        beginTest("stretch info survives split, lane snapshot and ClipAddAction");
+        juce::AudioFormatManager fmt; fmt.registerBasicFormats();
+        juce::AudioThumbnailCache cache(8);
+        Lane lane;
+        auto* c = lane.addClip(juce::File("/tmp/r.wav"), 0.0, 4.0, fmt, cache);
+        ClipStretch st; st.ratio = 0.8; st.source = juce::File("/tmp/s.wav"); st.srcStart = 2.0; st.semitones = -1.0;
+        c->setStretch(st);
+
+        EditActions::ClipSplitAction split(&lane, c, 1.5, fmt, cache, {}, {});
+        split.perform();
+        expect(lane.clips.size() == 2, "split made two pieces");
+        bool both = lane.clips.size() == 2;
+        for (auto& p : lane.clips) both = both && p->getStretch() == st;
+        expect(both, "both split pieces keep the stretch info");
+
+        std::vector<EditActions::LaneSnapshotAction::ClipSnap> before, after;
+        for (auto& p : lane.clips) before.push_back(EditActions::LaneSnapshotAction::ClipSnap::capture(p.get()));
+        EditActions::LaneSnapshotAction snap(&lane, before, after, fmt, cache, {});
+        snap.perform();
+        expect(lane.clips.empty(), "snapshot perform -> after (empty)");
+        snap.undo();
+        bool restored = lane.clips.size() == 2;
+        for (auto& p : lane.clips) restored = restored && p->getStretch() == st;
+        expect(restored, "lane snapshot undo recreates clips with stretch info");
+
+        EditActions::ClipParams prm;
+        prm.file = juce::File("/tmp/r.wav"); prm.startPos = 8.0; prm.duration = 1.0; prm.stretch = st;
+        EditActions::ClipAddAction add(&lane, prm, fmt, cache, {});
+        add.perform();
+        expect(lane.clips.back()->getStretch() == st, "ClipAddAction applies params.stretch");
     }
 
     // ── ClipsPropertyAction: 生存バリデータが破棄済みクリップの restore をスキップ ──

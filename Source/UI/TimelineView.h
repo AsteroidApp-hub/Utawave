@@ -5,6 +5,7 @@
 #include <JuceHeader.h>
 #include "../Localisation.h"
 #include <vector>
+#include <limits>
 #include "../Tracks/TrackManager.h"
 #include "../AppSettings.h"
 #include "../Edit/EditActions.h"
@@ -413,6 +414,16 @@ public:
     // スワイプ・コンピング (環境設定・既定 OFF)。ON の間はテイクレーン上の素のドラッグが
     // 「ドラッグした範囲をそのテイクから Lane 0 へ採用」になる (クリップの移動は Lane 0 で行う)
     void setSwipeCompEnabled(bool on) { swipeCompEnabled = on; }
+
+    // クリップのタイムストレッチ / キー変更を適用する (元ファイルから 1 回でレンダー・Undo 対応)。
+    // ratio は元の尺に対する倍率 (0.5〜2.0)。anchorEnd=true で右端固定。semitones に NaN を
+    // 渡すと現在のキー変更量を保つ。失敗/キャンセルで false
+    bool applyClipStretch(Track* track, AudioClip* clip, double ratio, bool anchorEnd,
+                          double semitones = std::numeric_limits<double>::quiet_NaN());
+    // クリップのファイルを Undo 対応で差し替える (キー変更の非ストレッチ経路)
+    void setClipFileUndoable(AudioClip* clip, const juce::File& f);
+    // <stem>_pitch±N.<ext> から元ファイルとキー変更量を求める (見つからなければ f 自身・0)
+    static juce::File findPitchOriginal(const juce::File& f, double& semitonesOut);
     // 現在の BPM / 拍子から 1 小節の秒数を返す (N/B の小節移動などで使う)
     double barLengthSecs() const;
     // フォーカスレーンの Solo をトグル（lane 1 以降のみ有効）
@@ -471,6 +482,7 @@ private:
     // ヒット判定の許容値 (カーソル判定 mouseMove / 掴み判定 mouseDown / 描画で共通)
     static constexpr int    kXfadeHandleHitPx    { 8 };      // クロスフェード両端ハンドル半径
     static constexpr int    kHandleHitPx         { 6 };      // フェードチップ / GainPoint 半径
+    static constexpr int    kStretchHitPx        { 12 };     // 下側の角 (タイムストレッチ) の高さ
     static constexpr double kOverlapEpsilonSecs  { 0.001 };  // 「重なりあり」とみなす下限 (1ms)
 
     // クロスフェードを「視覚化・操作対象」として扱うかの単一の真実源 (#L3)。
@@ -543,7 +555,7 @@ private:
                                  std::vector<MidiClip*> toRemove,
                                  std::vector<EditActions::MidiClipReplaceAction::NewMidiClip> toAdd,
                                  bool newTransaction = true);
-    enum class DragMode { None, Move, FadeIn, FadeOut, ResizeLeft, ResizeRight, CrossfadeLeft, CrossfadeRight, CrossfadeCenter, Gain, GainPoint, Selection };
+    enum class DragMode { None, Move, FadeIn, FadeOut, ResizeLeft, ResizeRight, CrossfadeLeft, CrossfadeRight, CrossfadeCenter, Gain, GainPoint, Selection, StretchLeft, StretchRight };
     DragMode getDragMode(const ClipRef& ref, int mouseX, int mouseY) const;
     juce::Rectangle<int> getContentArea() const;
 
@@ -673,6 +685,19 @@ private:
     bool    swipeNoSnap { false };
     ClipRef swipeClickRef;   // ドラッグせず離した時は従来どおりこのクリップを選択する
     bool beginSwipeComp(const juce::MouseEvent& e, const ClipRef& ref);
+
+    // タイムストレッチ: クリップ下側の角 (左下 / 右下) のドラッグ。ドラッグ中はクリップを
+    // 変えずプレビューだけ描き、離した時に元ファイルから 1 回レンダーして差し替える
+    bool    stretchActive { false };
+    ClipRef stretchRef;
+    bool    stretchAnchorEnd { false };   // true = 右端固定 (左下角)
+    double  stretchOrigStart { 0.0 }, stretchOrigEnd { 0.0 };
+    double  stretchSpanDur { 0.0 };       // source 上の尺 (倍率の基準)
+    double  stretchPreviewRatio { 1.0 };
+    void beginClipStretch(const ClipRef& ref, bool anchorEnd);
+    void updateClipStretch(const juce::MouseEvent& e);
+    void finishClipStretch();
+    void drawStretchPreview(juce::Graphics& g, juce::Rectangle<int> area);
     void finishSwipeComp();
     void swipeRange(double& t1, double& t2) const;
     juce::Point<int> rubberBandStart;

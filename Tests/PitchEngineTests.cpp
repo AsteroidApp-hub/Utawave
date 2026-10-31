@@ -15,6 +15,7 @@
 #include "../Source/Audio/PitchEngine.h"
 #include "../Source/Audio/pitchcore/RealFFT.h"
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -84,6 +85,130 @@ public:
         testShortBuffer();
         testGuards();
         testProcessFileRoundTrip();
+        testTimeStretch();
+        testRenderRegion();
+    }
+
+    // 無音の後の最初のオンセット (|x| > thr) の位置
+    static int firstOnset(const juce::AudioBuffer<float>& b, float thr)
+    {
+        const float* d = b.getReadPointer(0);
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            if (std::abs(d[i]) > thr) return i;
+        return -1;
+    }
+
+    // ── タイムストレッチ (shiftPitchAndTime): 尺 / ピッチ維持 / オンセット位置 / キー合成 ──
+    void testTimeStretch()
+    {
+        const double sr = 48000.0;
+        beginTest("shiftBufferAndTime: x1.5 keeps pitch, length = round(n*1.5)");
+        {
+            auto in = makeSine(1, sr, 2.0, { 440.0 });
+            juce::AudioBuffer<float> out;
+            expect(PitchEngine::shiftBufferAndTime(in, sr, 0.0, 1.5, out), "returns true");
+            expectEquals(out.getNumSamples(), (int) std::llround(in.getNumSamples() * 1.5), "length x1.5");
+            const double f = measureFreq(out, 0, sr, (int) (sr * 0.5), (int) (sr * 2.5));
+            expect(std::abs(f - 440.0) < 3.0, "pitch kept ~440 Hz, got " + juce::String(f, 2));
+            const float mag = out.getMagnitude(0, (int) (sr * 0.5), (int) (sr * 2.0));
+            expect(mag > 0.4f && mag < 0.6f, "amplitude kept ~0.5");
+            expect(allFinite(out), "finite");
+        }
+        beginTest("shiftBufferAndTime: x0.75 shortens, onset maps to t*0.75");
+        {
+            // 0.8s 無音 → 440Hz 0.5 振幅。オンセットは 0.8 * 0.75 = 0.6s に来るはず
+            const int n = (int) (sr * 2.0), on = (int) (sr * 0.8);
+            juce::AudioBuffer<float> in(1, n);
+            in.clear();
+            for (int i = on; i < n; ++i)
+                in.setSample(0, i, 0.5f * (float) std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * (i - on) / sr));
+            juce::AudioBuffer<float> out;
+            expect(PitchEngine::shiftBufferAndTime(in, sr, 0.0, 0.75, out), "returns true");
+            expectEquals(out.getNumSamples(), (int) std::llround(n * 0.75), "length x0.75");
+            const int o = firstOnset(out, 0.2f);
+            const double err = std::abs((double) o / sr - 0.6);
+            expect(err < 0.015, "onset at ~0.60 s (error " + juce::String(err * 1000.0, 1) + " ms)");
+        }
+        beginTest("shiftBufferAndTime: key + time in one pass (+3 st, x1.25)");
+        {
+            auto in = makeSine(1, sr, 2.0, { 440.0 });
+            juce::AudioBuffer<float> out;
+            expect(PitchEngine::shiftBufferAndTime(in, sr, 3.0, 1.25, out), "returns true");
+            expectEquals(out.getNumSamples(), (int) std::llround(in.getNumSamples() * 1.25), "length x1.25");
+            const double f = measureFreq(out, 0, sr, (int) (sr * 0.4), (int) (sr * 2.1));
+            expect(std::abs(f - 523.25) < 3.0, "pitch ~523.25 Hz, got " + juce::String(f, 2));
+        }
+        beginTest("shiftBufferAndTime: timeRatio 1 is identical to shiftBuffer; guards");
+        {
+            auto in = makeSine(2, sr, 1.0, { 440.0, 660.0 });
+            juce::AudioBuffer<float> a, b;
+            expect(PitchEngine::shiftBuffer(in, sr, 2.0, a), "shiftBuffer ok");
+            expect(PitchEngine::shiftBufferAndTime(in, sr, 2.0, 1.0, b), "shiftBufferAndTime ok");
+            bool same = a.getNumSamples() == b.getNumSamples();
+            for (int ch = 0; same && ch < 2; ++ch)
+                same = std::memcmp(a.getReadPointer(ch), b.getReadPointer(ch),
+                                   sizeof(float) * (size_t) a.getNumSamples()) == 0;
+            expect(same, "bit-identical to shiftBuffer at timeRatio 1");
+
+            juce::AudioBuffer<float> c;
+            expect(PitchEngine::shiftBufferAndTime(in, sr, 0.0, 1.0, c), "0 st / x1 ok");
+            expect(c.getNumSamples() == in.getNumSamples()
+                   && std::memcmp(c.getReadPointer(0), in.getReadPointer(0),
+                                  sizeof(float) * (size_t) in.getNumSamples()) == 0,
+                   "0 st / x1 is an exact copy");
+            expect(! PitchEngine::shiftBufferAndTime(in, sr, 0.0, 0.1, c), "ratio 0.1 rejected");
+            expect(! PitchEngine::shiftBufferAndTime(in, sr, 0.0, 5.0, c), "ratio 5 rejected");
+        }
+    }
+
+    // ── renderRegion: 区間だけを読み、x 倍の尺で 32f WAV を書く ──
+    void testRenderRegion()
+    {
+        beginTest("renderRegion: renders only the requested region at timeRatio");
+        juce::AudioFormatManager fmt;
+        fmt.registerBasicFormats();
+        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                       .getChildFile("UtawavePitchRegionTest");
+        dir.deleteRecursively();
+        dir.createDirectory();
+        auto inFile  = dir.getChildFile("in.wav");
+        auto outFile = dir.getChildFile("out.wav");
+
+        const double sr = 48000.0;
+        auto buf = makeSine(1, sr, 3.0, { 440.0 });
+        {
+            juce::WavAudioFormat wav;
+            std::unique_ptr<juce::OutputStream> os = inFile.createOutputStream();
+            auto w = wav.createWriterFor(os, juce::AudioFormatWriterOptions{}
+                         .withSampleRate(sr).withNumChannels(1).withBitsPerSample(32)
+                         .withSampleFormat(juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+            expect(w != nullptr, "source writer");
+            if (w) w->writeFromAudioSampleBuffer(buf, 0, buf.getNumSamples());
+        }
+
+        const juce::int64 start = (juce::int64) (sr * 1.0), len = (juce::int64) (sr * 1.0);
+        expect(PitchEngine::renderRegion(inFile, outFile, fmt, start, len, 0.0, 1.5), "render ok");
+        std::unique_ptr<juce::AudioFormatReader> r(fmt.createReaderFor(outFile));
+        expect(r != nullptr, "output readable");
+        if (r)
+        {
+            expectEquals((int) r->lengthInSamples, (int) std::llround((double) len * 1.5), "region x1.5 length");
+            expect(r->bitsPerSample == 32 && r->usesFloatingPointData, "32-bit float output");
+            juce::AudioBuffer<float> rd(1, (int) r->lengthInSamples);
+            r->read(&rd, 0, rd.getNumSamples(), 0, true, true);
+            const double f = measureFreq(rd, 0, sr, (int) (sr * 0.3), (int) (sr * 1.2));
+            expect(std::abs(f - 440.0) < 3.0, "pitch kept, got " + juce::String(f, 2));
+        }
+
+        auto cancelled = dir.getChildFile("cancel.wav");
+        expect(! PitchEngine::renderRegion(inFile, cancelled, fmt, start, len, 0.0, 1.5,
+                                           [](double) { return false; }),
+               "cancel returns false");
+        expect(! cancelled.existsAsFile(), "cancel leaves no output");
+        expect(! PitchEngine::renderRegion(dir.getChildFile("missing.wav"), outFile, fmt, 0, 100, 0.0, 1.5),
+               "missing input -> false");
+        r.reset();
+        dir.deleteRecursively();
     }
 
     // ── 自前 FFT: ラウンドトリップ恒等 + 正弦波の bin 位置/振幅/実信号対称性 ──

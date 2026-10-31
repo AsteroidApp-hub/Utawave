@@ -299,6 +299,14 @@ bool ProjectManager::save(const juce::File& projectFile, const State& s)
                 clipEl->setAttribute("fadeOut",       c->getFadeOutSecs());
                 clipEl->setAttribute("fadeInCurve",   (int)c->getFadeInCurve());
                 clipEl->setAttribute("fadeOutCurve",  (int)c->getFadeOutCurve());
+                if (const auto& st = c->getStretch(); st.isActive())
+                {
+                    auto* stEl = clipEl->createNewChildElement("Stretch");
+                    stEl->setAttribute("ratio",     st.ratio);
+                    stEl->setAttribute("source",    relPath(projectDir, st.source));
+                    stEl->setAttribute("srcStart",  st.srcStart);
+                    stEl->setAttribute("semitones", st.semitones);
+                }
 
                 if (!c->getGainPoints().empty())
                 {
@@ -723,6 +731,15 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                         clip->setFadeOutSecs(clipEl->getDoubleAttribute("fadeOut", 0.010));
                         clip->setFadeInCurve ((FadeCurve)clipEl->getIntAttribute("fadeInCurve",  0));
                         clip->setFadeOutCurve((FadeCurve)clipEl->getIntAttribute("fadeOutCurve", 0));
+                        if (auto* stEl = clipEl->getChildByName("Stretch"))
+                        {
+                            ClipStretch st;
+                            st.ratio     = stEl->getDoubleAttribute("ratio", 1.0);
+                            st.source    = resolveFile(projectDir, stEl->getStringAttribute("source"));
+                            st.srcStart  = stEl->getDoubleAttribute("srcStart", 0.0);
+                            st.semitones = stEl->getDoubleAttribute("semitones", 0.0);
+                            clip->setStretch(st);
+                        }
                         if (auto* gp = clipEl->getChildByName("GainPoints"))
                         {
                             auto& pts = clip->getGainPointsRW();

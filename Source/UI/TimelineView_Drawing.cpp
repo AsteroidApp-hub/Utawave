@@ -86,6 +86,19 @@ TimelineView::DragMode TimelineView::getDragMode(const ClipRef& ref, int mouseX,
         }
     }
 
+    // 下側の角 = タイムストレッチ (左右端のリサイズ域の下部・上部はフェード三角と対になる)
+    {
+        const int bottomY = lTop + (ref.laneIdx == 0
+                                    ? juce::jmin(ref.track->getMainHeight(), ref.track->getTotalHeight())
+                                    : ref.track->getLaneHeight()) - 2;
+        if (cw >= 24 && bottomY - clipTopY >= 24
+            && mouseY >= bottomY - kStretchHitPx && mouseY <= bottomY + 1)
+        {
+            if (mouseX <= cx + 10)      return DragMode::StretchLeft;
+            if (mouseX >= cx + cw - 10) return DragMode::StretchRight;
+        }
+    }
+
     // 左右端 8px がリサイズエリア（クリップ幅が 20px 以上のとき有効）
     if (cw >= 20)
     {
@@ -551,6 +564,36 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
                                       (float)clipRect.getRight() - foPx);
             drawHandle(foCX, /*isFadeIn=*/false, fadeOutHot);
         }
+    }
+
+    // ── タイムストレッチのハンドル (下側の角・ホバー時のみ。上角のフェード三角と色で区別) ──
+    if (&clip == hoveredClip && clipRect.getWidth() >= 24 && clipRect.getHeight() >= 24 && !stretchActive)
+    {
+        const float bottom = (float) clipRect.getBottom() - 1.0f;
+        const float l = (float) clipRect.getX(), r = (float) clipRect.getRight();
+        auto drawCorner = [&](bool left, bool hot)
+        {
+            const float S = hot ? 11.0f : 9.0f;
+            juce::Path tri;
+            if (left) tri.addTriangle(l, bottom, l + S, bottom, l, bottom - S);
+            else      tri.addTriangle(r, bottom, r - S, bottom, r, bottom - S);
+            g.setColour(juce::Colour(0xffffa040).withAlpha(hot ? 1.0f : 0.85f));
+            g.fillPath(tri);
+            g.setColour(juce::Colours::black.withAlpha(hot ? 0.5f : 0.35f));
+            g.strokePath(tri, juce::PathStrokeType(1.0f));
+        };
+        drawCorner(true,  hoveredHandle == DragMode::StretchLeft);
+        drawCorner(false, hoveredHandle == DragMode::StretchRight);
+    }
+
+    // 伸縮済みクリップは右下に倍率を小さく表示する (100% に戻せることが分かるように)
+    if (clip.getStretch().isActive() && clipRect.getWidth() >= 60 && clipRect.getHeight() >= 28)
+    {
+        const auto txt = juce::String(juce::roundToInt(clip.getStretch().ratio * 100.0)) + "%";
+        TextImageCache::getInstance().drawText(g, txt,
+            clipRect.withTrimmedRight(14).withTrimmedBottom(2).removeFromBottom(14),
+            sharedClipNameFont(), juce::Colour(0xffffa040).withAlpha(0.9f),
+            juce::Justification::bottomRight);
     }
 
     // ── クリップゲインライン（GAIN ON のときのみ表示） ──
@@ -1623,6 +1666,9 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
         }
     }
 
+    if (stretchActive)
+        drawStretchPreview(g, area);
+
     // ── プレイヘッドライン（全トラックを貫通） ──
     float phx = (float)positionToX(playheadSecs);
     if (phx >= 0 && phx <= area.getRight())
@@ -1630,4 +1676,50 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
         g.setColour(AppColours::playhead);
         g.drawLine(phx, (float)area.getY(), phx, (float)area.getBottom(), 2.0f);
     }
+}
+
+// タイムストレッチのドラッグ中プレビュー: 元クリップ位置を暗く覆い、新しい尺の矩形へ
+// 現在の波形をそのまま引き伸ばして描く (実際のレンダーは離した時に 1 回だけ)。
+void TimelineView::drawStretchPreview(juce::Graphics& g, juce::Rectangle<int> area)
+{
+    if (!stretchRef.valid() || !clipStillExists(stretchRef.clip)) return;
+    const int ti = trackManager.indexOf(stretchRef.track);
+    if (ti < 0) return;
+    auto* track = stretchRef.track;
+    auto* clip  = stretchRef.clip;
+
+    const int trackTop = area.getY() + trackManager.getTrackY(ti) - scrollY;
+    const int laneY = trackTop + (stretchRef.laneIdx == 0 ? 0
+                      : track->getMainHeight() + (stretchRef.laneIdx - 1) * track->getLaneHeight());
+    const int laneH = stretchRef.laneIdx == 0
+                      ? juce::jmin(track->getMainHeight(), track->getTotalHeight())
+                      : track->getLaneHeight();
+
+    const double newDur   = stretchSpanDur * stretchPreviewRatio;
+    const double newStart = stretchAnchorEnd ? juce::jmax(0.0, stretchOrigEnd - newDur) : stretchOrigStart;
+
+    const int ox1 = (int) positionToX(stretchOrigStart), ox2 = (int) positionToX(stretchOrigEnd);
+    const int nx1 = (int) positionToX(newStart),        nx2 = (int) positionToX(newStart + newDur);
+    const juce::Rectangle<int> oldRect { ox1, laneY + 1, juce::jmax(1, ox2 - ox1), laneH - 2 };
+    const juce::Rectangle<int> newRect { nx1, laneY + 1, juce::jmax(1, nx2 - nx1), laneH - 2 };
+    const auto col = juce::Colour(0xffffa040);
+
+    g.setColour(AppColours::trackBg.withAlpha(0.85f));
+    g.fillRect(oldRect);
+    g.setColour(track->getColour().withAlpha(0.35f));
+    g.fillRoundedRectangle(newRect.toFloat(), 2.0f);
+    if (clip->getThumbnail().getTotalLength() > 0.0)
+        drawClipWaveform(g, *clip, newRect.reduced(0, 3), clip->getFileOffset(), clip->getDuration(),
+                         juce::jlimit(0.05f, 4.0f, clip->getGain() * (float) waveformZoom),
+                         track->getColour().brighter(0.9f).withAlpha(0.7f));
+    g.setColour(col.withAlpha(0.9f));
+    g.drawRoundedRectangle(newRect.toFloat(), 2.0f, 1.5f);
+
+    const auto txt = juce::String(juce::roundToInt(stretchPreviewRatio * 100.0)) + "%";
+    const auto badge = juce::Rectangle<int>(0, 0, 46, 16)
+                           .withCentre({ newRect.getCentreX(), newRect.getY() + 12 });
+    g.setColour(juce::Colours::black.withAlpha(0.7f));
+    g.fillRoundedRectangle(badge.toFloat(), 3.0f);
+    TextImageCache::getInstance().drawText(g, txt, badge, sharedClipNameFont(), col,
+                                           juce::Justification::centred);
 }

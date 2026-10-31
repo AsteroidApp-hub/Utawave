@@ -28,4 +28,20 @@ namespace PitchEngine
                      double semitones,
                      int outputBits = 32,
                      std::function<void(double)> onProgress = {});
+
+    // ピッチ (semitones) と尺 (timeRatio 倍) を同時に変える版 (テスト可能・I/O 無し)。
+    // output は round(入力長 × timeRatio) サンプルになる。
+    bool shiftBufferAndTime(const juce::AudioBuffer<float>& input,
+                            double sampleRate, double semitones, double timeRatio,
+                            juce::AudioBuffer<float>& output,
+                            const std::function<bool(double)>& onProgress = {});
+
+    // 入力ファイルの [startSample, startSample+numSamples) だけを読み、shiftBufferAndTime して
+    // 32bit float WAV へ書き出す (タイムストレッチのクリップ区間レンダー用)。
+    // onProgress が false を返すと中断し、書きかけの出力は削除する。
+    bool renderRegion(const juce::File& inputFile, const juce::File& outputFile,
+                      juce::AudioFormatManager& fmt,
+                      juce::int64 startSample, juce::int64 numSamples,
+                      double semitones, double timeRatio,
+                      const std::function<bool(double)>& onProgress = {});
 }

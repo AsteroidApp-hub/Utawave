@@ -370,6 +370,7 @@ Track* TrackManager::duplicateTrack(int sourceIdx, bool includeTakeLanes)
             nc->setFadeOutSecs (srcClip->getFadeOutSecs());
             for (auto& gp : srcClip->getGainPoints())
                 nc->getGainPointsRW().push_back(gp);
+            nc->setStretch(srcClip->getStretch());
         }
     }
 

@@ -375,10 +375,23 @@ namespace pitchcore
                     std::vector<std::vector<float>>& output,
                     const std::function<bool(double)>& onProgress)
     {
+        return shiftPitchAndTime(input, numChannels, numSamples, sampleRate,
+                                 semitones, 1.0, output, onProgress);
+    }
+
+    bool shiftPitchAndTime(const float* const* input, int numChannels, int numSamples,
+                           double sampleRate, double semitones, double timeRatio,
+                           std::vector<std::vector<float>>& output,
+                           const std::function<bool(double)>& onProgress)
+    {
         if (input == nullptr || numChannels <= 0 || numSamples <= 0 || sampleRate <= 0.0)
             return false;
+        if (! (timeRatio >= 0.25 && timeRatio <= 4.0))
+            return false;
 
-        if (std::abs(semitones) < 1.0e-9)
+        const bool noPitch = std::abs(semitones) < 1.0e-9;
+        const bool noTime  = std::abs(timeRatio - 1.0) < 1.0e-9;
+        if (noPitch && noTime)
         {
             output.assign((size_t) numChannels, std::vector<float>((size_t) numSamples));
             for (int ch = 0; ch < numChannels; ++ch)
@@ -388,9 +401,12 @@ namespace pitchcore
             return true;
         }
 
-        const double ratio   = std::pow(2.0, semitones / 12.0);
+        const double ratio   = noPitch ? 1.0 : std::pow(2.0, semitones / 12.0);
+        const double factor  = ratio * timeRatio;   // ストレッチ段の倍率 (尺 × ピッチ補償)
         const int    fftSize = (sampleRate >= 88200.0 ? 16384 : 8192);
         const int    pad     = fftSize;
+        const int    outLen  = noTime ? numSamples
+                                      : std::max(1, (int) std::llround((double) numSamples * timeRatio));
 
         std::vector<std::vector<float>> padded(
             (size_t) numChannels,
@@ -399,24 +415,35 @@ namespace pitchcore
             std::memcpy(padded[(size_t) ch].data() + pad, input[ch],
                         (size_t) numSamples * sizeof(float));
 
+        const double stretchEnd = noPitch ? 1.0 : 0.7;
         std::vector<std::vector<float>> stretched;
         int stretchedLen = 0;
-        if (! stretchBuffer(padded, ratio, fftSize, stretched, stretchedLen,
-                            onProgress, 0.0, 0.7))
+        if (! stretchBuffer(padded, factor, fftSize, stretched, stretchedLen,
+                            onProgress, 0.0, stretchEnd))
             return false;
         // stretched の確保長は stretchedLen + N + Hs だが、有効な実データ全長を渡す
         const int stretchedAlloc = (int) stretched[0].size();
 
         // 先頭パディング相当を捨て、末尾側はルックアヘッド用に残したまま渡す。
-        // フレーム中心の時間写像は y = r*x - (r-1)*N/2 (解析フレーム [ta, ta+N) の中心
-        // ta+N/2 が合成 ts+N/2 に対応するため)。pad*r だけ捨てると (r-1)*N/2 ずれる
+        // フレーム中心の時間写像は y = f*x - (f-1)*N/2 (解析フレーム [ta, ta+N) の中心
+        // ta+N/2 が合成 ts+N/2 に対応するため)。pad*f だけ捨てると (f-1)*N/2 ずれる
         const int contentStart = std::max(0, (int) std::llround(
-            (double) pad * ratio - (ratio - 1.0) * (double) fftSize / 2.0));
+            (double) pad * factor - (factor - 1.0) * (double) fftSize / 2.0));
         if (contentStart >= stretchedAlloc) return false;
 
-        if (! resampleSection(stretched, stretchedAlloc, contentStart,
-                              sampleRate, sampleRate / ratio,
-                              output, numSamples, onProgress, 0.7, 1.0))
+        if (noPitch)
+        {
+            // ピッチ不変 = リサンプル不要。ストレッチ結果から尺ぶんを切り出す
+            output.assign((size_t) numChannels, std::vector<float>((size_t) outLen, 0.0f));
+            const int avail = std::min(outLen, stretchedAlloc - contentStart);
+            for (int ch = 0; ch < numChannels; ++ch)
+                std::memcpy(output[(size_t) ch].data(),
+                            stretched[(size_t) ch].data() + contentStart,
+                            (size_t) avail * sizeof(float));
+        }
+        else if (! resampleSection(stretched, stretchedAlloc, contentStart,
+                                   sampleRate, sampleRate / ratio,
+                                   output, outLen, onProgress, 0.7, 1.0))
             return false;
 
         if (onProgress) onProgress(1.0);

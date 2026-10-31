@@ -23,4 +23,15 @@ namespace pitchcore
                     double sampleRate, double semitones,
                     std::vector<std::vector<float>>& output,
                     const std::function<bool(double)>& onProgress = {});
+
+    // ピッチ (semitones 半音) と尺 (timeRatio 倍) を 1 回の処理で同時に変える (オフライン処理)。
+    // 内部のストレッチを (timeRatio × ピッチ比) 倍で 1 度だけ行うので、キー変更とタイム
+    // ストレッチを別々に掛けるより劣化しない。
+    //   output:    numChannels × round(numSamples × timeRatio) に確保して書き込む (同 SR)
+    //   timeRatio: 0.25〜4 の範囲 (実用は 0.5〜2)。1.0 は shiftPitch と同一結果
+    //   semitones=0 かつ timeRatio=1 は完全コピー
+    bool shiftPitchAndTime(const float* const* input, int numChannels, int numSamples,
+                           double sampleRate, double semitones, double timeRatio,
+                           std::vector<std::vector<float>>& output,
+                           const std::function<bool(double)>& onProgress = {});
 }

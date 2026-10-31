@@ -32,7 +32,8 @@ void TimelineView::mouseMove(const juce::MouseEvent& e)
         if (hr.valid() && !e.mods.isAltDown())
         {
             auto dm = getDragMode(hr, e.x, e.y);
-            if (dm == DragMode::FadeIn || dm == DragMode::FadeOut)
+            if (dm == DragMode::FadeIn || dm == DragMode::FadeOut
+                || dm == DragMode::StretchLeft || dm == DragMode::StretchRight)
                 nowHandle = dm;
         }
         if (nowHover != hoveredClip || nowHandle != hoveredHandle)
@@ -139,6 +140,10 @@ void TimelineView::mouseMove(const juce::MouseEvent& e)
         case DragMode::ResizeLeft:
         case DragMode::ResizeRight:
             setMouseCursor(juce::MouseCursor::LeftRightResizeCursor); break;
+        case DragMode::StretchLeft:
+            setMouseCursor(juce::MouseCursor::BottomLeftCornerResizeCursor); break;
+        case DragMode::StretchRight:
+            setMouseCursor(juce::MouseCursor::BottomRightCornerResizeCursor); break;
         case DragMode::Gain:
             setMouseCursor(juce::MouseCursor::UpDownResizeCursor); break;
         case DragMode::Selection:
@@ -570,6 +575,13 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     draggedGainPointIdx = -1;
     dragMode          = getDragMode(ref, e.x, e.y);
 
+    if (dragMode == DragMode::StretchLeft || dragMode == DragMode::StretchRight)
+    {
+        beginClipStretch(ref, dragMode == DragMode::StretchLeft);
+        dragMode = DragMode::None;
+        return;
+    }
+
     // 範囲選択ドラッグはクリックしたクリップの (track, lane) をフォーカス対象に
     if (dragMode == DragMode::Selection)
     {
@@ -768,10 +780,10 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             {
                 auto* left = ref.lane->addClip(ref.clip->getFile(), cs,
                                                 splitSecs - cs, fmt, cache);
-                if (left) left->setFileOffset(ref.clip->getFileOffset());
+                if (left) { left->setFileOffset(ref.clip->getFileOffset()); left->setStretch(ref.clip->getStretch()); }
                 auto* right = ref.lane->addClip(ref.clip->getFile(), splitSecs,
                                                  ce - splitSecs, fmt, cache);
-                if (right) right->setFileOffset(ref.clip->getFileOffset() + (splitSecs - cs));
+                if (right) { right->setFileOffset(ref.clip->getFileOffset() + (splitSecs - cs)); right->setStretch(ref.clip->getStretch()); }
                 auto& clips = ref.lane->clips;
                 clips.erase(std::remove_if(clips.begin(), clips.end(),
                     [&](const auto& c){ return c.get() == ref.clip; }), clips.end());
@@ -793,6 +805,12 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
 void TimelineView::mouseDrag(const juce::MouseEvent& e)
 {
+    if (stretchActive)
+    {
+        updateClipStretch(e);
+        return;
+    }
+
     if (swipeActive)
     {
         swipeCurX   = e.x;
@@ -1254,6 +1272,12 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
         return;
     }
 
+    if (stretchActive)
+    {
+        finishClipStretch();
+        return;
+    }
+
     // MIDI クリップ リサイズ終了 (start/duration の変化を Undo 対応で記録)
     if (resizingMidiClip != nullptr)
     {
@@ -1366,6 +1390,7 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             p.name    = clip->getName();
             p.colour  = clip->getColour();
             p.customColour = clip->hasCustomColour();   // トラック色追従なら追従のまま移す
+            p.stretch = clip->getStretch();
             return p;
         };
 
@@ -1524,6 +1549,7 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                             {
                                 RightPart rp;
                                 rp.params.file       = c->getFile();
+                                rp.params.stretch    = c->getStretch();
                                 rp.params.startPos   = plan.rightStart;
                                 rp.params.duration   = plan.rightDuration;
                                 rp.params.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
@@ -1871,6 +1897,7 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                         PendingRightClip rc;
                         rc.lane              = lane;
                         rc.params.file       = c->getFile();
+                        rc.params.stretch    = c->getStretch();
                         rc.params.startPos   = dE;
                         rc.params.duration   = juce::jmax(0.01, cE - dE);
                         rc.params.fileOffset = origFO + splitLocal;

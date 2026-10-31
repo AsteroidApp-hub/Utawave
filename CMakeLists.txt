@@ -125,6 +125,7 @@ target_sources(Utawave PRIVATE
     Source/UI/TimelineView_Edit.cpp
     Source/UI/TimelineView_EditOps.cpp
     Source/UI/TimelineView_Markers.cpp
+    Source/UI/TimelineView_Stretch.cpp
     Source/UI/MasterPanel.cpp
     Source/UI/PianoRollEditor.cpp
     Source/UI/BuiltInEffectEditor.cpp
@@ -352,6 +353,7 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/ClipInsertGeometryTests.cpp
         Tests/RulerRangeMathTests.cpp
         Tests/GridSnapMathTests.cpp
+        Tests/ClipStretchMathTests.cpp
         Tests/EditActionsTests.cpp
         Tests/PluginActionsTests.cpp
         Tests/PluginChainTests.cpp

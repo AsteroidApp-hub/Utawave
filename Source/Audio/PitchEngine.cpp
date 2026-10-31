@@ -80,4 +80,71 @@ namespace PitchEngine
         writer->flush();
         return true;
     }
+
+    bool shiftBufferAndTime(const juce::AudioBuffer<float>& input,
+                            double sampleRate, double semitones, double timeRatio,
+                            juce::AudioBuffer<float>& output,
+                            const std::function<bool(double)>& onProgress)
+    {
+        const int numCh = input.getNumChannels();
+        const int inLen = input.getNumSamples();
+        if (numCh <= 0 || inLen <= 0 || sampleRate <= 0.0) return false;
+
+        std::vector<const float*> ptrs((size_t) numCh, nullptr);
+        for (int ch = 0; ch < numCh; ++ch)
+            ptrs[(size_t) ch] = input.getReadPointer(ch);
+
+        std::vector<std::vector<float>> result;
+        if (! pitchcore::shiftPitchAndTime(ptrs.data(), numCh, inLen, sampleRate,
+                                           semitones, timeRatio, result, onProgress))
+            return false;
+
+        const int outLen = (int) result[0].size();
+        output.setSize(numCh, outLen);
+        for (int ch = 0; ch < numCh; ++ch)
+            std::memcpy(output.getWritePointer(ch), result[(size_t) ch].data(),
+                        (size_t) outLen * sizeof(float));
+        return true;
+    }
+
+    bool renderRegion(const juce::File& inputFile, const juce::File& outputFile,
+                      juce::AudioFormatManager& fmt,
+                      juce::int64 startSample, juce::int64 numSamples,
+                      double semitones, double timeRatio,
+                      const std::function<bool(double)>& onProgress)
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader(fmt.createReaderFor(inputFile));
+        if (! reader || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+            return false;
+
+        startSample = juce::jlimit<juce::int64>(0, reader->lengthInSamples, startSample);
+        numSamples  = juce::jmin(numSamples, reader->lengthInSamples - startSample);
+        if (numSamples <= 0 || numSamples > (juce::int64) std::numeric_limits<int>::max() / 4)
+            return false;
+
+        const int numCh = (int) reader->numChannels;
+        const double sampleRate = reader->sampleRate;
+        juce::AudioBuffer<float> inBuf(numCh, (int) numSamples);
+        reader->read(&inBuf, 0, (int) numSamples, startSample, true, true);
+        reader.reset();
+
+        juce::AudioBuffer<float> outBuf;
+        if (! shiftBufferAndTime(inBuf, sampleRate, semitones, timeRatio, outBuf, onProgress))
+            return false;
+
+        outputFile.deleteFile();
+        std::unique_ptr<juce::OutputStream> outStream = outputFile.createOutputStream();
+        if (outStream == nullptr) return false;
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor(outStream, juce::AudioFormatWriterOptions{}
+                          .withSampleRate(sampleRate)
+                          .withNumChannels((juce::uint32) numCh)
+                          .withBitsPerSample(32)
+                          .withSampleFormat(juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+        if (writer == nullptr) { outputFile.deleteFile(); return false; }
+        const bool ok = writer->writeFromAudioSampleBuffer(outBuf, 0, outBuf.getNumSamples());
+        writer.reset();
+        if (! ok) outputFile.deleteFile();
+        return ok;
+    }
 }

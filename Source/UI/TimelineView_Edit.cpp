@@ -156,6 +156,7 @@ void TimelineView::deleteSelectionRange()
                 // 右側末尾を新クリップとして残す (色/カーブ/エンベロープ引き継ぎは makeSplitTail)
                 EditActions::ClipParams rp;
                 rp.file       = c->getFile();
+                rp.stretch    = c->getStretch();
                 rp.startPos   = plan.rightStart;
                 rp.duration   = plan.rightDuration;
                 rp.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
@@ -369,6 +370,7 @@ void TimelineView::copySelectedClips()
                     e.params.name       = clip->getName();
                     e.params.colour     = clip->getColour();
                     e.params.customColour = clip->hasCustomColour();
+                    e.params.stretch      = clip->getStretch();
                     e.sourceTrack       = track;
                     e.sourceLane        = lane;
                     clipboard.push_back(e);
@@ -399,6 +401,7 @@ void TimelineView::copySelectedClips()
         e.params.name       = r.clip->getName();
         e.params.colour     = r.clip->getColour();
         e.params.customColour = r.clip->hasCustomColour();
+        e.params.stretch      = r.clip->getStretch();
         e.sourceTrack       = r.track;
         e.sourceLane        = r.lane;
         clipboard.push_back(e);
@@ -502,6 +505,7 @@ void TimelineView::pasteAtPlayhead(Track* preferredTrack)
                 // 右側末尾を新クリップとして残す (色/カーブ/エンベロープ引き継ぎは makeSplitTail)
                 EditActions::ClipParams rp;
                 rp.file       = c->getFile();
+                rp.stretch    = c->getStretch();
                 rp.startPos   = plan.rightStart;
                 rp.duration   = plan.rightDuration;
                 rp.fileOffset = before.fileOffset + plan.rightFileOffsetDelta;
@@ -606,6 +610,7 @@ void TimelineView::duplicateSelectedClips()
         p.name       = c->getName();
         p.colour     = c->getColour();
         p.customColour = c->hasCustomColour();
+        p.stretch      = c->getStretch();
 
         if (undoManager)
         {
@@ -897,6 +902,7 @@ bool TimelineView::promoteRangeToLane0(Track* track, Lane* srcLane, double t1, d
             rightClip->setGain(origGain);
             rightClip->setName(origName);
             if (origHasCustomCol) rightClip->setColour(origColour);
+            rightClip->setStretch(clip->getStretch());
             rightClip->setFadeInSecs(juce::jmin(kXfade, rightClip->getDuration() * 0.5));
             appended.push_back(std::move(rightClip));
 
@@ -951,6 +957,7 @@ bool TimelineView::promoteRangeToLane0(Track* track, Lane* srcLane, double t1, d
             // src がカスタム色を持っている場合のみ引き継ぐ。
             // 持っていない場合はトラック色に従わせるため何もしない (デフォルト)。
             if (src->hasCustomColour()) nc->setColour(src->getColour());
+            nc->setStretch(src->getStretch());
             // フェードは後段の「境界一元パス」が決める。ここでは小さなデフォルト
             // (クリック防止) だけ。隣がいない端はこの小フェード、隣がいる境界は一元パスが
             // クロスフェードに上書きする (重ねられない側に 30ms の単独三角を残さない)。
@@ -1341,6 +1348,7 @@ AudioClip* TimelineView::makeSplitTail(Lane* lane, const EditActions::ClipParams
             tail->setFadeOutSecs(params.fadeOut);
             tail->setGain(params.gain);
             if (params.name.isNotEmpty()) tail->setName(params.name);
+            tail->setStretch(params.stretch);
         }
     }
     if (tail != nullptr)
