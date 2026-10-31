@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.12-${{ runner.os }}-universal
+          key: juce-8.0.16-security-${{ runner.os }}-universal
 
       - name: Build (Release)
         run: |
@@ -121,7 +121,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.12-${{ runner.os }}
+          key: juce-8.0.16-security-${{ runner.os }}
 
       # ── ASIO SDK を非公開 repo (utawave-asiosdk) から read-only deploy key で取得 ──
       # 再配布制限のため public repo には置かない。配置されると CMake が
