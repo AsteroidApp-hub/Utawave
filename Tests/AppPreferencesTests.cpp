@@ -116,6 +116,16 @@ public:
                    "retakeKeepsTake round trips true");
         }
 
+        beginTest("swipe comping toggle: default off and round trip");
+        {
+            // 既定 false (既存ユーザーのテイクレーン操作を変えない)。true を保存 → load で保たれる
+            expect(AppPreferences{}.swipeComping == false, "default is false");
+            AppPreferences p;
+            p.swipeComping = true;
+            expect(p.save(), "save succeeds");
+            expect(AppPreferences::load().swipeComping == true, "swipeComping round trips true");
+        }
+
         beginTest("save/load round trip for export-complete dialog toggle");
         {
             // 既定 true。false を保存 → load で false が保たれる (書き出し完了ダイアログの表示設定)

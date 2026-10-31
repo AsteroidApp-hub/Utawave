@@ -1595,6 +1595,34 @@ void TimelineView::drawTrackRows(juce::Graphics& g, juce::Rectangle<int> area)
         }
     }
 
+    // ── スワイプ・コンピング中の範囲 (テイクレーン = 採用元を塗り、Lane 0 = 採用先は枠のみ) ──
+    if (swipeActive)
+    {
+        const int ti = trackManager.indexOf(swipeTrack);
+        if (ti >= 0 && swipeTrack->getTotalHeight() > 0 && !swipeTrack->isLanesCollapsed())
+        {
+            double t1 = 0.0, t2 = 0.0;
+            swipeRange(t1, t2);
+            const int x1 = (int) positionToX(t1);
+            const int x2 = juce::jmax(x1 + 1, (int) positionToX(t2));
+            const int trackTop = area.getY() + trackManager.getTrackY(ti) - scrollY;
+            const int mainH    = swipeTrack->getMainHeight();
+            const int laneH    = swipeTrack->getLaneHeight();
+            const int laneY    = trackTop + mainH + (swipeLaneIdx - 1) * laneH;
+            const auto swipeCol = juce::Colour(0xffffa040);
+
+            g.setColour(swipeCol.withAlpha(0.30f));
+            g.fillRect(x1, laneY, x2 - x1, laneH);
+            g.setColour(swipeCol.withAlpha(0.9f));
+            g.drawRect(x1, laneY, x2 - x1, laneH, 1);
+
+            g.setColour(swipeCol.withAlpha(0.10f));
+            g.fillRect(x1, trackTop, x2 - x1, mainH);
+            g.setColour(swipeCol.withAlpha(0.6f));
+            g.drawRect(x1, trackTop, x2 - x1, mainH, 1);
+        }
+    }
+
     // ── プレイヘッドライン（全トラックを貫通） ──
     float phx = (float)positionToX(playheadSecs);
     if (phx >= 0 && phx <= area.getRight())

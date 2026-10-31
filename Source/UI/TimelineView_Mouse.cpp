@@ -361,6 +361,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     const double bps = bpm / 60.0;
     dragStartSecs = (e.x + scrollX) / (bps * pixelsPerBeat);
 
+    if (swipeCompEnabled && beginSwipeComp(e, ref))
+        return;
+
     // 空白部クリック (Alt = 分割モードなので空白では何もしない)。
     // Cmd は「グリッドスナップの一時解除」修飾として通す (Cmd+ドラッグで自由位置の範囲選択)
     if (!ref.valid() && !e.mods.isShiftDown() && !e.mods.isAltDown())
@@ -790,6 +793,16 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
 void TimelineView::mouseDrag(const juce::MouseEvent& e)
 {
+    if (swipeActive)
+    {
+        swipeCurX   = e.x;
+        swipeNoSnap = e.mods.isCommandDown();
+        const double raw = juce::jmax(0.0, xToPosition(e.x));
+        swipeCurSecs = swipeNoSnap ? raw : snapTime(raw);
+        repaint();
+        return;
+    }
+
     // ── MIDI クリップ 左右リサイズ (GRID 単位) ──
     if (resizingMidiClip != nullptr)
     {
@@ -1235,6 +1248,12 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
 
 void TimelineView::mouseUp(const juce::MouseEvent&)
 {
+    if (swipeActive)
+    {
+        finishSwipeComp();
+        return;
+    }
+
     // MIDI クリップ リサイズ終了 (start/duration の変化を Undo 対応で記録)
     if (resizingMidiClip != nullptr)
     {
@@ -2105,5 +2124,81 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e,
             }
         }
     }
+    repaint();
+}
+
+// ── スワイプ・コンピング ──
+// テイクレーン上の素のドラッグ (Shift/Option なし。Cmd はスナップ一時解除) を掴む。
+// フェード / リサイズ / ゲインのハンドル上は従来操作を優先する。
+bool TimelineView::beginSwipeComp(const juce::MouseEvent& e, const ClipRef& ref)
+{
+    if (!e.mods.isLeftButtonDown() || e.mods.isShiftDown() || e.mods.isAltDown())
+        return false;
+
+    const auto area = getContentArea();
+    if (!area.contains(e.x, e.y)) return false;
+    const int relY = e.y - area.getY() + scrollY;
+    const int t = trackManager.trackAtY(relY);
+    if (t < 0) return false;
+    int ti = -1, li = -1;
+    if (!laneRowAtY(relY, ti, li) || ti != t || li <= 0) return false;
+
+    auto* track = trackManager.getTrack(t);
+    if (track == nullptr || track->isMidiTrack() || track->isFolderTrack()
+        || track->isClickTrack() || track->isAppCaptureTrack())
+        return false;
+
+    if (ref.valid() && ref.track == track && ref.laneIdx == li)
+    {
+        const auto dm = getDragMode(ref, e.x, e.y);
+        if (dm != DragMode::None && dm != DragMode::Move && dm != DragMode::Selection)
+            return false;
+    }
+
+    clearAllSelections();
+    if (loopEndTV > loopStartTV + 0.001 && onSetSelectionRange)
+        onSetSelectionRange(0.0, 0.0);
+
+    swipeActive     = true;
+    swipeTrack      = track;
+    swipeLaneIdx    = li;
+    swipeClickRef   = (ref.valid() && ref.track == track && ref.laneIdx == li) ? ref : ClipRef{};
+    swipeNoSnap     = e.mods.isCommandDown();
+    const double raw = juce::jmax(0.0, xToPosition(e.x));
+    swipeAnchorSecs = swipeNoSnap ? raw : snapTime(raw);
+    swipeCurSecs    = swipeAnchorSecs;
+    swipeStartX     = swipeCurX = e.x;
+    repaint();
+    return true;
+}
+
+void TimelineView::swipeRange(double& t1, double& t2) const
+{
+    t1 = juce::jmin(swipeAnchorSecs, swipeCurSecs);
+    t2 = juce::jmax(swipeAnchorSecs, swipeCurSecs);
+}
+
+void TimelineView::finishSwipeComp()
+{
+    swipeActive = false;
+    auto* track = trackManager.indexOf(swipeTrack) >= 0 ? swipeTrack : nullptr;
+    swipeTrack = nullptr;
+    if (track == nullptr) { repaint(); return; }
+
+    if (std::abs(swipeCurX - swipeStartX) < 4)
+    {
+        if (swipeClickRef.valid() && clipStillExists(swipeClickRef.clip))
+        {
+            selectedClip = swipeClickRef;
+            notifySelectionChanged();
+        }
+        repaint();
+        return;
+    }
+
+    double t1 = 0.0, t2 = 0.0;
+    swipeRange(t1, t2);
+    if (auto* lane = track->getLane(swipeLaneIdx); lane != nullptr && t2 > t1 + 0.01)
+        promoteRangeToLane0(track, lane, t1, t2);
     repaint();
 }

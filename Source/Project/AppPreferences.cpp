@@ -64,6 +64,7 @@ AppPreferences AppPreferences::load()
         p.recLatencyManualMs = juce::jlimit(-300.0, 300.0,
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
         p.retakeKeepsTake    = xml->getBoolAttribute("retakeKeepsTake", p.retakeKeepsTake);
+        p.swipeComping       = xml->getBoolAttribute("swipeComping", p.swipeComping);
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
         p.enableFolderTracks = xml->getBoolAttribute("enableFolderTracks", p.enableFolderTracks);
@@ -99,6 +100,7 @@ bool AppPreferences::save() const
     xml.setAttribute("recLatencyAutoComp", recLatencyAutoComp);
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
     xml.setAttribute("retakeKeepsTake", retakeKeepsTake);
+    xml.setAttribute("swipeComping", swipeComping);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
     xml.setAttribute("enableFolderTracks", enableFolderTracks);

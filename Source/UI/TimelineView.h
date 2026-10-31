@@ -410,6 +410,9 @@ public:
     // ↑ ボタンの活性条件: 範囲選択がそのレーンのクリップと重なる、または
     // 選択中クリップがそのトラック・レーン上にある時 true。
     bool canPromoteTakeLane(int trackIdx, int laneIdx) const;
+    // スワイプ・コンピング (環境設定・既定 OFF)。ON の間はテイクレーン上の素のドラッグが
+    // 「ドラッグした範囲をそのテイクから Lane 0 へ採用」になる (クリップの移動は Lane 0 で行う)
+    void setSwipeCompEnabled(bool on) { swipeCompEnabled = on; }
     // 現在の BPM / 拍子から 1 小節の秒数を返す (N/B の小節移動などで使う)
     double barLengthSecs() const;
     // フォーカスレーンの Solo をトグル（lane 1 以降のみ有効）
@@ -656,6 +659,22 @@ private:
     int dragHoverLaneIdx  { -1 };
     // ラバーバンド範囲選択
     bool       rubberBandActive { false };
+
+    // スワイプ・コンピング: mouseDown でテイクレーンを掴んだ時だけ swipeActive。
+    // track は mouseUp 時に indexOf で生存確認してから使う (ドラッグ中の削除に備える)
+    bool    swipeCompEnabled { false };
+    bool    swipeActive { false };
+    Track*  swipeTrack { nullptr };
+    int     swipeLaneIdx { -1 };
+    double  swipeAnchorSecs { 0.0 };
+    double  swipeCurSecs { 0.0 };
+    int     swipeStartX { 0 };
+    int     swipeCurX { 0 };
+    bool    swipeNoSnap { false };
+    ClipRef swipeClickRef;   // ドラッグせず離した時は従来どおりこのクリップを選択する
+    bool beginSwipeComp(const juce::MouseEvent& e, const ClipRef& ref);
+    void finishSwipeComp();
+    void swipeRange(double& t1, double& t2) const;
     juce::Point<int> rubberBandStart;
     juce::Point<int> rubberBandEnd;
     bool isClipInSelection(const AudioClip* clip) const;

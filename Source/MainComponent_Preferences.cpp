@@ -33,6 +33,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
         juce::ToggleButton recCompBtn;          // 録音レイテンシ自動補正 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton retakeKeepBtn;       // Q リテイクでテイクを残す (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton swipeCompBtn;        // スワイプ・コンピング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton monInsBtn;           // 入力モニターに INS を通す (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton diskStreamBtn;       // ディスクストリーミング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton multicoreBtn;        // オーディオのマルチコア処理 (アプリ全体設定。初期状態は showPreferences 側)
@@ -88,6 +89,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onRecCompChanged;
         std::function<void(double)> onRecCompOffsetChanged;
         std::function<void(bool)>  onRetakeKeepChanged;
+        std::function<void(bool)>  onSwipeCompChanged;
         std::function<void(bool)>  onMonInsChanged;
         std::function<void(bool)>  onDiskStreamChanged;
         std::function<void(bool)>  onMulticoreChanged;
@@ -314,6 +316,17 @@ void MainComponent::showPreferences()
                 if (onRetakeKeepChanged) onRetakeKeepChanged(retakeKeepBtn.getToggleState());
             };
             addAndMakeVisible(retakeKeepBtn);
+
+            // スワイプ・コンピング (既定 OFF)。テイクレーン上のドラッグの意味が変わるため任意設定
+            swipeCompBtn.setButtonText(
+                tr(u8"テイクリスト上をドラッグした範囲をそのまま採用する (スワイプで選ぶ)"));
+            swipeCompBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            swipeCompBtn.setTooltip(
+                tr(u8"ON の間、テイクリストのクリップはドラッグで動かせません (Lane 0 では従来どおり動かせます)"));
+            swipeCompBtn.onClick = [this] {
+                if (onSwipeCompChanged) onSwipeCompChanged(swipeCompBtn.getToggleState());
+            };
+            addAndMakeVisible(swipeCompBtn);
 
             // 入力モニターに INS (インサート FX) を通すか (アプリ全体設定。初期状態は showPreferences 側)。
             // 空チェーンのトラックでは無影響。歌枠/配信で生声に EQ/Comp を掛けながら歌うための機能。
@@ -664,6 +677,7 @@ void MainComponent::showPreferences()
             recCompOffsetLabel.setBounds(mx, y, 250, 24);
             recCompOffsetSlider.setBounds(mx + 256, y, cw - 256, 24); y += 24 + gRow;
             y = check(retakeKeepBtn, y);
+            y = check(swipeCompBtn, y);
             y = check(monInsBtn, y);
             y = check(diskStreamBtn, y);
             y = check(multicoreBtn, y);
@@ -975,6 +989,13 @@ void MainComponent::showPreferences()
         appPrefs.retakeKeepsTake = v;
         appPrefs.save();
     };
+    // スワイプ・コンピング (アプリ全体設定)。即時保存 + タイムラインへ即反映
+    dlg->swipeCompBtn.setToggleState(appPrefs.swipeComping, juce::dontSendNotification);
+    dlg->onSwipeCompChanged = [this](bool v) {
+        appPrefs.swipeComping = v;
+        appPrefs.save();
+        timelineView.setSwipeCompEnabled(v);
+    };
     // 入力モニターに INS を通す (アプリ全体設定)。即時保存 + モニタ状態を再同期して即反映。
     dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
     dlg->onMonInsChanged = [this](bool v) {
@@ -1140,6 +1161,7 @@ void MainComponent::showPreferences()
         appPrefs.recLatencyAutoComp = defPrefs.recLatencyAutoComp;
         appPrefs.recLatencyManualMs = defPrefs.recLatencyManualMs;
         appPrefs.retakeKeepsTake    = defPrefs.retakeKeepsTake;
+        appPrefs.swipeComping       = defPrefs.swipeComping;
         appPrefs.monitorThroughInserts = defPrefs.monitorThroughInserts;
         appPrefs.diskStreaming      = defPrefs.diskStreaming;
         appPrefs.multicoreAudio     = defPrefs.multicoreAudio;
@@ -1169,6 +1191,8 @@ void MainComponent::showPreferences()
         dlg->recCompBtn.setToggleState(appPrefs.recLatencyAutoComp, juce::dontSendNotification);
         dlg->recCompOffsetSlider.setValue(appPrefs.recLatencyManualMs, juce::dontSendNotification);
         dlg->retakeKeepBtn.setToggleState(appPrefs.retakeKeepsTake, juce::dontSendNotification);
+        dlg->swipeCompBtn.setToggleState(appPrefs.swipeComping, juce::dontSendNotification);
+        timelineView.setSwipeCompEnabled(appPrefs.swipeComping);
         dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
         dlg->diskStreamBtn.setToggleState(appPrefs.diskStreaming, juce::dontSendNotification);
         dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);
