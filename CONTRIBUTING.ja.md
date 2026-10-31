@@ -34,7 +34,7 @@ Signed-off-by: Your Name <your.email@example.com>
 ## 開発環境
 
 ビルド手順は [README.md](README.md) を参照してください
-（CMake 3.22+ / C++17 / JUCE 8 は CMake が自動取得）。変更後はユニットテストを実行してください:
+（CMake 3.22+ / C++17 / JUCE 9 は CMake が自動取得）。変更後はユニットテストを実行してください:
 
 ```sh
 cmake --build build --target UtawaveTests --config Debug

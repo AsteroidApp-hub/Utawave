@@ -22,19 +22,19 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ── JUCE 8 ──
+# ── JUCE 9 ──
 # 公開リポジトリには JUCE を含めない。ローカルに JUCE/ があればそれを使い (オフライン/高速)、
 # 無ければ FetchContent で固定バージョンを取得する (CI / 新規 clone はこちら)。
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/CMakeLists.txt")
     message(STATUS "JUCE: ローカルの JUCE/ を使用")
     add_subdirectory(JUCE)
 else()
-    message(STATUS "JUCE: ローカルに無いため FetchContent で取得 (8.0.16-security)")
+    message(STATUS "JUCE: ローカルに無いため FetchContent で取得 (9.0.4)")
     include(FetchContent)
     FetchContent_Declare(
         JUCE
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG        8.0.16-security # 8 系最新パッチ (String の不正データ対策のみ)。厳密一致が必要ならこの tag を SHA に置換し GIT_SHALLOW を外す
+        GIT_TAG        9.0.4 # 9 系最新パッチ。厳密一致が必要ならこの tag を SHA に置換し GIT_SHALLOW を外す
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(JUCE)

@@ -32,7 +32,7 @@ Signed-off-by: Your Name <your.email@example.com>
 
 ## Development environment
 
-See [README.md](README.md) for build instructions (CMake 3.22+ / C++17 / JUCE 8 fetched automatically by
+See [README.md](README.md) for build instructions (CMake 3.22+ / C++17 / JUCE 9 fetched automatically by
 CMake). Run the unit tests after making changes:
 
 ```sh

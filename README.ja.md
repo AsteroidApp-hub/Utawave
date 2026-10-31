@@ -32,7 +32,7 @@ Licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-o
 
 - CMake 3.22 以上
 - C++17 対応コンパイラ（macOS: Xcode / Windows: MSVC）
-- JUCE 8（CMake が自動取得、またはローカル `JUCE/` に配置）
+- JUCE 9（CMake が自動取得、またはローカル `JUCE/` に配置）
 
 ### 手順
 
@@ -43,8 +43,8 @@ cmake -S . -B build-mac -DCMAKE_BUILD_TYPE=Release
 cmake --build build-mac --config Release
 ```
 
-初回の configure で **JUCE 8 (8.0.12) を自動ダウンロード**します（CMake FetchContent）。
-リポジトリに JUCE は含まれません。オフラインや特定バージョンでビルドしたい場合は、JUCE 8 を
+初回の configure で **JUCE 9 (9.0.4) を自動ダウンロード**します（CMake FetchContent）。
+リポジトリに JUCE は含まれません。オフラインや特定バージョンでビルドしたい場合は、JUCE 9 を
 リポジトリ直下 `JUCE/` に配置すると、ダウンロードせずローカルの `JUCE/` を使います。
 
 ### Windows での ASIO 対応（任意）

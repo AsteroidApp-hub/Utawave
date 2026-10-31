@@ -32,7 +32,7 @@ See the bundled manual ([Docs/MANUAL.html](Docs/MANUAL.html)) and the specificat
 
 - CMake 3.22 or later
 - A C++17 compiler (macOS: Xcode / Windows: MSVC)
-- JUCE 8 (fetched automatically by CMake, or placed in a local `JUCE/`)
+- JUCE 9 (fetched automatically by CMake, or placed in a local `JUCE/`)
 
 ### Steps
 
@@ -43,8 +43,8 @@ cmake -S . -B build-mac -DCMAKE_BUILD_TYPE=Release
 cmake --build build-mac --config Release
 ```
 
-The first configure **automatically downloads JUCE 8 (8.0.12)** via CMake FetchContent; JUCE is not
-vendored in the repository. To build offline or pin a specific version, place JUCE 8 in `JUCE/` at the
+The first configure **automatically downloads JUCE 9 (9.0.4)** via CMake FetchContent; JUCE is not
+vendored in the repository. To build offline or pin a specific version, place JUCE 9 in `JUCE/` at the
 repository root and the local copy is used instead of downloading.
 
 ### ASIO support on Windows (optional)
