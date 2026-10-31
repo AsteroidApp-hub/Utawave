@@ -175,6 +175,28 @@ public:
         return f;
     }
 
+    // 440Hz 正弦波の Opus を書く (JUCE 内蔵 writer・Opus は常に 48k で格納される lossy)。
+    juce::File writeOpus(const juce::String& name, double sr, double secs)
+    {
+        auto f = dir.getChildFile(name);
+        f.deleteFile();
+        std::unique_ptr<juce::OutputStream> os = f.createOutputStream();
+        if (os == nullptr) return {};
+        juce::OpusAudioFormat opus;
+        auto w = opus.createWriterFor(os, juce::AudioFormatWriterOptions{}
+                                              .withSampleRate(sr)
+                                              .withNumChannels(1)
+                                              .withBitsPerSample(32));
+        if (w == nullptr) return {};
+        const int n = (int) (sr * secs);
+        juce::AudioBuffer<float> buf(1, n);
+        for (int i = 0; i < n; ++i)
+            buf.setSample(0, i,
+                (float) (0.5 * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / sr)));
+        w->writeFromAudioSampleBuffer(buf, 0, n);
+        return f;
+    }
+
     // 正方向ゼロ交差から支配的周波数を推定 (窓の開始位相に依らない)
     static double estimateFreq(const juce::AudioBuffer<float>& s, int start, int count, double sr)
     {
@@ -228,6 +250,7 @@ public:
         testImport64BitWav(fmt);
         testDecodeTranscodeMp3(fmt);
         testDecodeTranscodeFlacAndResampleChain(fmt);
+        testDecodeTranscodeOpus(fmt);
         testDecodeTranscodeErrorPaths(fmt);
 
         dir.deleteRecursively();
@@ -558,6 +581,46 @@ public:
         expect(!r2.success && r2.cancelled, "cancelling during decode reports cancelled=true");
         expect(cache.getNumberOfChildFiles(juce::File::findFiles) == before,
                "cancelled decode leaves no new cache file");
+    }
+
+    // ── Opus (.opus): 常に 48k でデコードされ、48k プロジェクトは変換のみ / 44.1k はリサンプルへ連結 ──
+    void testDecodeTranscodeOpus(juce::AudioFormatManager& fmt)
+    {
+        beginTest("compressed import: Opus decodes to 32f WAV and chains into resample");
+
+        expect(AudioFileImporter::needsDecodeTranscode(juce::File("/tmp/a.opus")), "opus needs decode");
+
+        auto src = writeOpus("sine48.opus", 48000.0, 1.0);
+        expect(src.existsAsFile(), "opus source written (built-in encoder)");
+
+        auto cache = dir.getChildFile("cache_opus");
+        cache.deleteRecursively(); cache.createDirectory();
+        AudioFileImporter importer(fmt);
+        importer.getCacheFolderCb = [cache] { return cache; };
+
+        for (double projSr : { 48000.0, 44100.0 })
+        {
+            auto r = importer.importFile(src, projSr);
+            expect(r.success, "opus import succeeds");
+            expect(r.wasResampled && r.file != src && r.file.hasFileExtension("wav"),
+                   "opus is decoded to a cache .wav");
+
+            auto out = readBack(fmt, r.file);
+            expect(out.ok && out.bits == 32 && out.isFloat, "decoded opus is 32-bit float");
+            expect(std::abs(out.sampleRate - projSr) < 0.01, "decoded opus is at the project SR");
+            // Opus はプリスキップ/パディングで前後する。尺はゆるく検証
+            expect(std::abs((double) out.length - projSr) < 0.1 * projSr, "decoded length is ~1.0s");
+
+            if (out.ok && out.length > (juce::int64) (projSr * 0.6))
+            {
+                const int start = (int) (out.length / 4);
+                const int count = (int) (out.length / 2);
+                const double freq = estimateFreq(out.samples, start, count, out.sampleRate);
+                expect(std::abs(freq - 440.0) < 6.0, "decoded opus content is a ~440Hz tone");
+                const float mag = out.samples.getMagnitude(0, start, count);
+                expect(mag > 0.35f && mag < 0.65f, "decoded opus amplitude is ~0.5");
+            }
+        }
     }
 
     // ── 圧縮フォーマット (FLAC = ロスレス) のサンプル一致 + MP3 のデコード→リサンプル連結 ──

@@ -363,12 +363,12 @@ void MainComponent::showImportMidiDialog()
 }
 
 // 取り込みピッカーの音声ワイルドカード。対応拡張子は OS のデコーダで変わる (WAV/AIFF/MP3/
-// FLAC/Ogg は共通、m4a/aac/caf は macOS の CoreAudio、wma は Windows の Media Foundation)。
+// FLAC/Ogg/Opus は共通、m4a/aac/caf は macOS の CoreAudio、wma は Windows の Media Foundation)。
 // JUCE の各 AudioFormat が canHandleFile で受ける拡張子に合わせ、読めない形式をピッカーに
 // 出さない (「選べるのに失敗」を防ぐ)。showImportDialog / showImportAnyDialog で共用しドリフトを防ぐ。
 static juce::String audioImportWildcard()
 {
-    juce::String w = "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg";
+    juce::String w = "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg;*.opus";
    #if JUCE_MAC
     w += ";*.m4a;*.aac;*.caf";
    #elif JUCE_WINDOWS

@@ -1396,7 +1396,7 @@ void TimelineView::scrollBarMoved(juce::ScrollBar* bar, double newRange)
 bool TimelineView::isInterestedInFileDrag(const juce::StringArray& files)
 {
     static const juce::StringArray exts {
-        ".wav", ".aif", ".aiff", ".mp3", ".m4a", ".flac", ".ogg",
+        ".wav", ".aif", ".aiff", ".mp3", ".m4a", ".flac", ".ogg", ".opus",
         ".mid", ".midi"
     };
     for (auto& f : files)

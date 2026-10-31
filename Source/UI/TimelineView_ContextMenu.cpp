@@ -354,7 +354,7 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
 
                 // 元ファイル (拡張子付き) を解決
                 // - 現在が xxx_pitch±N.<ext> なら xxx.<ext> に戻して探す
-                // - 拡張子は .wav / .aif / .aiff / .mp3 / .m4a / .flac / .ogg を順に試す
+                // - 拡張子は .wav / .aif / .aiff / .mp3 / .m4a / .flac / .ogg / .opus を順に試す
                 juce::File origFile = srcFile;
                 {
                     auto stem = srcFile.getFileNameWithoutExtension();
@@ -362,7 +362,7 @@ void TimelineView::showAudioClipContextMenu(const ClipRef& rcRef, const juce::Mo
                     {
                         stem = stem.upToLastOccurrenceOf("_pitch", false, false);
                         auto dir = srcFile.getParentDirectory();
-                        static const char* exts[] = { ".wav", ".aif", ".aiff", ".mp3", ".m4a", ".flac", ".ogg" };
+                        static const char* exts[] = { ".wav", ".aif", ".aiff", ".mp3", ".m4a", ".flac", ".ogg", ".opus" };
                         juce::File found;
                         for (auto* e : exts)
                         {
