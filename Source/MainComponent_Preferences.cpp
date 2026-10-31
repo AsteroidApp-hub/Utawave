@@ -28,6 +28,7 @@ void MainComponent::showPreferences()
         juce::ToggleButton exportDoneDlgBtn;    // 書き出し完了ダイアログ表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton midiPagingBtn;       // MIDI ピアノロールの自動ページング (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton tooltipsBtn;         // ツールチップ表示 (アプリ全体設定。初期状態は showPreferences 側)
+        juce::ToggleButton timeStretchBtn;      // タイムストレッチを使う (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton folderTracksBtn;     // フォルダトラック追加を有効化 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton folderExtrasBtn;     // フォルダに Pan/Rev/INS を表示 (アプリ全体設定。初期状態は showPreferences 側)
         juce::ToggleButton showAdsBtn;          // 起動画面の広告表示 (アプリ全体設定。初期状態は showPreferences 側で設定)
@@ -84,6 +85,7 @@ void MainComponent::showPreferences()
         std::function<void(bool)>  onMidiPagingChanged;
         std::function<void(bool)>  onTooltipsChanged;
         std::function<void(bool)>  onFolderTracksChanged;
+        std::function<void(bool)>  onTimeStretchChanged;
         std::function<void(bool)>  onFolderExtrasChanged;
         std::function<void(bool)>  onShowAdsChanged;
         std::function<void(bool)>  onRecCompChanged;
@@ -255,6 +257,15 @@ void MainComponent::showPreferences()
                 if (onTooltipsChanged) onTooltipsChanged(tooltipsBtn.getToggleState());
             };
             addAndMakeVisible(tooltipsBtn);
+
+            // タイムストレッチ (既定 OFF)。ON の間だけ波形の下側の角ドラッグで伸縮できる
+            timeStretchBtn.setButtonText(
+                tr(u8"波形の下側の角をドラッグしてタイムストレッチできるようにする"));
+            timeStretchBtn.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+            timeStretchBtn.onClick = [this] {
+                if (onTimeStretchChanged) onTimeStretchChanged(timeStretchBtn.getToggleState());
+            };
+            addAndMakeVisible(timeStretchBtn);
 
             // フォルダトラック (アプリ全体設定。初期状態は showPreferences 側)。
             // ON にすると「+ トラック追加」メニューに「フォルダトラックを追加」が出る。
@@ -668,6 +679,7 @@ void MainComponent::showPreferences()
             y = check(zeroCrossBtn, y);
             y = check(midiPagingBtn, y);
             y = check(tooltipsBtn, y);
+            y = check(timeStretchBtn, y);
             y = check(folderTracksBtn, y);
             y = check(folderExtrasBtn, y);
 
@@ -920,6 +932,13 @@ void MainComponent::showPreferences()
     };
     // フォルダトラック追加の有効化 (アプリ全体設定)。即時保存のみ (「+ トラック追加」
     // メニューは開くたびに再構築されるので次に開いた時から反映される)。
+    // タイムストレッチ (アプリ全体設定)。即時保存 + タイムラインへ即反映
+    dlg->timeStretchBtn.setToggleState(appPrefs.enableTimeStretch, juce::dontSendNotification);
+    dlg->onTimeStretchChanged = [this](bool v) {
+        appPrefs.enableTimeStretch = v;
+        appPrefs.save();
+        timelineView.setTimeStretchEnabled(v);
+    };
     dlg->folderTracksBtn.setToggleState(appPrefs.enableFolderTracks, juce::dontSendNotification);
     dlg->onFolderTracksChanged = [this](bool v) {
         appPrefs.enableFolderTracks = v;
@@ -1162,6 +1181,7 @@ void MainComponent::showPreferences()
         appPrefs.recLatencyManualMs = defPrefs.recLatencyManualMs;
         appPrefs.retakeKeepsTake    = defPrefs.retakeKeepsTake;
         appPrefs.swipeComping       = defPrefs.swipeComping;
+        appPrefs.enableTimeStretch  = defPrefs.enableTimeStretch;
         appPrefs.monitorThroughInserts = defPrefs.monitorThroughInserts;
         appPrefs.diskStreaming      = defPrefs.diskStreaming;
         appPrefs.multicoreAudio     = defPrefs.multicoreAudio;
@@ -1193,6 +1213,8 @@ void MainComponent::showPreferences()
         dlg->retakeKeepBtn.setToggleState(appPrefs.retakeKeepsTake, juce::dontSendNotification);
         dlg->swipeCompBtn.setToggleState(appPrefs.swipeComping, juce::dontSendNotification);
         timelineView.setSwipeCompEnabled(appPrefs.swipeComping);
+        dlg->timeStretchBtn.setToggleState(appPrefs.enableTimeStretch, juce::dontSendNotification);
+        timelineView.setTimeStretchEnabled(appPrefs.enableTimeStretch);
         dlg->monInsBtn.setToggleState(appPrefs.monitorThroughInserts, juce::dontSendNotification);
         dlg->diskStreamBtn.setToggleState(appPrefs.diskStreaming, juce::dontSendNotification);
         dlg->multicoreBtn.setToggleState(appPrefs.multicoreAudio, juce::dontSendNotification);

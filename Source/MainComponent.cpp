@@ -1007,6 +1007,7 @@ MainComponent::MainComponent()
     // オーディオのマルチコア処理 (トラック描画を複数コアへ分散) の ON/OFF を反映
     audioEngine.setMulticoreAudioEnabled(appPrefs.multicoreAudio);
     timelineView.setSwipeCompEnabled(appPrefs.swipeComping);
+    timelineView.setTimeStretchEnabled(appPrefs.enableTimeStretch);
     // 配信ミラー出力 (最終ミックスを別デバイスへ複製) を設定に応じて開始。起動時の失敗
     // (デバイス取り外し等) は稀だが配信前に気付けるようダイアログで知らせる
     applyStreamMirrorFromPrefs(/*showErrors*/ true);

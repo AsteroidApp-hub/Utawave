@@ -91,7 +91,7 @@ TimelineView::DragMode TimelineView::getDragMode(const ClipRef& ref, int mouseX,
         const int bottomY = lTop + (ref.laneIdx == 0
                                     ? juce::jmin(ref.track->getMainHeight(), ref.track->getTotalHeight())
                                     : ref.track->getLaneHeight()) - 2;
-        if (cw >= 24 && bottomY - clipTopY >= 24
+        if (timeStretchEnabled && cw >= 24 && bottomY - clipTopY >= 24
             && mouseY >= bottomY - kStretchHitPx && mouseY <= bottomY + 1)
         {
             if (mouseX <= cx + 10)      return DragMode::StretchLeft;
@@ -567,7 +567,7 @@ void TimelineView::drawClip(juce::Graphics& g, AudioClip& clip,
     }
 
     // ── タイムストレッチのハンドル (下側の角・ホバー時のみ。上角のフェード三角と色で区別) ──
-    if (&clip == hoveredClip && clipRect.getWidth() >= 24 && clipRect.getHeight() >= 24 && !stretchActive)
+    if (timeStretchEnabled && &clip == hoveredClip && clipRect.getWidth() >= 24 && clipRect.getHeight() >= 24 && !stretchActive)
     {
         const float bottom = (float) clipRect.getBottom() - 1.0f;
         const float l = (float) clipRect.getX(), r = (float) clipRect.getRight();

@@ -65,6 +65,7 @@ AppPreferences AppPreferences::load()
             xml->getDoubleAttribute("recLatencyManualMs", p.recLatencyManualMs));
         p.retakeKeepsTake    = xml->getBoolAttribute("retakeKeepsTake", p.retakeKeepsTake);
         p.swipeComping       = xml->getBoolAttribute("swipeComping", p.swipeComping);
+        p.enableTimeStretch  = xml->getBoolAttribute("enableTimeStretch", p.enableTimeStretch);
         p.monitorThroughInserts = xml->getBoolAttribute("monitorThroughInserts", p.monitorThroughInserts);
         p.showTooltips       = xml->getBoolAttribute("showTooltips", p.showTooltips);
         p.enableFolderTracks = xml->getBoolAttribute("enableFolderTracks", p.enableFolderTracks);
@@ -101,6 +102,7 @@ bool AppPreferences::save() const
     xml.setAttribute("recLatencyManualMs", recLatencyManualMs);
     xml.setAttribute("retakeKeepsTake", retakeKeepsTake);
     xml.setAttribute("swipeComping", swipeComping);
+    xml.setAttribute("enableTimeStretch", enableTimeStretch);
     xml.setAttribute("monitorThroughInserts", monitorThroughInserts);
     xml.setAttribute("showTooltips", showTooltips);
     xml.setAttribute("enableFolderTracks", enableFolderTracks);

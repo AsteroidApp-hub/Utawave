@@ -126,6 +126,15 @@ public:
             expect(AppPreferences::load().swipeComping == true, "swipeComping round trips true");
         }
 
+        beginTest("time stretch toggle: default off and round trip");
+        {
+            expect(AppPreferences{}.enableTimeStretch == false, "default is false");
+            AppPreferences p;
+            p.enableTimeStretch = true;
+            expect(p.save(), "save succeeds");
+            expect(AppPreferences::load().enableTimeStretch == true, "enableTimeStretch round trips true");
+        }
+
         beginTest("save/load round trip for export-complete dialog toggle");
         {
             // 既定 true。false を保存 → load で false が保たれる (書き出し完了ダイアログの表示設定)

@@ -414,6 +414,8 @@ public:
     // スワイプ・コンピング (環境設定・既定 OFF)。ON の間はテイクレーン上の素のドラッグが
     // 「ドラッグした範囲をそのテイクから Lane 0 へ採用」になる (クリップの移動は Lane 0 で行う)
     void setSwipeCompEnabled(bool on) { swipeCompEnabled = on; }
+    // タイムストレッチ (環境設定・既定 OFF)。OFF の間は下側の角のドラッグ / ホバー表示を出さない
+    void setTimeStretchEnabled(bool on) { timeStretchEnabled = on; if (! on) stretchActive = false; repaint(); }
 
     // クリップのタイムストレッチ / キー変更を適用する (元ファイルから 1 回でレンダー・Undo 対応)。
     // ratio は元の尺に対する倍率 (0.5〜2.0)。anchorEnd=true で右端固定。semitones に NaN を
@@ -688,6 +690,7 @@ private:
 
     // タイムストレッチ: クリップ下側の角 (左下 / 右下) のドラッグ。ドラッグ中はクリップを
     // 変えずプレビューだけ描き、離した時に元ファイルから 1 回レンダーして差し替える
+    bool    timeStretchEnabled { false };
     bool    stretchActive { false };
     ClipRef stretchRef;
     bool    stretchAnchorEnd { false };   // true = 右端固定 (左下角)
