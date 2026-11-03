@@ -1847,8 +1847,8 @@ void MainComponent::promptRecordingSetup()
             .withTitle(tr(u8"録音の準備"))
             .withMessage(tr(u8"このトラックを録音状態にして録音を開始しますか？")
                          + juce::String("\n\n") + t->getName())
-            .withButton(tr(u8"録音する"))
-            .withButton(tr(u8"キャンセル")),
+            .withButton(tr(u8"録音する"), 1)
+            .withButton(tr(u8"キャンセル"), 0),
             [self, t](int r)
             {
                 if (r != 1 || self == nullptr) return;
@@ -1969,7 +1969,7 @@ void MainComponent::startRecording()
             .withTitle(tr(u8"録音を開始できないトラックがあります"))
             .withMessage(tr(u8"以下のトラックの録音ファイルを作成できませんでした。\nディスクの空き容量と書き込み権限を確認してください。\n\n")
                          + failed.joinIntoString("\n"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
     }
 
     if (!isRecording)

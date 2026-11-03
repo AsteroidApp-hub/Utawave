@@ -326,7 +326,7 @@ void TrackHeaderView::handleTrackContextMenuResult(int result)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"ラウドネス測定"))
                 .withMessage(tr(u8"このトラックには測定可能なクリップがありません。"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
 
@@ -347,7 +347,7 @@ void TrackHeaderView::handleTrackContextMenuResult(int result)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"ラウドネス測定"))
                 .withMessage(tr(u8"クリップを読み込めませんでした。"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
 
@@ -394,7 +394,7 @@ void TrackHeaderView::handleTrackContextMenuResult(int result)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"ラウドネス測定"))
                 .withMessage(tr(u8"ラウドネスを測定できませんでした。\nクリップが短すぎるか、無音が多すぎます。"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
 
@@ -424,8 +424,8 @@ void TrackHeaderView::handleTrackContextMenuResult(int result)
             .withIconType(juce::MessageBoxIconType::QuestionIcon)
             .withTitle(tr(u8"ラウドネス調整"))
             .withMessage(msg)
-            .withButton(tr(u8"適用"))
-            .withButton(tr(u8"キャンセル")),
+            .withButton(tr(u8"適用"), 1)
+            .withButton(tr(u8"キャンセル"), 0),
             [safe, newVolDb](int r)
             {
                 if (r != 1) return;

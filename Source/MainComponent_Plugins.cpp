@@ -602,7 +602,7 @@ void MainComponent::handlePluginDropAcrossTracks(int srcTrack, int srcSlot,
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"プラグインのコピーに失敗"))
                 .withMessage(err.isNotEmpty() ? err : tr(u8"エフェクトを複製できませんでした"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
         if (state.getSize() > 0)
@@ -677,7 +677,7 @@ void MainComponent::addPluginToMaster(int slotIdx)
                     .withIconType(juce::MessageBoxIconType::WarningIcon)
                     .withTitle(tr(u8"プラグインの読込に失敗"))
                     .withMessage(err)
-                    .withButton("OK"), nullptr);
+                    .withButton("OK", 0), nullptr);
                 return;
             }
 
@@ -779,7 +779,7 @@ void MainComponent::addPluginToTrack(int trackIdx, int slotIdx)
                     .withIconType(juce::MessageBoxIconType::WarningIcon)
                     .withTitle(tr(u8"プラグインの読込に失敗"))
                     .withMessage(err)
-                    .withButton("OK"), nullptr);
+                    .withButton("OK", 0), nullptr);
                 return;
             }
 

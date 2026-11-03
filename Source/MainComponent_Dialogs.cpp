@@ -37,7 +37,7 @@ juce::File MainComponent::doImportConversion(const juce::File& src,
                     .withIconType(juce::MessageBoxIconType::WarningIcon)
                     .withTitle(title)
                     .withMessage(msg)
-                    .withButton("OK"), nullptr);
+                    .withButton("OK", 0), nullptr);
             });
         }
         return {};
@@ -250,7 +250,7 @@ void MainComponent::importMidiFromFile(const juce::File& file, double dropTimeOv
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"読み込み失敗"))
             .withMessage(result.error)
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
     auto sharedResult = std::make_shared<MidiImporter::ImportResult>(std::move(result));

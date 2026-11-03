@@ -228,7 +228,7 @@ void MainComponent::openBundledHelp(const juce::String& anchor)
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"使い方ドキュメント"))
             .withMessage(tr(u8"ドキュメントファイル (help.html) が見つかりませんでした。"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
 
@@ -724,7 +724,7 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
                     .withIconType(juce::MessageBoxIconType::WarningIcon)
                     .withTitle(tr(u8"書き出し対象なし"))
                     .withMessage(tr(u8"書き出せるトラックがありません"))
-                    .withButton("OK"), nullptr);
+                    .withButton("OK", 0), nullptr);
                 return;
             }
         }
@@ -755,7 +755,7 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
                     .withIconType(juce::MessageBoxIconType::WarningIcon)
                     .withTitle(tr(u8"書き出し対象なし"))
                     .withMessage(tr(u8"選択されたトラックがすべてミュートされています。\nミュートを解除するか、他のトラックを選択してください。"))
-                    .withButton("OK"), nullptr);
+                    .withButton("OK", 0), nullptr);
                 return;
             }
             // CLICK トラックが再生で鳴っている状態 (存在・非ミュート・ソロ規則通過) なら
@@ -1000,7 +1000,7 @@ void MainComponent::runExport(const ExportEngine::Options& optionsIn)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"書き出し失敗"))
                 .withMessage(err)
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
         }
 }
 
@@ -1033,7 +1033,7 @@ void MainComponent::showMidiExportDialog()
             .withIconType(juce::MessageBoxIconType::InfoIcon)
             .withTitle(tr(u8"MIDI を書き出す"))
             .withMessage(tr(u8"書き出せる MIDI ノートがありません"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
 
@@ -1062,7 +1062,7 @@ void MainComponent::showMidiExportDialog()
                 .withIconType(juce::MessageBoxIconType::InfoIcon)
                 .withTitle(tr(u8"書き出し完了"))
                 .withMessage(tr(u8"書き出しが完了しました:\n") + file.getFullPathName())
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
         }
         else
         {
@@ -1070,7 +1070,7 @@ void MainComponent::showMidiExportDialog()
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"書き出し失敗"))
                 .withMessage(result.error.isNotEmpty() ? result.error : tr(u8"書き出しに失敗しました"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
         }
     });
 }

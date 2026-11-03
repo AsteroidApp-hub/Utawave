@@ -724,7 +724,7 @@ void ExportDialog::doExport()
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"範囲エラー"))
             .withMessage(tr(u8"書き出し範囲が無効です"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
 
@@ -735,7 +735,7 @@ void ExportDialog::doExport()
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"出力フォルダ未指定"))
             .withMessage(tr(u8"出力フォルダを指定してください"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
     folder.createDirectory();
@@ -748,7 +748,7 @@ void ExportDialog::doExport()
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"トラック未選択"))
             .withMessage(tr(u8"書き出すトラックを選択してください"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
 

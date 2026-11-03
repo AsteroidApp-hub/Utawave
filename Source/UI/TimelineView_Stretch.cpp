@@ -49,7 +49,7 @@ namespace
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"タイムストレッチ"))
             .withMessage(msg)
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
     }
 }
 

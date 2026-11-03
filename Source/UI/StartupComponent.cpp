@@ -420,7 +420,7 @@ void StartupComponent::createNewProject()
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"保存先エラー"))
                 .withMessage(tr(u8"保存先フォルダを作成できませんでした"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
     }
@@ -434,7 +434,7 @@ void StartupComponent::createNewProject()
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"作成できません"))
             .withMessage(tr(u8"同名のファイルが既に存在します"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
     if (projectFile.existsAsFile())
@@ -443,7 +443,7 @@ void StartupComponent::createNewProject()
             .withIconType(juce::MessageBoxIconType::QuestionIcon)
             .withTitle(tr(u8"既存のプロジェクト"))
             .withMessage(tr(u8"同名のプロジェクトが既に存在します。\n別の名前を指定してください。"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return;
     }
 

@@ -43,7 +43,7 @@ cmake -S . -B build-mac -DCMAKE_BUILD_TYPE=Release
 cmake --build build-mac --config Release
 ```
 
-初回の configure で **JUCE 9 (9.0.4) を自動ダウンロード**します（CMake FetchContent）。
+初回の configure で **JUCE 9 (9.0.5) を自動ダウンロード**します（CMake FetchContent）。
 リポジトリに JUCE は含まれません。オフラインや特定バージョンでビルドしたい場合は、JUCE 9 を
 リポジトリ直下 `JUCE/` に配置すると、ダウンロードせずローカルの `JUCE/` を使います。
 

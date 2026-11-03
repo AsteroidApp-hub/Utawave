@@ -247,7 +247,7 @@ void TimelineView::showStripSilenceDialog(const ClipRef& ref)
                 .withIconType(juce::MessageBoxIconType::InfoIcon)
                 .withTitle(tr(u8"無音区間なし"))
                 .withMessage(tr(u8"指定条件で無音区間は見つかりませんでした。"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
         auto keep = SilenceDetector::regionsToKeep(silence, ref.clip->getDuration(),
@@ -258,7 +258,7 @@ void TimelineView::showStripSilenceDialog(const ClipRef& ref)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"全体が無音"))
                 .withMessage(tr(u8"クリップ全体が無音と判定されました。実行を中止します。"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
             return;
         }
 
@@ -293,8 +293,8 @@ void TimelineView::showStripSilenceDialog(const ClipRef& ref)
                     .withMessage(tr(u8"このクリップにはボリュームエンベロープが設定されています。\n"
                                     u8"無音区間カットを実行するとエンベロープは破棄されます。\n"
                                     u8"続行しますか?"))
-                    .withButton(tr(u8"続行"))
-                    .withButton(tr(u8"キャンセル")),
+                    .withButton(tr(u8"続行"), 1)
+                    .withButton(tr(u8"キャンセル"), 0),
                 [runAction = std::move(runAction)](int result) mutable
                 {
                     if (result == 1) runAction();

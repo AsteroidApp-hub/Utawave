@@ -620,8 +620,8 @@ void MainComponent::showPreferences()
                     .withIconType(juce::MessageBoxIconType::QuestionIcon)
                     .withTitle(tr(u8"設定リセット"))
                     .withMessage(tr(u8"全ての環境設定をデフォルト値に戻します。よろしいですか？"))
-                    .withButton(tr(u8"リセット"))
-                    .withButton(tr(u8"キャンセル")),
+                    .withButton(tr(u8"リセット"), 1)
+                    .withButton(tr(u8"キャンセル"), 0),
                     [this](int r)
                     {
                         if (r != 1) return;
@@ -841,7 +841,7 @@ void MainComponent::showPreferences()
             .withIconType(juce::MessageBoxIconType::InfoIcon)
             .withTitle(tr(u8"言語設定"))
             .withMessage(tr(u8"言語の変更は次回起動時に反映されます。"))
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
     };
     dlg->onBitsChanged = [this](int bits) {
         appSettings.resampleOutputBits = (bits == 24) ? 24 : 32;
@@ -1275,7 +1275,7 @@ void MainComponent::applyStreamMirrorFromPrefs(bool showErrors)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"配信ミラー出力"))
                 .withMessage(tr(u8"配信ミラー出力を開始できませんでした。") + "\n" + err)
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
     }
 }
 
@@ -1299,7 +1299,7 @@ void MainComponent::applyMidiInputFromPrefs(bool showErrors)
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"MIDI入力"))
                 .withMessage(tr(u8"MIDIキーボードを開けませんでした。デバイスの接続を確認してください。"))
-                .withButton("OK"), nullptr);
+                .withButton("OK", 0), nullptr);
     }
     // 接続中だけ MIDI トラックに R (録音アーム) ボタンを出す
     trackHeaderPanel.setMidiInputAvailable(midiKeyboardInput != nullptr);

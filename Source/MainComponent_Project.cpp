@@ -113,8 +113,8 @@ void MainComponent::offerAutoSaveRecoveryIfNeeded(const juce::File& projectFile)
             .withIconType(juce::MessageBoxIconType::QuestionIcon)
             .withTitle(tr(u8"自動保存から復旧"))
             .withMessage(tr(u8"前回終了時に未保存の変更が見つかりました。\n自動保存ファイルから復旧しますか?"))
-            .withButton(tr(u8"復旧"))
-            .withButton(tr(u8"破棄")),
+            .withButton(tr(u8"復旧"), 1)
+            .withButton(tr(u8"破棄"), 0),
         [this, projectFile, newest](int result)
         {
             if (result == 1)
@@ -244,7 +244,7 @@ bool MainComponent::saveProjectTo(const juce::File& f, bool announce)
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"保存失敗"))
             .withMessage(tr(u8"プロジェクトの保存に失敗しました: ") + f.getFullPathName())
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return false;
     }
     currentProjectFile = f;
@@ -316,7 +316,7 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle(tr(u8"読み込み失敗"))
             .withMessage(tr(u8"プロジェクトを読み込めませんでした: ") + f.getFullPathName())
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
         return false;
     }
     currentProjectFile = f;
@@ -402,7 +402,7 @@ bool MainComponent::loadProjectFrom(const juce::File& f, bool isRecovery)
                             u8"クリップは表示されますが音は出ません。\n"
                             u8"ファイルを <プロジェクト>/Audio/ に戻すと自動的に復活します。\n\n")
                          + list)
-            .withButton("OK"), nullptr);
+            .withButton("OK", 0), nullptr);
     }
     return true;
 }
@@ -607,9 +607,9 @@ void MainComponent::confirmCloseIfDirty(std::function<void()> onProceed)
             .withIconType(juce::MessageBoxIconType::QuestionIcon)
             .withTitle(tr(u8"変更を保存しますか?"))
             .withMessage(tr(u8"このプロジェクトには未保存の変更があります。\n保存しますか?"))
-            .withButton(tr(u8"保存"))
-            .withButton(tr(u8"保存しない"))
-            .withButton(tr(u8"キャンセル")),
+            .withButton(tr(u8"保存"), 1)
+            .withButton(tr(u8"保存しない"), 2)
+            .withButton(tr(u8"キャンセル"), 0),
         [this, onProceed](int result)
         {
             // result: 1=Save, 2=Don't Save, 3=Cancel

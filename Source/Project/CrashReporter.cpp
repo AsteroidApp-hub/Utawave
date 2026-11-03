@@ -356,8 +356,8 @@ void CrashReporter::offerPendingReports()
                 .withIconType(juce::MessageBoxIconType::WarningIcon)
                 .withTitle(tr(u8"前回終了時に問題が発生しました"))
                 .withMessage(tr(u8"クラッシュログが保存されています。内容を確認しますか？"))
-                .withButton(tr(u8"ログを表示"))
-                .withButton(tr(u8"閉じる")),
+                .withButton(tr(u8"ログを表示"), 1)
+                .withButton(tr(u8"閉じる"), 0),
             [newest, markAllHandled](int result)
             {
                 if (result == 1) newest.revealToUser();
@@ -373,9 +373,9 @@ void CrashReporter::offerPendingReports()
             .withMessage(tr(u8"アプリの改善のため、エラーログを開発者に送信してもよろしいですか？\n"
                             u8"ログにはクラッシュ時の技術情報 (スタックトレース・アプリのバージョン・OS) のみが含まれ、\n"
                             u8"音声データや個人情報は含まれません。"))
-            .withButton(tr(u8"送信する"))
-            .withButton(tr(u8"送信しない"))
-            .withButton(tr(u8"ログを表示")),
+            .withButton(tr(u8"送信する"), 1)
+            .withButton(tr(u8"送信しない"), 2)
+            .withButton(tr(u8"ログを表示"), 0),
         [newest, markAllHandled](int result)
         {
             if (result == 3)   // ログを表示 (処理はまだ確定しない → 次回また聞く)
@@ -397,7 +397,7 @@ void CrashReporter::offerPendingReports()
                             .withTitle(tr(u8"送信できませんでした"))
                             .withMessage(tr(u8"エラーログを送信できませんでした。\n"
                                             u8"インターネット接続を確認してください (ログはローカルに残っています)。"))
-                            .withButton("OK"),
+                            .withButton("OK", 0),
                         nullptr);
                 });
             }
