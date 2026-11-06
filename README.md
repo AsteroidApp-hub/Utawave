@@ -7,6 +7,7 @@ A free, **recording-focused DAW** for vocal-cover artists, distributed at no cos
 Copyright (C) 2025-2026 Utawave
 Licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)**.
 
+- Website and downloads: https://utawave.com/en/
 - Source code: https://github.com/AsteroidApp-hub/Utawave
 - Full license text: [LICENSE](LICENSE)
 - Third-party components: [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt)
@@ -20,7 +21,7 @@ Licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-o
 - MIDI tracks, piano roll, built-in synth
 - Mixer / metering / simple reverb / plugin (VST3) hosting
 - WAV / AIFF / MP3 export (built-in encoder, high-quality dither)
-- Japanese / English UI
+- Japanese / English / Simplified Chinese / Traditional Chinese / Korean UI
 
 See the bundled manual ([Docs/MANUAL.html](Docs/MANUAL.html)) and the specification ([Docs/SPEC.md](Docs/SPEC.md)) for details.
 

@@ -2,11 +2,12 @@
 
 [English](README.md) | **日本語**
 
-歌い手（ボーカルカバー投稿者）向けの**録音特化 DAW**。macOS / Windows のクロスプラットフォームで無料配布します。
+歌い手（ボーカルカバー投稿者）向けの**録音特化の無料 DAW**。macOS / Windows のクロスプラットフォームで配布します。
 
 Copyright (C) 2025-2026 Utawave
 Licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)**.
 
+- 公式サイト・ダウンロード: https://utawave.com/
 - ソースコード: https://github.com/AsteroidApp-hub/Utawave
 - ライセンス全文: [LICENSE](LICENSE)
 - 同梱ライブラリの表記: [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt)
@@ -20,7 +21,7 @@ Licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-o
 - MIDI トラック・ピアノロール・内蔵シンセ
 - ミキサー / メータリング / 簡易リバーブ / プラグイン（VST3）ホスト
 - WAV / AIFF / MP3 書き出し（内蔵エンコーダ・高品質ディザ）
-- 日本語 / English
+- 日本語 / English / 简体中文 / 繁體中文 / 한국어
 
 詳細は同梱マニュアル（[Docs/MANUAL.html](Docs/MANUAL.html)）と仕様書（[Docs/SPEC.md](Docs/SPEC.md)）を参照。
 
