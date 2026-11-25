@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   macos-asan:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       # macOS の LSan は非対応。UBSan はスタックトレース付きで即停止 (-fno-sanitize-recover)
@@ -55,7 +55,7 @@ jobs:
           if-no-files-found: ignore
 
   macos-tsan:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
