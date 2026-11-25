@@ -16,7 +16,7 @@ jobs:
   #   証明書シークレット未登録のうちは ad-hoc ビルド (未署名) のまま zip 化する。
   # ──────────────────────────────────────────────────────────────
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       # secrets は if 条件で直接参照できないため job env 経由で真偽を持つ
       HAS_SIGNING: ${{ secrets.MACOS_CERT_P12 != '' }}
