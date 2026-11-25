@@ -62,6 +62,10 @@ private:
     const juce::int64  fileLen;
 
     juce::AudioBuffer<float> ring;      // chans × capacity (循環: file sample F → 列 F % capacity)
+    // ring のチャンネル先頭ポインタ (ctor で 1 回だけ取得)。ring へは AudioBuffer::copyFrom を使わず
+    // これ経由で読み書きする: copyFrom は内部の isClear フラグを producer が書き consumer が読むため、
+    // 2 スレッドから触るとデータ競合になる (TSan で検出)。サンプル領域の分担は SPSC 不変条件が保証する
+    float* ringPtr[2] { nullptr, nullptr };
     juce::AudioBuffer<float> fillTmp;   // bg の read 用一時 (chans × fillChunk)
     static constexpr int kFillChunk = 1 << 14;  // 16384
 

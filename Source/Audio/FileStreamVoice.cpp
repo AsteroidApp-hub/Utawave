@@ -22,6 +22,8 @@ FileStreamVoice::FileStreamVoice(std::unique_ptr<juce::AudioFormatReader> bgRead
 {
     ring.setSize(chans, capacity);
     ring.clear();
+    for (int c = 0; c < chans; ++c)
+        ringPtr[c] = ring.getWritePointer(c);   // 以後 ring の AudioBuffer API は触らない
     fillTmp.setSize(chans, kFillChunk);
     thread.addTimeSliceClient(this);
 }
@@ -53,9 +55,10 @@ void FileStreamVoice::read(juce::AudioBuffer<float>& dest, int destOffset, int n
         const int first = juce::jmin(num, capacity - idx);
         for (int c = 0; c < nCopy; ++c)
         {
-            dest.copyFrom(c, destOffset, ring, c, idx, first);
+            float* d = dest.getWritePointer(c, destOffset);
+            juce::FloatVectorOperations::copy(d, ringPtr[c] + idx, first);
             if (num > first)
-                dest.copyFrom(c, destOffset + first, ring, c, 0, num - first);
+                juce::FloatVectorOperations::copy(d + first, ringPtr[c], num - first);
         }
         for (int c = nCopy; c < destCh; ++c)
             dest.clear(c, destOffset, num);   // reader->read と同じく余剰チャンネルは 0
@@ -104,9 +107,10 @@ int FileStreamVoice::useTimeSlice()
     const int first = juce::jmin(chunk, capacity - idx);
     for (int c = 0; c < chans; ++c)
     {
-        ring.copyFrom(c, idx, fillTmp, c, 0, first);
+        const float* src = fillTmp.getReadPointer(c);
+        juce::FloatVectorOperations::copy(ringPtr[c] + idx, src, first);
         if (chunk > first)
-            ring.copyFrom(c, 0, fillTmp, c, first, chunk - first);
+            juce::FloatVectorOperations::copy(ringPtr[c], src + first, chunk - first);
     }
     re += chunk;
     residentEnd.store(re, std::memory_order_release);      // データ書込後に公開

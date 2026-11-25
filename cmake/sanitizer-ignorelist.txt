@@ -1,0 +1,8 @@
+# UBSan 除外リスト (UTAWAVE_SANITIZE に undefined を含む時に CMakeLists.txt が渡す)
+# 同梱の外部ライブラリが意図的に使っている実害の無い未定義動作 (負値の左シフト・範囲外 double→int
+# 変換を「結果が一致するか」で判定する等) で止まらないよう、外部コードだけを UBSan の対象から外す。
+# 自前コード (Source/ の ThirdParty 以外) は全チェックの対象のまま。ASan には影響しない。
+[undefined]
+src:*/ThirdParty/r8brain/*
+src:*/ThirdParty/lame/*
+src:*/juce_audio_formats/codecs/*

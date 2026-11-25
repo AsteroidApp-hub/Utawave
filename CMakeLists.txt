@@ -22,6 +22,32 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ── Sanitizer (テスト/検証ビルド専用・配布ビルドでは使わない) ──
+# 例: -DUTAWAVE_SANITIZE=address,undefined (ASan + UBSan) / -DUTAWAVE_SANITIZE=thread (TSan)。
+# JUCE / LAME を含む全ターゲットに掛けるため、ターゲット生成 (JUCE の add_subdirectory) より前に置く。
+# MSVC は address のみ対応。CI (.github/workflows/tests.yml) が UtawaveTests をこれで回す。
+set(UTAWAVE_SANITIZE "" CACHE STRING "Sanitizers for test builds: address / undefined / thread (comma-separated)")
+if(UTAWAVE_SANITIZE)
+    message(STATUS "Utawave: sanitizer build (${UTAWAVE_SANITIZE})")
+    if(MSVC)
+        if(NOT UTAWAVE_SANITIZE STREQUAL "address")
+            message(FATAL_ERROR "MSVC supports only UTAWAVE_SANITIZE=address")
+        endif()
+        add_compile_options(/fsanitize=address /Zi)
+        # MSVC の ASan は /RTC (Debug 既定) と併用できない
+        foreach(_cfgvar CMAKE_CXX_FLAGS_DEBUG CMAKE_C_FLAGS_DEBUG)
+            string(REGEX REPLACE "/RTC[1scu]*" "" ${_cfgvar} "${${_cfgvar}}")
+        endforeach()
+    else()
+        add_compile_options(-fsanitize=${UTAWAVE_SANITIZE} -fno-omit-frame-pointer -fno-sanitize-recover=all)
+        if(UTAWAVE_SANITIZE MATCHES "undefined")
+            # 同梱の外部ライブラリ (r8brain / LAME / JUCE のコーデック) は UBSan の対象外にする
+            add_compile_options("-fsanitize-ignorelist=${CMAKE_CURRENT_SOURCE_DIR}/cmake/sanitizer-ignorelist.txt")
+        endif()
+        add_link_options(-fsanitize=${UTAWAVE_SANITIZE})
+    endif()
+endif()
+
 # ── JUCE 9 ──
 # 公開リポジトリには JUCE を含めない。ローカルに JUCE/ があればそれを使い (オフライン/高速)、
 # 無ければ FetchContent で固定バージョンを取得する (CI / 新規 clone はこちら)。
@@ -376,6 +402,7 @@ if(UTAWAVE_BUILD_TESTS)
         Tests/AudioWorkerPoolTests.cpp
         Tests/StreamMirrorTests.cpp
         Tests/PianoRollLaneTests.cpp
+        Tests/RenderGoldenTests.cpp
         Source/UI/PianoRollEditor.cpp
         Source/Audio/AudioFileImporter.cpp
         Source/Audio/FileStreamVoice.cpp
@@ -440,6 +467,8 @@ if(UTAWAVE_BUILD_TESTS)
         JUCE_APPLICATION_NAME_STRING="UtawaveTests"
         JUCE_APPLICATION_VERSION_STRING="0.1.0"
         JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=0
+        # 書き出し比較テスト (RenderGoldenTests) が基準ファイル Tests/golden/ を探す場所
+        UTAWAVE_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests"
     )
 
     if(MSVC)
