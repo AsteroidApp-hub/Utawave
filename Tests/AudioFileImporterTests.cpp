@@ -749,12 +749,13 @@ public:
 
     // 16bit モノ PCM の AIFF を手書きする。COMM の numSampleFrames と SSND のサイズ欄には
     // claimedFrames 分を書き、実データは actualFrames 分だけ置く (壊れた / 末尾が欠けたファイルを模す)。
-    // JUCE の AIFF リーダーは尺を SSND のサイズ欄で切り詰めるだけで実ファイルサイズは見ないため、
-    // この状況を再現できる (WAV リーダーはファイルサイズで切り詰めるので WAV では再現しない)
+    // JUCE 自身の AIFF リーダーはサイズ欄がファイルより大きいと読まない (null) が、macOS では
+    // CoreAudio のリーダーが代わりに開いて名乗った尺をそのまま報告する = 取り込みが固まる経路。
+    // Windows には該当デコーダが無く「読めない形式」で断られる (どちらでも固まらないことを検証する)
     static void writeAiffClaiming(const juce::File& f, juce::uint32 claimedFrames, int actualFrames)
     {
         juce::MemoryOutputStream m;
-        const auto claimedSsnd = (int) juce::jmin((juce::int64) 0x7ffffff0, 8 + (juce::int64) claimedFrames * 2);
+        const auto claimedSsnd = (int) juce::jmin((juce::int64) 0x7f000000, 8 + (juce::int64) claimedFrames * 2);   // FORM サイズ欄も int に収める
         m.write("FORM", 4); m.writeIntBigEndian(4 + (8 + 18) + (8 + claimedSsnd)); m.write("AIFF", 4);
         m.write("COMM", 4); m.writeIntBigEndian(18);
         m.writeShortBigEndian(1);                                   // channels
@@ -782,17 +783,20 @@ public:
 
         auto bogus = dir.getChildFile("claims_forever.aiff");
         writeAiffClaiming(bogus, 0x40000000u, 50);   // ~10 億サンプルを名乗るが実データは 100 バイト
+        bool readerTrustsHeader = false;
         {
             std::unique_ptr<juce::AudioFormatReader> rd(fmt.createReaderFor(bogus));
-            expect(rd != nullptr && rd->lengthInSamples > 100000000,
-                   "setup: the reader trusts the bogus header length");
+            readerTrustsHeader = rd != nullptr && rd->lengthInSamples > 100000000;
         }
         const auto t0 = juce::Time::getMillisecondCounterHiRes();
         auto r = importer.importFile(bogus, 48000.0);   // 44.1k -> 48k = リサンプル経路
         const auto ms = juce::Time::getMillisecondCounterHiRes() - t0;
         expect(! r.success, "implausible length -> import fails");
         expect(! r.cancelled, "not reported as a cancel");
-        expectEquals(r.errorMessage, juce::String("Unsupported or corrupt audio file"));
+        if (readerTrustsHeader)   // 名乗った尺を信じるリーダーがある環境 (macOS) では新しい検証で断る
+            expectEquals(r.errorMessage, juce::String("Unsupported or corrupt audio file"));
+        else
+            expect(r.errorMessage.isNotEmpty(), "rejected as unreadable");
         expect(ms < 2000.0, "fails fast instead of resampling the claimed length");
         expectEquals(cache.getNumberOfChildFiles(juce::File::findFiles), 0, "no leftover cache files");
 
