@@ -48,6 +48,20 @@ if(UTAWAVE_SANITIZE)
     endif()
 endif()
 
+# ── メモリ安全のための実行時チェック (配布ビルドにも掛ける) ──
+# macOS: libc++ のハードニング (fast)。vector[] / string_view / span 等の範囲外アクセスを、メモリを
+#   壊す前にその場でトラップで止める (黙って壊れて後で別の場所で落ちるのを防ぐ)。性能影響はごく小さい。
+#   トラップは arm64 で SIGTRAP / x86_64 で SIGILL になり、CrashReporter がどちらもログに残す。
+#   JUCE / LAME を含む全ターゲットに掛けるため JUCE の add_subdirectory より前に置く。
+# Windows: Control Flow Guard (/guard:cf)。壊れた関数ポインタ/vtable 経由の不正な間接呼び出しを止める。
+#   MSVC の ASan とは併用しない (検証ビルドは ASan 側で見る)。
+if(APPLE)
+    add_compile_definitions(_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST)
+elseif(MSVC AND NOT UTAWAVE_SANITIZE)
+    add_compile_options(/guard:cf)
+    add_link_options(/guard:cf)
+endif()
+
 # ── JUCE 9 ──
 # 公開リポジトリには JUCE を含めない。ローカルに JUCE/ があればそれを使い (オフライン/高速)、
 # 無ければ FetchContent で固定バージョンを取得する (CI / 新規 clone はこちら)。

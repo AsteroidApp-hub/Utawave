@@ -164,6 +164,7 @@ namespace
             case SIGILL:  return "SIGILL";
             case SIGABRT: return "SIGABRT";
             case SIGSYS:  return "SIGSYS";
+            case SIGTRAP: return "SIGTRAP";
             default:      return "";
         }
     }
@@ -204,6 +205,17 @@ namespace
 
         file.replaceWithText(log);
     }
+
+   #if ! JUCE_WINDOWS
+    // JUCE の setApplicationCrashHandler は SIGTRAP を登録しない。libc++ ハードニングの
+    // 境界チェック失敗は arm64 で SIGTRAP になるため自前で拾う。ログ後は既定動作へ戻して
+    // 復帰 = トラップ命令を再実行して通常どおり落ちる (OS のクラッシュレポートも残る)。
+    void onTrapSignal(int sig)
+    {
+        onCrash((void*) (juce::pointer_sized_int) sig);
+        ::signal(sig, SIG_DFL);
+    }
+   #endif
 } // namespace
 
 void CrashReporter::install()
@@ -212,6 +224,9 @@ void CrashReporter::install()
     crashLogDirectory().createDirectory();
     messageThreadId = juce::Thread::getCurrentThreadId();
     juce::SystemStats::setApplicationCrashHandler(onCrash);
+   #if ! JUCE_WINDOWS
+    ::signal(SIGTRAP, onTrapSignal);
+   #endif
 }
 
 juce::String CrashReporter::exceptionCodeName(juce::uint32 code)
