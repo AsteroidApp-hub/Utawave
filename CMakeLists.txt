@@ -572,6 +572,11 @@ if(UTAWAVE_BUILD_TESTS)
             # 壊れた入力では JUCE の jassert / DBG が大量に出て遅くなるため切る
             # (検出はサニタイザとターゲット内のチェックに任せる)
             NDEBUG=1
+            # JUCE は Debug 構成で DEBUG/_DEBUG も定義するため NDEBUG だけでは JUCE_DEBUG が残り、
+            # jassert のたびにログを書く。チャンネル数 65535 の壊れた WAV では JUCE のチャンネル
+            # 構成ループが数万回ログを出し、1 入力で 10 秒以上かかってタイムアウト扱いになった。
+            # ログ出力のマクロを空にして確実に止める
+            "JUCE_LOG_CURRENT_ASSERTION="
         )
         if(MSVC)
             target_compile_options(UtawaveFuzz PRIVATE /utf-8 /wd4819)
