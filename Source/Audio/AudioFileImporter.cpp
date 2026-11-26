@@ -4,6 +4,25 @@
 #include "AudioFileImporter.h"
 #include "CDSPResampler.h"  // r8brain (header-only)
 #include <cstring>          // std::memcpy (64bit サンプルのビット解釈)
+#include <cfloat>
+#include <cmath>
+
+namespace
+{
+// 取り込み変換で受け付けるチャンネル数 / サンプルレートの範囲。壊れたヘッダの値をそのまま
+// WAV writer へ渡すと不正なチャンネル配置になったり (JUCE の離散チャンネルは 127 まで)、
+// SR 0 で後段の計算が壊れたりする (ファジングで検出)。実在する音源はこの範囲に収まる。
+constexpr int    kMaxImportChannels   = 64;
+constexpr double kMinImportSampleRate = 1000.0;
+constexpr double kMaxImportSampleRate = 768000.0;
+
+bool plausibleFormat(int channels, double sampleRate)
+{
+    return channels >= 1 && channels <= kMaxImportChannels
+        && std::isfinite(sampleRate)
+        && sampleRate >= kMinImportSampleRate && sampleRate <= kMaxImportSampleRate;
+}
+} // namespace
 
 juce::File AudioFileImporter::getDefaultCacheFolder()
 {
@@ -473,6 +492,7 @@ bool AudioFileImporter::transcodeToWavFloat(const juce::File& src, const juce::F
     if (reader == nullptr)             { errorOut = "Unsupported format";  return false; }
     const int ch = (int) reader->numChannels;
     if (ch < 1 || reader->lengthInSamples <= 0) { errorOut = "Empty audio file"; return false; }
+    if (! plausibleFormat(ch, reader->sampleRate)) { errorOut = "Unsupported audio format"; return false; }
 
     juce::WavAudioFormat wav;
     auto outStreamUP = std::make_unique<juce::FileOutputStream>(dst);
@@ -495,7 +515,16 @@ bool AudioFileImporter::transcodeToWavFloat(const juce::File& src, const juce::F
     // 決定論なので、シーク精度に依存しない正確なサンプル列が得られる。
     const int blockFrames = 4096;
     juce::AudioBuffer<float> buf(ch, blockFrames);
-    const juce::int64 total = reader->lengthInSamples;
+    // デコーダが報告する尺は信用しすぎない: 壊れた MP3/FLAC は数百バイトでも「数時間」と名乗れ、
+    // デコーダは実データの終わりを過ぎても無音を返し続けるため、報告どおり書くと巨大な
+    // 無音 WAV でディスクを埋めて取り込みが固まる (ファジングで検出)。
+    // 入力 1 バイトあたりのサンプル数には上限があるので、ファイルサイズから「あり得る最大の尺」を
+    // 上限にする。上限は 1 バイトあたり 512 サンプル (全チャンネル合計): 実在する圧縮音源は
+    // 超低ビットレートの音声でも 64 程度なので、正常なファイルは削らない。
+    constexpr double kMaxSamplesPerByte = 512.0;
+    const juce::int64 maxPlausible = juce::jmax((juce::int64) blockFrames,
+        (juce::int64) ((double) src.getSize() * kMaxSamplesPerByte / ch));
+    const juce::int64 total = juce::jmin(reader->lengthInSamples, maxPlausible);
     juce::int64 pos = 0;
     while (pos < total)
     {
@@ -545,6 +574,7 @@ bool AudioFileImporter::transcodeHighBitWavToFloat(const juce::File& src, const 
     if (info.bits != 64)  { errorOut = "Unsupported bit depth";  return false; }   // 現状 64bit のみ
 
     const int ch             = info.channels;
+    if (! plausibleFormat(ch, info.sampleRate)) { errorOut = "Unsupported WAV format"; return false; }
     const int bytesPerSample = info.bits / 8;          // 8
     const int frameBytes     = ch * bytesPerSample;
     if (frameBytes <= 0)  { errorOut = "Bad frame size"; return false; }
@@ -597,7 +627,9 @@ bool AudioFileImporter::transcodeHighBitWavToFloat(const juce::File& src, const 
                 {
                     double d;
                     std::memcpy(&d, &le, sizeof(d));
-                    v = (float) d;
+                    // float の範囲外を素の (float) 変換にすると未定義動作。NaN は 0、範囲外は
+                    // float の最大値へ寄せる (通常の音声値はそのまま・ピークは書き出し側で処理)
+                    v = std::isnan(d) ? 0.0f : (float) juce::jlimit(-(double) FLT_MAX, (double) FLT_MAX, d);
                 }
                 else
                 {

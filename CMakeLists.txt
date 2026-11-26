@@ -366,43 +366,8 @@ if(UTAWAVE_BUILD_TESTS)
     juce_add_console_app(UtawaveTests PRODUCT_NAME "UtawaveTests")
     juce_generate_juce_header(UtawaveTests)
 
-    target_sources(UtawaveTests PRIVATE
-        Tests/ExportEngineTests.cpp
-        Tests/AudioEngineTests.cpp
-        Tests/MidiIoTests.cpp
-        Tests/BackupManagerTests.cpp
-        Tests/AudioClipTests.cpp
-        Tests/RecordingTests.cpp
-        Tests/AppSettingsTests.cpp
-        Tests/MidiClipTests.cpp
-        Tests/SilenceDetectorTests.cpp
-        Tests/ClipInsertGeometryTests.cpp
-        Tests/RulerRangeMathTests.cpp
-        Tests/GridSnapMathTests.cpp
-        Tests/ClipStretchMathTests.cpp
-        Tests/EditActionsTests.cpp
-        Tests/PluginActionsTests.cpp
-        Tests/PluginChainTests.cpp
-        Tests/LufsMeterTests.cpp
-        Tests/BpmDetectorTests.cpp
-        Tests/ProjectManagerTests.cpp
-        Tests/InternalSynthTests.cpp
-        Tests/MeterDrawTests.cpp
-        Tests/TrackManagerTests.cpp
-        Tests/LocalisationTests.cpp
-        Tests/AudioFileImporterTests.cpp
-        Tests/AppStorageTests.cpp
-        Tests/AppPreferencesTests.cpp
-        Tests/AdServiceTests.cpp
-        Tests/UpdateCheckerTests.cpp
-        Tests/CrashReporterTests.cpp
-        Tests/PitchEngineTests.cpp
-        Tests/BuiltInEffectsTests.cpp
-        Tests/FileStreamVoiceTests.cpp
-        Tests/AudioWorkerPoolTests.cpp
-        Tests/StreamMirrorTests.cpp
-        Tests/PianoRollLaneTests.cpp
-        Tests/RenderGoldenTests.cpp
+    # テスト/ファザーが共通でリンクする本体コード (GUI 非依存の部分 + テストで駆動する一部 UI)
+    set(UTAWAVE_HEADLESS_SOURCES
         Source/UI/PianoRollEditor.cpp
         Source/Audio/AudioFileImporter.cpp
         Source/Audio/FileStreamVoice.cpp
@@ -451,6 +416,46 @@ if(UTAWAVE_BUILD_TESTS)
         Source/MIDI/MidiImporter.cpp
         Source/MIDI/MidiExporter.cpp
         Source/Localisation.cpp
+    )
+
+    target_sources(UtawaveTests PRIVATE
+        Tests/ExportEngineTests.cpp
+        Tests/AudioEngineTests.cpp
+        Tests/MidiIoTests.cpp
+        Tests/BackupManagerTests.cpp
+        Tests/AudioClipTests.cpp
+        Tests/RecordingTests.cpp
+        Tests/AppSettingsTests.cpp
+        Tests/MidiClipTests.cpp
+        Tests/SilenceDetectorTests.cpp
+        Tests/ClipInsertGeometryTests.cpp
+        Tests/RulerRangeMathTests.cpp
+        Tests/GridSnapMathTests.cpp
+        Tests/ClipStretchMathTests.cpp
+        Tests/EditActionsTests.cpp
+        Tests/PluginActionsTests.cpp
+        Tests/PluginChainTests.cpp
+        Tests/LufsMeterTests.cpp
+        Tests/BpmDetectorTests.cpp
+        Tests/ProjectManagerTests.cpp
+        Tests/InternalSynthTests.cpp
+        Tests/MeterDrawTests.cpp
+        Tests/TrackManagerTests.cpp
+        Tests/LocalisationTests.cpp
+        Tests/AudioFileImporterTests.cpp
+        Tests/AppStorageTests.cpp
+        Tests/AppPreferencesTests.cpp
+        Tests/AdServiceTests.cpp
+        Tests/UpdateCheckerTests.cpp
+        Tests/CrashReporterTests.cpp
+        Tests/PitchEngineTests.cpp
+        Tests/BuiltInEffectsTests.cpp
+        Tests/FileStreamVoiceTests.cpp
+        Tests/AudioWorkerPoolTests.cpp
+        Tests/StreamMirrorTests.cpp
+        Tests/PianoRollLaneTests.cpp
+        Tests/RenderGoldenTests.cpp
+        ${UTAWAVE_HEADLESS_SOURCES}
     )
 
     target_include_directories(UtawaveTests SYSTEM PRIVATE
@@ -525,4 +530,60 @@ if(UTAWAVE_BUILD_TESTS)
         juce::juce_events
         juce::juce_recommended_config_flags
     )
+    # ── ファジング (UtawaveFuzz・テスト/検証専用) ──
+    # 外部から入るデータ (.uta / 音声ファイル / MIDI / 内蔵エフェクトの状態 / ネットワーク JSON) を
+    # 壊した入力で叩く。Sanitizer ビルド (UTAWAVE_SANITIZE) と組み合わせて使う。CI は ASan ジョブで回す。
+    # 使い方は Tests/Fuzz/FuzzMain.cpp 冒頭。UTAWAVE_FUZZ_ENGINE=libfuzzer で libFuzzer 版になる
+    # (clang の libFuzzer が必要 = Apple clang には無いので Homebrew の llvm 等で)。
+    option(UTAWAVE_BUILD_FUZZ "Build UtawaveFuzz (fuzzing driver)" OFF)
+    set(UTAWAVE_FUZZ_ENGINE "builtin" CACHE STRING "Fuzzing engine: builtin / libfuzzer")
+    if(UTAWAVE_BUILD_FUZZ)
+        juce_add_console_app(UtawaveFuzz PRODUCT_NAME "UtawaveFuzz")
+        juce_generate_juce_header(UtawaveFuzz)
+        target_sources(UtawaveFuzz PRIVATE
+            Tests/Fuzz/FuzzMain.cpp
+            Tests/Fuzz/FuzzTargets.cpp
+            ${UTAWAVE_HEADLESS_SOURCES}
+        )
+        target_include_directories(UtawaveFuzz SYSTEM PRIVATE Source/ThirdParty/r8brain)
+        target_compile_definitions(UtawaveFuzz PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            JUCE_MODAL_LOOPS_PERMITTED=1
+            JUCE_PLUGINHOST_VST3=1
+            JUCE_PLUGINHOST_AU=0
+            JUCE_APPLICATION_NAME_STRING="UtawaveFuzz"
+            JUCE_APPLICATION_VERSION_STRING="0.1.0"
+            JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=0
+            # 壊れた入力では JUCE の jassert / DBG が大量に出て遅くなるため切る
+            # (検出はサニタイザとターゲット内のチェックに任せる)
+            NDEBUG=1
+        )
+        if(MSVC)
+            target_compile_options(UtawaveFuzz PRIVATE /utf-8 /wd4819)
+            target_compile_definitions(UtawaveFuzz PRIVATE NOMINMAX=1 _USE_MATH_DEFINES=1)
+        else()
+            target_compile_options(UtawaveFuzz PRIVATE -O1)   # Debug でも実用的な速度で回す
+        endif()
+        if(UTAWAVE_FUZZ_ENGINE STREQUAL "libfuzzer")
+            target_compile_definitions(UtawaveFuzz PRIVATE UTAWAVE_LIBFUZZER=1)
+            target_compile_options(UtawaveFuzz PRIVATE -fsanitize=fuzzer)
+            target_link_options(UtawaveFuzz PRIVATE -fsanitize=fuzzer)
+        endif()
+        target_link_libraries(UtawaveFuzz PRIVATE
+            juce::juce_audio_basics
+            juce::juce_audio_devices
+            juce::juce_audio_formats
+            juce::juce_audio_processors
+            juce::juce_audio_utils
+            juce::juce_core
+            juce::juce_data_structures
+            juce::juce_events
+            juce::juce_graphics
+            juce::juce_gui_basics
+            juce::juce_gui_extra
+            juce::juce_recommended_config_flags
+            lame_static
+        )
+    endif()
 endif()

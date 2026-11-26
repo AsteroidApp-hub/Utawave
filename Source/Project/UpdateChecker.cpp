@@ -2,6 +2,7 @@
 // Copyright (C) 2025-2026 Utawave
 
 #include "UpdateChecker.h"
+#include "SafeText.h"
 
 namespace
 {
@@ -32,7 +33,7 @@ namespace
                 if (n <= 0) break;   // EOF / エラー
                 mb.append(buf, (size_t)n);
             }
-            return mb.toString();
+            return SafeText::fromUtf8OrEmpty(mb);
         }
         return {};
     }

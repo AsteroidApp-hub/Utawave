@@ -2,6 +2,7 @@
 // Copyright (C) 2025-2026 Utawave
 
 #include "AdService.h"
+#include "SafeText.h"
 #include "../Localisation.h"
 
 namespace
@@ -303,7 +304,7 @@ std::vector<Ad> AdService::loadCache(const juce::File& dir, const juce::String& 
     if (! jf.existsAsFile())
         return {};
 
-    auto ads = parseAds(jf.loadFileAsString());
+    auto ads = parseAds(SafeText::loadFileOrEmpty(jf));
     for (auto& ad : ads)
     {
         if (ad.imageUrl.isEmpty())
@@ -338,7 +339,7 @@ void AdService::fetch(juce::String feedUrl, juce::String lang, juce::File dir, C
             if (auto in = feed.createInputStream(streamOptions()))
             {
                 // フィード JSON は最大 1MB / 10 秒で打ち切り
-                const juce::String json = readBounded(*in, 1024 * 1024, 10000).toString();
+                const juce::String json = SafeText::fromUtf8OrEmpty(readBounded(*in, 1024 * 1024, 10000));
 
                 if (json.isNotEmpty())   // 本文を読めた = サーバーに到達できた (Empty/HasAds を判定)
                 {

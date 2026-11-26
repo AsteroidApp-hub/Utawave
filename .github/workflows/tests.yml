@@ -1,7 +1,7 @@
 name: Tests
 
 # push / PR のたびに UtawaveTests (ユニットテスト + 書き出し結果の比較テスト) を回す。
-#   - macOS: ASan + UBSan (メモリ破壊・UAF・未定義動作をその場で検出)
+#   - macOS: ASan + UBSan (メモリ破壊・UAF・未定義動作をその場で検出) + ファジング (UtawaveFuzz)
 #   - macOS: TSan (audio thread / 先読み / ワーカー間のデータ競合を検出)
 #   - Windows: 通常の Debug ビルド (MSVC でのコンパイル確認 + 環境差の検出)
 # 配布ビルド (release-build.yml) とは独立。署名シークレットは使わない。
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   macos-asan:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       # macOS の LSan は非対応。UBSan はスタックトレース付きで即停止 (-fno-sanitize-recover)
       ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:strict_string_checks=1
@@ -36,15 +36,23 @@ jobs:
           key: juce-9.0.5-${{ runner.os }}-tests
 
       - name: Configure (Debug + ASan/UBSan)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DUTAWAVE_SANITIZE=address,undefined
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DUTAWAVE_SANITIZE=address,undefined -DUTAWAVE_BUILD_FUZZ=ON
 
-      - name: Build UtawaveTests
-        run: cmake --build build --target UtawaveTests -j 4
+      - name: Build UtawaveTests + UtawaveFuzz
+        run: cmake --build build --target UtawaveTests UtawaveFuzz -j 4
 
       - name: Run UtawaveTests
         run: |
           T=$(find build -type f -perm -u+x -name UtawaveTests | head -1)
           "$T"
+
+      # 壊れた入力 (.uta / 音声 / MIDI / エフェクト状態 / JSON) を各ターゲット 45 秒ずつ流し込む。
+      # seed は実行ごとに変える (毎回別の入力を試す)。見つかった入力は artifact の fuzz-findings に入り、
+      # ローカルで `UtawaveFuzz <target> --repro <file>` で再現できる。
+      - name: Fuzz (ASan/UBSan)
+        run: |
+          F=$(find build -type f -perm -u+x -name UtawaveFuzz | head -1)
+          "$F" all --seconds 45 --seed ${{ github.run_id }} --out fuzz-out
 
       - name: Upload failed render artefacts
         if: failure()
@@ -52,6 +60,14 @@ jobs:
         with:
           name: render-golden-actual-macos
           path: render-out/
+          if-no-files-found: ignore
+
+      - name: Upload fuzz findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: fuzz-out/
           if-no-files-found: ignore
 
   macos-tsan:

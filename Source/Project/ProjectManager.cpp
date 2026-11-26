@@ -7,6 +7,7 @@
 #include "../VST/PluginChain.h"
 #include "../Audio/builtin/BuiltInFactory.h"  // 内蔵エフェクトの復元 (format="Utawave")
 #include "../Tracks/MidiClip.h"
+#include <cmath>
 
 namespace {
 juce::String relPath(const juce::File& projectDir, const juce::File& f)
@@ -31,6 +32,30 @@ juce::File resolveFile(const juce::File& projectDir, const juce::String& path)
 // ロード時に音楽的に意味のある範囲へクランプする
 double sanitiseBpm(double bpm)   { return (bpm > 0.0 && bpm < 1000.0) ? bpm : 120.0; }
 int    sanitiseMeter(int v)      { return juce::jlimit(1, 64, v); }
+
+// 読み込む数値はすべてここを通す: 非有限 (nan / inf) は既定値、範囲外はクランプ。
+// 壊れた .uta の duration="nan" 等がそのまま再生経路の整数変換 (サンプル位置) に届くと
+// 未定義動作になる (ファジングで検出)。位置/尺は約 11 日 (kMaxTimeSecs) を上限にする。
+constexpr double kMaxTimeSecs = 1.0e6;
+
+double num(const juce::XmlElement* e, const char* name, double def, double lo, double hi)
+{
+    const double v = e->getDoubleAttribute(name, def);
+    return juce::jlimit(lo, hi, std::isfinite(v) ? v : def);
+}
+
+double timeAttr(const juce::XmlElement* e, const char* name, double def)
+{
+    return num(e, name, def, 0.0, kMaxTimeSecs);
+}
+
+// enum へ int をそのまま cast すると範囲外で未定義動作になるため、件数で検証する
+template <typename E>
+E enumAttr(const juce::XmlElement* e, const char* name, E def, int count)
+{
+    const int v = e->getIntAttribute(name, (int) def);
+    return (v >= 0 && v < count) ? (E) v : def;
+}
 
 juce::String colorToHex(juce::Colour c)
 {
@@ -403,14 +428,14 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
     {
         if (s.bpm) *s.bpm = sanitiseBpm(transport->getDoubleAttribute("bpm", 120.0));
         s.appSettings->initialBpm = sanitiseBpm(transport->getDoubleAttribute("initialBpm", 120.0));
-        if (s.playheadSecs) *s.playheadSecs = transport->getDoubleAttribute("playheadSecs", 0.0);
+        if (s.playheadSecs) *s.playheadSecs = timeAttr(transport, "playheadSecs", 0.0);
         s.appSettings->bpmChanges.clear();
         if (auto* bpmCh = transport->getChildByName("BpmChanges"))
         {
             for (auto* e : bpmCh->getChildIterator())
             {
                 BpmChange bc;
-                bc.timeSec = e->getDoubleAttribute("timeSec", 0.0);
+                bc.timeSec = timeAttr(e, "timeSec", 0.0);
                 bc.bpm     = sanitiseBpm(e->getDoubleAttribute("bpm", 120.0));
                 s.appSettings->bpmChanges.push_back(bc);
             }
@@ -421,7 +446,7 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
     if (s.pixelsPerBeat)
     {
         if (auto* view = xml->getChildByName("View"))
-            *s.pixelsPerBeat = view->getDoubleAttribute("pixelsPerBeat", 80.0);
+            *s.pixelsPerBeat = num(view, "pixelsPerBeat", 80.0, 0.5, 1.0e6);
         else
             *s.pixelsPerBeat = 80.0;  // 古いプロジェクトは既定値で開く
     }
@@ -448,8 +473,8 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
     // Loop
     if (auto* loop = xml->getChildByName("Loop"))
     {
-        if (s.loopStartSecs) *s.loopStartSecs = loop->getDoubleAttribute("startSecs", 0.0);
-        if (s.loopEndSecs)   *s.loopEndSecs   = loop->getDoubleAttribute("endSecs",   0.0);
+        if (s.loopStartSecs) *s.loopStartSecs = timeAttr(loop, "startSecs", 0.0);
+        if (s.loopEndSecs)   *s.loopEndSecs   = timeAttr(loop, "endSecs",   0.0);
         if (s.loopActive)    *s.loopActive    = loop->getIntAttribute("active", 0) != 0;
     }
 
@@ -462,7 +487,7 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
             for (auto* e : markersEl->getChildIterator())
             {
                 Marker m;
-                m.time   = e->getDoubleAttribute("time", 0.0);
+                m.time   = timeAttr(e, "time", 0.0);
                 m.name   = e->getStringAttribute("name");
                 m.colour = hexToColor(e->getStringAttribute("colour"));
                 s.markers->push_back(m);
@@ -478,18 +503,18 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
         //  「新規作成 → 設定変更 → 保存 → 開き直し」で挙動が変わるのを防ぐ)
         const AppSettings def {};
         s.appSettings->countInBars              = settings->getIntAttribute("countInBars",       def.countInBars);
-        s.appSettings->preRollSecs              = settings->getDoubleAttribute("preRollSecs",    def.preRollSecs);
+        s.appSettings->preRollSecs              = num(settings, "preRollSecs", def.preRollSecs, 0.0, 60.0);
         s.appSettings->retrospectiveEnabled     = settings->getIntAttribute("retrospectiveEnabled", def.retrospectiveEnabled ? 1 : 0) != 0;
         s.appSettings->playheadFollowsSelection = settings->getIntAttribute("playheadFollowsSelection", def.playheadFollowsSelection ? 1 : 0) != 0;
         s.appSettings->autoCrossfade            = settings->getIntAttribute("autoCrossfade",     def.autoCrossfade ? 1 : 0) != 0;
         s.appSettings->zeroCrossingFade         = settings->getIntAttribute("zeroCrossingFade",  def.zeroCrossingFade ? 1 : 0) != 0;
-        s.appSettings->crossfadeDuration        = settings->getDoubleAttribute("crossfadeDuration", def.crossfadeDuration);
+        s.appSettings->crossfadeDuration        = num(settings, "crossfadeDuration", def.crossfadeDuration, 0.0, 10.0);
         s.appSettings->showClipGain             = settings->getIntAttribute("showClipGain",      def.showClipGain ? 1 : 0) != 0;
-        s.appSettings->snapMode                 = (SnapMode)settings->getIntAttribute("snapMode", (int) def.snapMode);
+        s.appSettings->snapMode                 = enumAttr(settings, "snapMode", def.snapMode, (int) SnapMode::SixteenthT + 1);
         s.appSettings->useMarkerColors          = settings->getIntAttribute("useMarkerColors",   def.useMarkerColors ? 1 : 0) != 0;
-        s.appSettings->toolMode                 = (ToolMode)settings->getIntAttribute("toolMode", (int) def.toolMode);
+        s.appSettings->toolMode                 = enumAttr(settings, "toolMode", def.toolMode, (int) ToolMode::Both + 1);
         s.appSettings->resampleOutputBits       = settings->getIntAttribute("resampleOutputBits", def.resampleOutputBits);
-        s.appSettings->projectSampleRate        = settings->getDoubleAttribute("projectSampleRate", def.projectSampleRate);
+        s.appSettings->projectSampleRate        = num(settings, "projectSampleRate", def.projectSampleRate, 8000.0, 768000.0);
         s.appSettings->projectBitDepth          = settings->getIntAttribute("projectBitDepth", def.projectBitDepth);
         s.appSettings->masterInsertSlotsVisible = settings->getIntAttribute("masterInsertSlotsVisible", def.masterInsertSlotsVisible ? 1 : 0) != 0;
         s.appSettings->masterPanelCollapsed     = settings->getIntAttribute("masterPanelCollapsed", def.masterPanelCollapsed ? 1 : 0) != 0;
@@ -497,8 +522,8 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
         s.appSettings->rulerBarsRowVisible      = settings->getIntAttribute("rulerBarsRowVisible", def.rulerBarsRowVisible ? 1 : 0) != 0;
         s.appSettings->autoSaveIntervalMinutes  = settings->getIntAttribute("autoSaveIntervalMinutes", def.autoSaveIntervalMinutes);
         s.appSettings->maxBackups               = settings->getIntAttribute("maxBackups", def.maxBackups);
-        s.appSettings->vuReferenceLevel         = (float) settings->getDoubleAttribute("vuReferenceLevel", def.vuReferenceLevel);
-        s.appSettings->loudnessTargetLufs       = (float) settings->getDoubleAttribute("loudnessTargetLufs", def.loudnessTargetLufs);
+        s.appSettings->vuReferenceLevel         = (float) num(settings, "vuReferenceLevel", def.vuReferenceLevel, -60.0, 20.0);
+        s.appSettings->loudnessTargetLufs       = (float) num(settings, "loudnessTargetLufs", def.loudnessTargetLufs, -70.0, 0.0);
         s.appSettings->returnToStartOnStop      = settings->getIntAttribute("returnToStartOnStop", def.returnToStartOnStop ? 1 : 0) != 0;
         s.appSettings->autoNormalizeOnImport    = settings->getIntAttribute("autoNormalizeOnImport", def.autoNormalizeOnImport ? 1 : 0) != 0;
         s.appSettings->stripImportedMetadata    = settings->getIntAttribute("stripImportedMetadata", def.stripImportedMetadata ? 1 : 0) != 0;
@@ -529,9 +554,9 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
 
             tr->setName(trackEl->getStringAttribute("name", "Track"));
             tr->setColour(hexToColor(trackEl->getStringAttribute("colour")));
-            tr->setVolume((float)trackEl->getDoubleAttribute("volume", 0.0));
-            tr->setPan   ((float)trackEl->getDoubleAttribute("pan", 0.0));
-            tr->setReverbSend((float)trackEl->getDoubleAttribute("reverbSend", 0.0));
+            tr->setVolume((float) num(trackEl, "volume", 0.0, -144.0, 24.0));
+            tr->setPan   ((float) num(trackEl, "pan", 0.0, -1.0, 1.0));
+            tr->setReverbSend((float) num(trackEl, "reverbSend", 0.0, 0.0, 1.0));
             tr->setMuted   (trackEl->getIntAttribute("muted",        0) != 0);
             tr->setSoloed  (trackEl->getIntAttribute("soloed",       0) != 0);
             tr->setRecArmed(trackEl->getIntAttribute("recArmed",     0) != 0);
@@ -572,8 +597,8 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                     for (auto* mEl : midiEl->getChildIterator())
                     {
                         if (!mEl->hasTagName("MidiClip")) continue;
-                        const double startP = mEl->getDoubleAttribute("startPosition", 0.0);
-                        const double dur    = mEl->getDoubleAttribute("duration", 0.0);
+                        const double startP = timeAttr(mEl, "startPosition", 0.0);
+                        const double dur    = timeAttr(mEl, "duration", 0.0);
                         auto* clip = tr->addMidiClip(startP, dur);
                         if (!clip) continue;
                         clip->setName(mEl->getStringAttribute("name"));
@@ -584,7 +609,7 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                         for (auto* eEl : mEl->getChildIterator())
                         {
                             if (!eEl->hasTagName("Ev")) continue;
-                            const double t = eEl->getDoubleAttribute("t", 0.0);
+                            const double t = timeAttr(eEl, "t", 0.0);
                             const auto b64 = eEl->getStringAttribute("d");
                             juce::MemoryBlock mb;
                             if (mb.fromBase64Encoding(b64) && mb.getSize() > 0)
@@ -716,28 +741,28 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                         // (相対パスは保ったままなので、後でファイルが復活すれば自動的に再生される)
                         if (!file.existsAsFile() && s.missingFiles != nullptr)
                             s.missingFiles->push_back(relPath);
-                        double startPos = clipEl->getDoubleAttribute("startPosition", 0.0);
-                        double dur      = clipEl->getDoubleAttribute("duration",      0.0);
+                        double startPos = timeAttr(clipEl, "startPosition", 0.0);
+                        double dur      = timeAttr(clipEl, "duration",      0.0);
                         auto* clip = lane->addClip(file, startPos, dur,
                                                     tr->getFormatManager(),
                                                     tr->getThumbnailCache());
                         if (!clip) continue;
-                        clip->setFileOffset(clipEl->getDoubleAttribute("fileOffset", 0.0));
-                        clip->setGain((float)clipEl->getDoubleAttribute("gain", 1.0));
+                        clip->setFileOffset(timeAttr(clipEl, "fileOffset", 0.0));
+                        clip->setGain((float) num(clipEl, "gain", 1.0, 0.0, 64.0));
                         clip->setName(clipEl->getStringAttribute("name", file.getFileNameWithoutExtension()));
                         if (clipEl->getIntAttribute("customColour", 0) != 0)
                             clip->setColour(hexToColor(clipEl->getStringAttribute("colour")));
-                        clip->setFadeInSecs (clipEl->getDoubleAttribute("fadeIn",  0.010));
-                        clip->setFadeOutSecs(clipEl->getDoubleAttribute("fadeOut", 0.010));
-                        clip->setFadeInCurve ((FadeCurve)clipEl->getIntAttribute("fadeInCurve",  0));
-                        clip->setFadeOutCurve((FadeCurve)clipEl->getIntAttribute("fadeOutCurve", 0));
+                        clip->setFadeInSecs (timeAttr(clipEl, "fadeIn",  0.010));
+                        clip->setFadeOutSecs(timeAttr(clipEl, "fadeOut", 0.010));
+                        clip->setFadeInCurve (enumAttr(clipEl, "fadeInCurve",  FadeCurve::Linear, (int) FadeCurve::SCurve + 1));
+                        clip->setFadeOutCurve(enumAttr(clipEl, "fadeOutCurve", FadeCurve::Linear, (int) FadeCurve::SCurve + 1));
                         if (auto* stEl = clipEl->getChildByName("Stretch"))
                         {
                             ClipStretch st;
-                            st.ratio     = stEl->getDoubleAttribute("ratio", 1.0);
+                            st.ratio     = num(stEl, "ratio", 1.0, 0.25, 4.0);
                             st.source    = resolveFile(projectDir, stEl->getStringAttribute("source"));
-                            st.srcStart  = stEl->getDoubleAttribute("srcStart", 0.0);
-                            st.semitones = stEl->getDoubleAttribute("semitones", 0.0);
+                            st.srcStart  = timeAttr(stEl, "srcStart", 0.0);
+                            st.semitones = num(stEl, "semitones", 0.0, -48.0, 48.0);
                             clip->setStretch(st);
                         }
                         if (auto* gp = clipEl->getChildByName("GainPoints"))
@@ -747,8 +772,8 @@ bool ProjectManager::load(const juce::File& projectFile, State& s)
                             for (auto* pe : gp->getChildIterator())
                             {
                                 GainPoint p;
-                                p.time = pe->getDoubleAttribute("time", 0.0);
-                                p.dB   = (float)pe->getDoubleAttribute("dB", 0.0);
+                                p.time = timeAttr(pe, "time", 0.0);
+                                p.dB   = (float) num(pe, "dB", 0.0, -144.0, 24.0);
                                 pts.push_back(p);
                             }
                         }
