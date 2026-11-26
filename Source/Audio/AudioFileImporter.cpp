@@ -22,6 +22,20 @@ bool plausibleFormat(int channels, double sampleRate)
         && std::isfinite(sampleRate)
         && sampleRate >= kMinImportSampleRate && sampleRate <= kMaxImportSampleRate;
 }
+
+// 入力 1 バイトあたりのサンプル数 (全チャンネル合計) の上限。実在する音源は圧縮でも超低ビットレートの
+// 音声で 64 程度・非圧縮 PCM は 1 以下なので、これを大きく超える尺を名乗るヘッダは壊れている。
+constexpr double kMaxSamplesPerByte = 512.0;
+
+// ヘッダが名乗る尺がファイルサイズから見てあり得る範囲か。壊れた WAV/AIFF は数百バイトでも
+// 「10 億サンプル」を名乗れ、リーダーは実データの終わりを過ぎても無音を返すため、そのまま
+// リサンプルすると取り込みが何時間も終わらずディスクを埋める (ファジングで検出)。
+// 末尾が欠けただけの実ファイル (名乗る尺が実データより少し長い) はこの上限に掛からない。
+bool plausibleLength(const juce::File& file, juce::int64 lengthInSamples, int channels)
+{
+    return (double) lengthInSamples * (double) channels
+        <= (double) juce::jmax((juce::int64) 1, file.getSize()) * kMaxSamplesPerByte;
+}
 } // namespace
 
 juce::File AudioFileImporter::getDefaultCacheFolder()
@@ -131,6 +145,15 @@ AudioFileImporter::importFile(const juce::File& src, double projectSampleRate, i
     {
         if (didTranscode) working.deleteFile();
         r.errorMessage = "Unsupported format";
+        return r;
+    }
+
+    if (! plausibleFormat((int) reader->numChannels, reader->sampleRate)
+        || ! plausibleLength(working, reader->lengthInSamples, (int) reader->numChannels))
+    {
+        reader.reset();
+        if (didTranscode) working.deleteFile();
+        r.errorMessage = "Unsupported or corrupt audio file";
         return r;
     }
 
@@ -521,7 +544,6 @@ bool AudioFileImporter::transcodeToWavFloat(const juce::File& src, const juce::F
     // 入力 1 バイトあたりのサンプル数には上限があるので、ファイルサイズから「あり得る最大の尺」を
     // 上限にする。上限は 1 バイトあたり 512 サンプル (全チャンネル合計): 実在する圧縮音源は
     // 超低ビットレートの音声でも 64 程度なので、正常なファイルは削らない。
-    constexpr double kMaxSamplesPerByte = 512.0;
     const juce::int64 maxPlausible = juce::jmax((juce::int64) blockFrames,
         (juce::int64) ((double) src.getSize() * kMaxSamplesPerByte / ch));
     const juce::int64 total = juce::jmin(reader->lengthInSamples, maxPlausible);

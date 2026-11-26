@@ -252,6 +252,7 @@ public:
         testDecodeTranscodeFlacAndResampleChain(fmt);
         testDecodeTranscodeOpus(fmt);
         testDecodeTranscodeErrorPaths(fmt);
+        testImplausibleHeaderLength(fmt);
 
         dir.deleteRecursively();
     }
@@ -744,6 +745,63 @@ public:
         expect(!tcancel3,             "zero-sample decode is a failure, not a cancel");
         expect(terr3.isNotEmpty(),    "error set when zero samples decoded");
         expect(!dst3.existsAsFile(),  "no empty WAV left when zero samples decoded (pos<=0 guard)");
+    }
+
+    // 16bit モノ PCM の AIFF を手書きする。COMM の numSampleFrames と SSND のサイズ欄には
+    // claimedFrames 分を書き、実データは actualFrames 分だけ置く (壊れた / 末尾が欠けたファイルを模す)。
+    // JUCE の AIFF リーダーは尺を SSND のサイズ欄で切り詰めるだけで実ファイルサイズは見ないため、
+    // この状況を再現できる (WAV リーダーはファイルサイズで切り詰めるので WAV では再現しない)
+    static void writeAiffClaiming(const juce::File& f, juce::uint32 claimedFrames, int actualFrames)
+    {
+        juce::MemoryOutputStream m;
+        const auto claimedSsnd = (int) juce::jmin((juce::int64) 0x7ffffff0, 8 + (juce::int64) claimedFrames * 2);
+        m.write("FORM", 4); m.writeIntBigEndian(4 + (8 + 18) + (8 + claimedSsnd)); m.write("AIFF", 4);
+        m.write("COMM", 4); m.writeIntBigEndian(18);
+        m.writeShortBigEndian(1);                                   // channels
+        m.writeIntBigEndian((int) claimedFrames);                   // numSampleFrames
+        m.writeShortBigEndian(16);                                  // bits
+        const juce::uint8 sr44100[10] = { 0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0 };   // 80-bit extended
+        m.write(sr44100, 10);
+        m.write("SSND", 4); m.writeIntBigEndian(claimedSsnd);
+        m.writeIntBigEndian(0); m.writeIntBigEndian(0);             // offset / blockSize
+        for (int i = 0; i < actualFrames; ++i)
+            m.writeShortBigEndian((short) ((i % 64) * 256));
+        f.replaceWithData(m.getData(), m.getDataSize());
+    }
+
+    // ── 壊れたヘッダが名乗る巨大な尺: リサンプルで何時間も固まらず、すぐ失敗で返る ──
+    //    (ファジングで検出: 303 バイトの AIFF が 10 億サンプルを名乗り取り込みが終わらなかった)
+    void testImplausibleHeaderLength(juce::AudioFormatManager& fmt)
+    {
+        beginTest("importFile: header claiming an impossible length fails fast; a slightly truncated file still imports");
+
+        auto cache = dir.getChildFile("cache_len");
+        cache.deleteRecursively(); cache.createDirectory();
+        AudioFileImporter importer(fmt);
+        importer.getCacheFolderCb = [cache] { return cache; };
+
+        auto bogus = dir.getChildFile("claims_forever.aiff");
+        writeAiffClaiming(bogus, 0x40000000u, 50);   // ~10 億サンプルを名乗るが実データは 100 バイト
+        {
+            std::unique_ptr<juce::AudioFormatReader> rd(fmt.createReaderFor(bogus));
+            expect(rd != nullptr && rd->lengthInSamples > 100000000,
+                   "setup: the reader trusts the bogus header length");
+        }
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        auto r = importer.importFile(bogus, 48000.0);   // 44.1k -> 48k = リサンプル経路
+        const auto ms = juce::Time::getMillisecondCounterHiRes() - t0;
+        expect(! r.success, "implausible length -> import fails");
+        expect(! r.cancelled, "not reported as a cancel");
+        expectEquals(r.errorMessage, juce::String("Unsupported or corrupt audio file"));
+        expect(ms < 2000.0, "fails fast instead of resampling the claimed length");
+        expectEquals(cache.getNumberOfChildFiles(juce::File::findFiles), 0, "no leftover cache files");
+
+        // 名乗る尺が実データの 2 倍程度 (録音中断などで末尾が欠けた実ファイル) は従来どおり取り込める
+        auto truncated = dir.getChildFile("truncated.aiff");
+        writeAiffClaiming(truncated, 44100u * 2u, 44100);   // 2 秒を名乗り実データは 1 秒
+        auto r2 = importer.importFile(truncated, 48000.0);
+        expect(r2.success, "slightly truncated file still imports");
+        if (r2.success && r2.wasResampled) r2.file.deleteFile();
     }
 
     // ── importFile: 欠損ファイルは success=false ──
